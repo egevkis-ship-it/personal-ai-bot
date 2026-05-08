@@ -1,3 +1,4 @@
+import json
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import text
 
@@ -10,6 +11,7 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 async def init_db() -> None:
     async with engine.begin() as conn:
+        # Core logs
         await conn.execute(text("""
         CREATE TABLE IF NOT EXISTS raw_messages (
             id BIGSERIAL PRIMARY KEY,
@@ -51,6 +53,195 @@ async def init_db() -> None:
         );
         """))
 
+        # Fitness: training plans
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS training_plans (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT,
+            plan_name TEXT,
+            period_type TEXT, -- week / month / custom / program
+            start_date DATE,
+            end_date DATE,
+            status TEXT DEFAULT 'active', -- active / archived / cancelled
+            source_text TEXT,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS planned_workouts (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            plan_id BIGINT REFERENCES training_plans(id) ON DELETE CASCADE,
+            telegram_user_id TEXT,
+            planned_date DATE,
+            weekday TEXT,
+            sequence_number INTEGER,
+            is_floating BOOLEAN DEFAULT false,
+            title TEXT,
+            focus TEXT,
+            focus_label TEXT,
+            workout_type TEXT DEFAULT 'planned', -- planned / custom / replacement
+            status TEXT DEFAULT 'planned', -- planned / completed / completed_modified / skipped / moved / replaced / cancelled
+            replaced_by_id BIGINT,
+            source_text TEXT,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS planned_exercises (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            planned_workout_id BIGINT REFERENCES planned_workouts(id) ON DELETE CASCADE,
+            exercise_order INTEGER,
+            exercise_name TEXT,
+            target_sets INTEGER,
+            target_reps_min INTEGER,
+            target_reps_max INTEGER,
+            target_reps_text TEXT,
+            target_weight_kg NUMERIC,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS planned_workout_events (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            planned_workout_id BIGINT REFERENCES planned_workouts(id) ON DELETE SET NULL,
+            event_type TEXT, -- created / moved / swapped / replaced / skipped / completed / shortened / custom_added
+            old_value_json JSONB,
+            new_value_json JSONB,
+            source_text TEXT,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fitness_workouts (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT,
+            planned_workout_id BIGINT REFERENCES planned_workouts(id) ON DELETE SET NULL,
+            workout_date DATE,
+            workout_type TEXT,
+            focus TEXT,
+            focus_label TEXT,
+            bodyweight_kg NUMERIC,
+            completion_type TEXT DEFAULT 'custom', -- as_planned / modified / shortened / custom / replacement
+            source_text TEXT,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fitness_exercise_sets (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            workout_id BIGINT REFERENCES fitness_workouts(id) ON DELETE CASCADE,
+            exercise_name TEXT,
+            set_number INTEGER,
+            weight_kg NUMERIC,
+            reps INTEGER,
+            rpe NUMERIC,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS body_measurements (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT,
+            measurement_date DATE,
+            weight_kg NUMERIC,
+            waist_cm NUMERIC,
+            chest_cm NUMERIC,
+            hips_cm NUMERIC,
+            arm_cm NUMERIC,
+            thigh_cm NUMERIC,
+            neck_cm NUMERIC,
+            notes TEXT,
+            source_text TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS training_constraints (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT,
+            constraint_date DATE,
+            body_part TEXT, -- knee / shoulder / back / elbow / general etc.
+            severity TEXT,
+            note TEXT,
+            source_text TEXT,
+            status TEXT DEFAULT 'active'
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fitness_pending_decisions (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT,
+            decision_type TEXT,
+            status TEXT DEFAULT 'pending', -- pending / resolved / cancelled
+            context_json JSONB,
+            source_text TEXT,
+            resolved_at TIMESTAMPTZ
+        );
+        """))
+
+        # Helpful indexes
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_training_plans_user_status
+        ON training_plans (telegram_user_id, status);
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_planned_workouts_user_date_status
+        ON planned_workouts (telegram_user_id, planned_date, status);
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_planned_workouts_user_sequence_status
+        ON planned_workouts (telegram_user_id, sequence_number, status);
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_fitness_workouts_user_date
+        ON fitness_workouts (telegram_user_id, workout_date);
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date
+        ON body_measurements (telegram_user_id, measurement_date);
+        """))
+
+        # Compatibility migrations if older tables already existed
+        await conn.execute(text("""
+        ALTER TABLE fitness_workouts
+        ADD COLUMN IF NOT EXISTS planned_workout_id BIGINT REFERENCES planned_workouts(id) ON DELETE SET NULL;
+        """))
+
+        await conn.execute(text("""
+        ALTER TABLE fitness_workouts
+        ADD COLUMN IF NOT EXISTS focus TEXT;
+        """))
+
+        await conn.execute(text("""
+        ALTER TABLE fitness_workouts
+        ADD COLUMN IF NOT EXISTS focus_label TEXT;
+        """))
+
+        await conn.execute(text("""
+        ALTER TABLE fitness_workouts
+        ADD COLUMN IF NOT EXISTS completion_type TEXT DEFAULT 'custom';
+        """))
+
 
 async def save_raw_message(
     telegram_user_id: str | None,
@@ -79,7 +270,7 @@ async def save_raw_message(
                 "parsed_json": parsed_json,
                 "status": status,
                 "error": error,
-            }
+            },
         )
         await session.commit()
 
@@ -91,3 +282,371 @@ async def db_healthcheck() -> bool:
         return True
     except Exception:
         return False
+
+
+async def save_training_plan(
+    telegram_user_id: str | None,
+    plan_name: str | None,
+    period_type: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    source_text: str,
+    notes: str | None,
+    planned_workouts: list[dict],
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO training_plans
+            (telegram_user_id, plan_name, period_type, start_date, end_date, source_text, notes)
+            VALUES
+            (:telegram_user_id, :plan_name, :period_type, :start_date, :end_date, :source_text, :notes)
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "plan_name": plan_name,
+                "period_type": period_type,
+                "start_date": start_date,
+                "end_date": end_date,
+                "source_text": source_text,
+                "notes": notes,
+            },
+        )
+        plan_id = result.scalar_one()
+
+        for workout in planned_workouts:
+            workout_result = await session.execute(
+                text("""
+                INSERT INTO planned_workouts
+                (plan_id, telegram_user_id, planned_date, weekday, sequence_number, is_floating,
+                 title, focus, focus_label, workout_type, status, source_text, notes)
+                VALUES
+                (:plan_id, :telegram_user_id, :planned_date, :weekday, :sequence_number, :is_floating,
+                 :title, :focus, :focus_label, :workout_type, :status, :source_text, :notes)
+                RETURNING id
+                """),
+                {
+                    "plan_id": plan_id,
+                    "telegram_user_id": telegram_user_id,
+                    "planned_date": workout.get("planned_date"),
+                    "weekday": workout.get("weekday"),
+                    "sequence_number": workout.get("sequence_number"),
+                    "is_floating": workout.get("is_floating", False),
+                    "title": workout.get("title"),
+                    "focus": workout.get("focus"),
+                    "focus_label": workout.get("focus_label"),
+                    "workout_type": workout.get("workout_type", "planned"),
+                    "status": workout.get("status", "planned"),
+                    "source_text": source_text,
+                    "notes": workout.get("notes"),
+                },
+            )
+            planned_workout_id = workout_result.scalar_one()
+
+            await session.execute(
+                text("""
+                INSERT INTO planned_workout_events
+                (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+                VALUES
+                (:planned_workout_id, 'created', NULL, CAST(:new_value_json AS JSONB), :source_text, NULL)
+                """),
+                {
+                    "planned_workout_id": planned_workout_id,
+                    "new_value_json": json.dumps(workout, ensure_ascii=False),
+                    "source_text": source_text,
+                },
+            )
+
+            for exercise in workout.get("exercises", []):
+                await session.execute(
+                    text("""
+                    INSERT INTO planned_exercises
+                    (planned_workout_id, exercise_order, exercise_name, target_sets,
+                     target_reps_min, target_reps_max, target_reps_text, target_weight_kg, notes)
+                    VALUES
+                    (:planned_workout_id, :exercise_order, :exercise_name, :target_sets,
+                     :target_reps_min, :target_reps_max, :target_reps_text, :target_weight_kg, :notes)
+                    """),
+                    {
+                        "planned_workout_id": planned_workout_id,
+                        "exercise_order": exercise.get("exercise_order"),
+                        "exercise_name": exercise.get("exercise_name"),
+                        "target_sets": exercise.get("target_sets"),
+                        "target_reps_min": exercise.get("target_reps_min"),
+                        "target_reps_max": exercise.get("target_reps_max"),
+                        "target_reps_text": exercise.get("target_reps_text"),
+                        "target_weight_kg": exercise.get("target_weight_kg"),
+                        "notes": exercise.get("notes"),
+                    },
+                )
+
+        await session.commit()
+        return plan_id
+
+
+async def get_today_planned_workout(telegram_user_id: str | None, today: str) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date = :today
+              AND status = 'planned'
+            ORDER BY sequence_number NULLS LAST, id
+            LIMIT 1
+            """),
+            {"telegram_user_id": telegram_user_id, "today": today},
+        )
+        workout = result.mappings().first()
+        if not workout:
+            return None
+
+        exercises = await _get_planned_exercises(session, workout["id"])
+        return {"workout": dict(workout), "exercises": exercises}
+
+
+async def get_next_planned_workout(telegram_user_id: str | None) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'planned'
+            ORDER BY
+              CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END,
+              planned_date ASC NULLS LAST,
+              sequence_number ASC NULLS LAST,
+              id ASC
+            LIMIT 1
+            """),
+            {"telegram_user_id": telegram_user_id},
+        )
+        workout = result.mappings().first()
+        if not workout:
+            return None
+
+        exercises = await _get_planned_exercises(session, workout["id"])
+        return {"workout": dict(workout), "exercises": exercises}
+
+
+async def get_week_plan(telegram_user_id: str | None, start_date: str, end_date: str) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND (
+                planned_date BETWEEN :start_date AND :end_date
+                OR (planned_date IS NULL AND status = 'planned')
+              )
+            ORDER BY
+              planned_date ASC NULLS LAST,
+              sequence_number ASC NULLS LAST,
+              id ASC
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        )
+
+        rows = []
+        for workout in result.mappings().all():
+            exercises = await _get_planned_exercises(session, workout["id"])
+            rows.append({"workout": dict(workout), "exercises": exercises})
+        return rows
+
+
+async def _get_planned_exercises(session, planned_workout_id: int) -> list[dict]:
+    result = await session.execute(
+        text("""
+        SELECT *
+        FROM planned_exercises
+        WHERE planned_workout_id = :planned_workout_id
+        ORDER BY exercise_order NULLS LAST, id
+        """),
+        {"planned_workout_id": planned_workout_id},
+    )
+    return [dict(row) for row in result.mappings().all()]
+
+
+async def save_fitness_workout(
+    telegram_user_id: str | None,
+    workout_date: str,
+    workout_type: str | None,
+    focus: str | None,
+    focus_label: str | None,
+    bodyweight_kg,
+    source_text: str,
+    notes: str | None,
+    exercises: list[dict],
+    planned_workout_id: int | None = None,
+    completion_type: str = "custom",
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO fitness_workouts
+            (telegram_user_id, planned_workout_id, workout_date, workout_type, focus, focus_label,
+             bodyweight_kg, completion_type, source_text, notes)
+            VALUES
+            (:telegram_user_id, :planned_workout_id, :workout_date, :workout_type, :focus, :focus_label,
+             :bodyweight_kg, :completion_type, :source_text, :notes)
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "planned_workout_id": planned_workout_id,
+                "workout_date": workout_date,
+                "workout_type": workout_type,
+                "focus": focus,
+                "focus_label": focus_label,
+                "bodyweight_kg": bodyweight_kg,
+                "completion_type": completion_type,
+                "source_text": source_text,
+                "notes": notes,
+            },
+        )
+        workout_id = result.scalar_one()
+
+        for exercise in exercises:
+            exercise_name = exercise.get("name") or exercise.get("exercise_name")
+            for set_data in exercise.get("sets", []):
+                await session.execute(
+                    text("""
+                    INSERT INTO fitness_exercise_sets
+                    (workout_id, exercise_name, set_number, weight_kg, reps, rpe, notes)
+                    VALUES
+                    (:workout_id, :exercise_name, :set_number, :weight_kg, :reps, :rpe, :notes)
+                    """),
+                    {
+                        "workout_id": workout_id,
+                        "exercise_name": exercise_name,
+                        "set_number": set_data.get("set_number"),
+                        "weight_kg": set_data.get("weight_kg"),
+                        "reps": set_data.get("reps"),
+                        "rpe": set_data.get("rpe"),
+                        "notes": set_data.get("notes"),
+                    },
+                )
+
+        if planned_workout_id:
+            status = "completed_modified" if completion_type in ("modified", "shortened", "replacement") else "completed"
+            await session.execute(
+                text("""
+                UPDATE planned_workouts
+                SET status = :status
+                WHERE id = :planned_workout_id
+                """),
+                {"status": status, "planned_workout_id": planned_workout_id},
+            )
+
+            await session.execute(
+                text("""
+                INSERT INTO planned_workout_events
+                (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+                VALUES
+                (:planned_workout_id, 'completed', NULL, CAST(:new_value_json AS JSONB), :source_text, NULL)
+                """),
+                {
+                    "planned_workout_id": planned_workout_id,
+                    "new_value_json": json.dumps(
+                        {"fitness_workout_id": workout_id, "completion_type": completion_type},
+                        ensure_ascii=False,
+                    ),
+                    "source_text": source_text,
+                },
+            )
+
+        await session.commit()
+        return workout_id
+
+
+async def save_body_measurement(
+    telegram_user_id: str | None,
+    measurement_date: str,
+    source_text: str,
+    data: dict,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO body_measurements
+            (telegram_user_id, measurement_date, weight_kg, waist_cm, chest_cm, hips_cm,
+             arm_cm, thigh_cm, neck_cm, notes, source_text)
+            VALUES
+            (:telegram_user_id, :measurement_date, :weight_kg, :waist_cm, :chest_cm, :hips_cm,
+             :arm_cm, :thigh_cm, :neck_cm, :notes, :source_text)
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "measurement_date": measurement_date,
+                "weight_kg": data.get("weight_kg"),
+                "waist_cm": data.get("waist_cm"),
+                "chest_cm": data.get("chest_cm"),
+                "hips_cm": data.get("hips_cm"),
+                "arm_cm": data.get("arm_cm"),
+                "thigh_cm": data.get("thigh_cm"),
+                "neck_cm": data.get("neck_cm"),
+                "notes": data.get("notes"),
+                "source_text": source_text,
+            },
+        )
+        measurement_id = result.scalar_one()
+        await session.commit()
+        return measurement_id
+
+
+async def get_last_workout(telegram_user_id: str | None) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        workout_result = await session.execute(
+            text("""
+            SELECT id, workout_date, workout_type, focus, focus_label, bodyweight_kg, completion_type, notes
+            FROM fitness_workouts
+            WHERE (:telegram_user_id IS NULL OR telegram_user_id = :telegram_user_id)
+            ORDER BY workout_date DESC, id DESC
+            LIMIT 1
+            """),
+            {"telegram_user_id": telegram_user_id},
+        )
+        workout = workout_result.mappings().first()
+
+        if not workout:
+            return None
+
+        sets_result = await session.execute(
+            text("""
+            SELECT exercise_name, set_number, weight_kg, reps, rpe, notes
+            FROM fitness_exercise_sets
+            WHERE workout_id = :workout_id
+            ORDER BY id ASC
+            """),
+            {"workout_id": workout["id"]},
+        )
+
+        return {
+            "workout": dict(workout),
+            "sets": [dict(row) for row in sets_result.mappings().all()],
+        }
+
+
+async def get_last_measurement(telegram_user_id: str | None) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM body_measurements
+            WHERE (:telegram_user_id IS NULL OR telegram_user_id = :telegram_user_id)
+            ORDER BY measurement_date DESC, id DESC
+            LIMIT 1
+            """),
+            {"telegram_user_id": telegram_user_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
