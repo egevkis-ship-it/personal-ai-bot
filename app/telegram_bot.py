@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 from app.config import settings
-from app.ai import parse_message, transcribe_audio
+from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
 
@@ -28,10 +28,13 @@ def is_allowed(update: Update) -> bool:
     return str(user.id) == str(settings.allowed_telegram_user_id)
 
 
-def build_reply(parsed: dict) -> str:
+def build_reply(parsed: dict, source_text: str | None = None) -> str:
     intent = parsed.get("intent", "unknown")
     confidence = parsed.get("confidence")
     summary = parsed.get("summary") or "Принял."
+
+    if intent == "general_question" and source_text:
+        return generate_general_answer(source_text)
 
     if parsed.get("requires_confirmation"):
         return (
@@ -39,8 +42,8 @@ def build_reply(parsed: dict) -> str:
             f"Тип: {intent}\n"
             f"Уверенность: {confidence}\n"
             f"Сводка: {summary}\n\n"
-            f"Пока v0.1 только логирует такие действия. "
-            f"В следующем этапе добавим подтверждение кнопками."
+            f"Пока я только логирую такие действия. "
+            f"На следующем этапе добавим подтверждение кнопками."
         )
 
     return (
@@ -95,7 +98,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             status="parsed",
         )
 
-        await update.message.reply_text(build_reply(parsed))
+        await update.message.reply_text(build_reply(parsed, text))
 
     except Exception as e:
         await save_raw_message(
@@ -145,7 +148,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
         await update.message.reply_text(
-            f"Расшифровка:\n{transcript}\n\n{build_reply(parsed)}"
+            f"Расшифровка:\n{transcript}\n\n{build_reply(parsed, transcript)}"
         )
 
     except Exception as e:

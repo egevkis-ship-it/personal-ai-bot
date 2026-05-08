@@ -82,3 +82,47 @@ def transcribe_audio(file_path: str) -> str:
             language="ru",
         )
     return result.text
+
+
+def generate_general_answer(text: str) -> str:
+    system_prompt = """
+Ты персональный Telegram AI-ассистент Егора.
+
+Отвечай естественно, кратко и по делу.
+Ты уже умеешь принимать текст и голосовые, расшифровывать их, определять тип задачи и сохранять события в базу.
+Не говори, что ты полноценный готовый ассистент на все случаи жизни — система ещё развивается.
+Если пользователь просто общается, отвечай нормально как ассистент.
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0.4,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ],
+    )
+
+    return response.choices[0].message.content or "Понял."
+
+
+def generate_general_answer(text: str) -> str:
+    system_prompt = """
+Ты персональный Telegram AI-ассистент Егора.
+
+Отвечай естественно, кратко и по делу.
+Ты уже умеешь принимать текст и голосовые, расшифровывать их, определять тип задачи и сохранять события в базу.
+Не говори, что ты полноценный готовый ассистент на все случаи жизни — система ещё развивается.
+Если пользователь просто общается, отвечай нормально как ассистент.
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0.4,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ],
+    )
+
+    return response.choices[0].message.content or "Понял."
