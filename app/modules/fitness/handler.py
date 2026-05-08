@@ -9,8 +9,14 @@ from app.db import (
     save_body_measurement,
     get_last_workout,
     get_last_measurement,
+    get_planned_workout_by_focus,
+    mark_planned_workout_skipped,
+    move_planned_workout,
+    swap_planned_workouts,
+    replace_planned_workout,
 )
 from app.modules.fitness.parser import parse_fitness_action
+from app.modules.fitness.change_parser import parse_plan_change
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_week_plan,
@@ -64,12 +70,15 @@ async def handle_fitness_text(telegram_user_id: str | None, text: str) -> str:
         return format_week_plan(items)
 
     if action == "get_focus_workout":
-        # Пока используем простую стратегию: показываем следующую тренировку.
-        # Поиск по focus добавим в следующем пакете вместе с редактированием плана.
-        data = await get_next_planned_workout(telegram_user_id)
-        if not data:
-            return "Активная тренировка по этому фокусу пока не найдена."
-        return "Пока поиск по фокусу работает упрощённо. Ближайшая подходящая/следующая тренировка:\n\n" + format_planned_workout(data)
+        query = parsed.get("query") or {}
+        data = await get_planned_workout_by_focus(
+            telegram_user_id,
+            query.get("focus"),
+            query.get("focus_label"),
+        )
+        if data:
+            return "Тренировка по запросу:\n\n" + format_planned_workout(data)
+        return "Активная тренировка по этому фокусу пока не найдена."
 
     if action == "log_workout":
         completed = parsed.get("completed_workout") or {}
@@ -125,11 +134,8 @@ async def handle_fitness_text(telegram_user_id: str | None, text: str) -> str:
         )
         return format_measurement(parsed, measurement_id=measurement_id)
 
-    if action == "skip_workout":
-        return "Я понял, что нужно отметить пропуск. В следующем пакете добавлю изменение статуса плана: skipped."
-
-    if action == "change_plan":
-        return "Я понял, что нужно изменить план. В следующем пакете добавлю переносы, замены и перестановки."
+    if action in ("skip_workout", "change_plan"):
+        return await handle_plan_change(telegram_user_id, text)
 
     return "Я понял сообщение как фитнес-контекст, но пока не смог уверенно выбрать действие. Попробуй сформулировать: “создай план”, “дай сегодняшнюю тренировку” или “сделал тренировку”."
 
@@ -177,3 +183,112 @@ async def command_last_workout(telegram_user_id: str | None) -> str:
 
 async def command_last_measurement(telegram_user_id: str | None) -> str:
     return format_last_measurement(await get_last_measurement(telegram_user_id))
+
+
+async def _find_target_workout(telegram_user_id: str | None, target: dict) -> dict | None:
+    if target.get("is_today"):
+        return await get_today_planned_workout(telegram_user_id, date.today().isoformat())
+
+    if target.get("is_next"):
+        return await get_next_planned_workout(telegram_user_id)
+
+    if target.get("focus") or target.get("focus_label"):
+        return await get_planned_workout_by_focus(
+            telegram_user_id,
+            target.get("focus"),
+            target.get("focus_label"),
+        )
+
+    if target.get("date"):
+        return await get_today_planned_workout(telegram_user_id, target.get("date"))
+
+    return await get_next_planned_workout(telegram_user_id)
+
+
+async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
+    change = parse_plan_change(text)
+    change_type = change.get("change_type")
+    target = change.get("target") or {}
+
+    if change_type == "skip":
+        data = await _find_target_workout(telegram_user_id, target)
+        if not data:
+            return "Не нашёл тренировку, которую нужно пропустить."
+
+        workout = data["workout"]
+        await mark_planned_workout_skipped(
+            planned_workout_id=workout["id"],
+            source_text=text,
+            reason=change.get("reason"),
+        )
+
+        return (
+            "Отметил тренировку как пропущенную.\n\n"
+            + format_planned_workout(data)
+        )
+
+    if change_type == "move":
+        data = await _find_target_workout(telegram_user_id, target)
+        if not data:
+            return "Не нашёл тренировку, которую нужно перенести."
+
+        new_date = change.get("new_date")
+        if not new_date:
+            return "Понял перенос, но не понял новую дату. Напиши, например: “перенеси плечи на пятницу”."
+
+        workout = data["workout"]
+        await move_planned_workout(
+            planned_workout_id=workout["id"],
+            new_date=new_date,
+            new_weekday=change.get("new_weekday"),
+            source_text=text,
+        )
+
+        return f"Перенёс тренировку: {workout.get('title') or workout.get('focus_label')} → {new_date}."
+
+    if change_type == "swap":
+        first = await _find_target_workout(telegram_user_id, target)
+        second_target = change.get("second_target") or {}
+        second = await _find_target_workout(telegram_user_id, second_target)
+
+        if not first or not second:
+            return "Не нашёл обе тренировки для обмена местами."
+
+        await swap_planned_workouts(
+            first_workout_id=first["workout"]["id"],
+            second_workout_id=second["workout"]["id"],
+            source_text=text,
+        )
+
+        return (
+            "Поменял тренировки местами:\n"
+            f"- {first['workout'].get('title') or first['workout'].get('focus_label')}\n"
+            f"- {second['workout'].get('title') or second['workout'].get('focus_label')}"
+        )
+
+    if change_type == "replace":
+        data = await _find_target_workout(telegram_user_id, target)
+        if not data:
+            return "Не нашёл тренировку, которую нужно заменить."
+
+        replacement = change.get("replacement") or {}
+        if not replacement.get("focus") and not replacement.get("focus_label") and not replacement.get("title"):
+            return "Понял замену, но не понял, на какую тренировку заменить."
+
+        replacement_id = await replace_planned_workout(
+            target_workout_id=data["workout"]["id"],
+            replacement=replacement,
+            source_text=text,
+        )
+
+        return (
+            "Заменил тренировку.\n\n"
+            f"Было: {data['workout'].get('title') or data['workout'].get('focus_label')}\n"
+            f"Стало: {replacement.get('title') or replacement.get('focus_label')}\n"
+            f"ID новой тренировки: {replacement_id}"
+        )
+
+    if change_type == "custom_today":
+        return "Понял кастомную тренировку на сегодня. В следующем пакете добавлю создание кастомной плановой тренировки."
+
+    return "Я понял, что ты хочешь изменить план, но пока не смог уверенно разобрать действие."

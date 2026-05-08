@@ -660,3 +660,358 @@ async def get_last_measurement(telegram_user_id: str | None) -> dict | None:
         )
         row = result.mappings().first()
         return dict(row) if row else None
+
+
+async def get_planned_workout_by_focus(telegram_user_id: str | None, focus: str | None, focus_label: str | None = None) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'planned'
+              AND (
+                (:focus IS NOT NULL AND focus = :focus)
+                OR (:focus_label IS NOT NULL AND lower(focus_label) = lower(:focus_label))
+              )
+            ORDER BY
+              CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END,
+              planned_date ASC NULLS LAST,
+              sequence_number ASC NULLS LAST,
+              id ASC
+            LIMIT 1
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "focus": focus,
+                "focus_label": focus_label,
+            },
+        )
+        workout = result.mappings().first()
+        if not workout:
+            return None
+
+        exercises = await _get_planned_exercises(session, workout["id"])
+        return {"workout": dict(workout), "exercises": exercises}
+
+
+async def get_planned_workout_by_id(planned_workout_id: int) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE id = :planned_workout_id
+            LIMIT 1
+            """),
+            {"planned_workout_id": planned_workout_id},
+        )
+        workout = result.mappings().first()
+        if not workout:
+            return None
+
+        exercises = await _get_planned_exercises(session, workout["id"])
+        return {"workout": dict(workout), "exercises": exercises}
+
+
+async def mark_planned_workout_skipped(
+    planned_workout_id: int,
+    source_text: str,
+    reason: str | None = None,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        old_result = await session.execute(
+            text("SELECT row_to_json(planned_workouts.*) AS data FROM planned_workouts WHERE id = :id"),
+            {"id": planned_workout_id},
+        )
+        old_value = old_result.scalar_one_or_none()
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET status = 'skipped',
+                notes = COALESCE(notes, '') || CASE WHEN :reason IS NULL THEN '' ELSE '\nПричина пропуска: ' || :reason END
+            WHERE id = :id
+            """),
+            {"id": planned_workout_id, "reason": reason},
+        )
+
+        new_result = await session.execute(
+            text("SELECT row_to_json(planned_workouts.*) AS data FROM planned_workouts WHERE id = :id"),
+            {"id": planned_workout_id},
+        )
+        new_value = new_result.scalar_one_or_none()
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:id, 'skipped', CAST(:old_value AS JSONB), CAST(:new_value AS JSONB), :source_text, :reason)
+            """),
+            {
+                "id": planned_workout_id,
+                "old_value": json.dumps(old_value, ensure_ascii=False) if old_value else None,
+                "new_value": json.dumps(new_value, ensure_ascii=False) if new_value else None,
+                "source_text": source_text,
+                "reason": reason,
+            },
+        )
+        await session.commit()
+
+
+async def move_planned_workout(
+    planned_workout_id: int,
+    new_date: str | None,
+    new_weekday: str | None,
+    source_text: str,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        old_result = await session.execute(
+            text("SELECT row_to_json(planned_workouts.*) AS data FROM planned_workouts WHERE id = :id"),
+            {"id": planned_workout_id},
+        )
+        old_value = old_result.scalar_one_or_none()
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET planned_date = :new_date,
+                weekday = :new_weekday,
+                is_floating = CASE WHEN :new_date IS NULL THEN true ELSE false END,
+                status = 'planned'
+            WHERE id = :id
+            """),
+            {
+                "id": planned_workout_id,
+                "new_date": to_date(new_date),
+                "new_weekday": new_weekday,
+            },
+        )
+
+        new_result = await session.execute(
+            text("SELECT row_to_json(planned_workouts.*) AS data FROM planned_workouts WHERE id = :id"),
+            {"id": planned_workout_id},
+        )
+        new_value = new_result.scalar_one_or_none()
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:id, 'moved', CAST(:old_value AS JSONB), CAST(:new_value AS JSONB), :source_text, NULL)
+            """),
+            {
+                "id": planned_workout_id,
+                "old_value": json.dumps(old_value, ensure_ascii=False) if old_value else None,
+                "new_value": json.dumps(new_value, ensure_ascii=False) if new_value else None,
+                "source_text": source_text,
+            },
+        )
+        await session.commit()
+
+
+async def swap_planned_workouts(
+    first_workout_id: int,
+    second_workout_id: int,
+    source_text: str,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        old_result = await session.execute(
+            text("""
+            SELECT json_agg(row_to_json(pw.*)) AS data
+            FROM planned_workouts pw
+            WHERE id IN (:first_id, :second_id)
+            """),
+            {"first_id": first_workout_id, "second_id": second_workout_id},
+        )
+        old_value = old_result.scalar_one_or_none()
+
+        first = await session.execute(
+            text("SELECT planned_date, weekday, sequence_number, is_floating FROM planned_workouts WHERE id = :id"),
+            {"id": first_workout_id},
+        )
+        second = await session.execute(
+            text("SELECT planned_date, weekday, sequence_number, is_floating FROM planned_workouts WHERE id = :id"),
+            {"id": second_workout_id},
+        )
+
+        first_row = first.mappings().first()
+        second_row = second.mappings().first()
+
+        if not first_row or not second_row:
+            raise ValueError("Не нашёл одну из тренировок для обмена местами")
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET planned_date = :planned_date,
+                weekday = :weekday,
+                sequence_number = :sequence_number,
+                is_floating = :is_floating
+            WHERE id = :id
+            """),
+            {
+                "id": first_workout_id,
+                "planned_date": second_row["planned_date"],
+                "weekday": second_row["weekday"],
+                "sequence_number": second_row["sequence_number"],
+                "is_floating": second_row["is_floating"],
+            },
+        )
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET planned_date = :planned_date,
+                weekday = :weekday,
+                sequence_number = :sequence_number,
+                is_floating = :is_floating
+            WHERE id = :id
+            """),
+            {
+                "id": second_workout_id,
+                "planned_date": first_row["planned_date"],
+                "weekday": first_row["weekday"],
+                "sequence_number": first_row["sequence_number"],
+                "is_floating": first_row["is_floating"],
+            },
+        )
+
+        new_result = await session.execute(
+            text("""
+            SELECT json_agg(row_to_json(pw.*)) AS data
+            FROM planned_workouts pw
+            WHERE id IN (:first_id, :second_id)
+            """),
+            {"first_id": first_workout_id, "second_id": second_workout_id},
+        )
+        new_value = new_result.scalar_one_or_none()
+
+        for workout_id in (first_workout_id, second_workout_id):
+            await session.execute(
+                text("""
+                INSERT INTO planned_workout_events
+                (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+                VALUES
+                (:id, 'swapped', CAST(:old_value AS JSONB), CAST(:new_value AS JSONB), :source_text, NULL)
+                """),
+                {
+                    "id": workout_id,
+                    "old_value": json.dumps(old_value, ensure_ascii=False) if old_value else None,
+                    "new_value": json.dumps(new_value, ensure_ascii=False) if new_value else None,
+                    "source_text": source_text,
+                },
+            )
+
+        await session.commit()
+
+
+async def replace_planned_workout(
+    target_workout_id: int,
+    replacement: dict,
+    source_text: str,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        old_result = await session.execute(
+            text("SELECT row_to_json(planned_workouts.*) AS data FROM planned_workouts WHERE id = :id"),
+            {"id": target_workout_id},
+        )
+        old_value = old_result.scalar_one_or_none()
+
+        target_result = await session.execute(
+            text("""
+            SELECT plan_id, telegram_user_id, planned_date, weekday, sequence_number
+            FROM planned_workouts
+            WHERE id = :id
+            """),
+            {"id": target_workout_id},
+        )
+        target = target_result.mappings().first()
+        if not target:
+            raise ValueError("Не нашёл тренировку для замены")
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET status = 'replaced'
+            WHERE id = :id
+            """),
+            {"id": target_workout_id},
+        )
+
+        replacement_result = await session.execute(
+            text("""
+            INSERT INTO planned_workouts
+            (plan_id, telegram_user_id, planned_date, weekday, sequence_number, is_floating,
+             title, focus, focus_label, workout_type, status, source_text, notes)
+            VALUES
+            (:plan_id, :telegram_user_id, :planned_date, :weekday, :sequence_number, false,
+             :title, :focus, :focus_label, 'replacement', 'planned', :source_text, :notes)
+            RETURNING id
+            """),
+            {
+                "plan_id": target["plan_id"],
+                "telegram_user_id": target["telegram_user_id"],
+                "planned_date": target["planned_date"],
+                "weekday": target["weekday"],
+                "sequence_number": target["sequence_number"],
+                "title": replacement.get("title"),
+                "focus": replacement.get("focus"),
+                "focus_label": replacement.get("focus_label"),
+                "source_text": source_text,
+                "notes": replacement.get("notes"),
+            },
+        )
+        replacement_id = replacement_result.scalar_one()
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET replaced_by_id = :replacement_id
+            WHERE id = :target_id
+            """),
+            {"replacement_id": replacement_id, "target_id": target_workout_id},
+        )
+
+        for exercise in replacement.get("exercises", []):
+            await session.execute(
+                text("""
+                INSERT INTO planned_exercises
+                (planned_workout_id, exercise_order, exercise_name, target_sets,
+                 target_reps_min, target_reps_max, target_reps_text, target_weight_kg, notes)
+                VALUES
+                (:planned_workout_id, :exercise_order, :exercise_name, :target_sets,
+                 :target_reps_min, :target_reps_max, :target_reps_text, :target_weight_kg, :notes)
+                """),
+                {
+                    "planned_workout_id": replacement_id,
+                    "exercise_order": exercise.get("exercise_order"),
+                    "exercise_name": exercise.get("exercise_name"),
+                    "target_sets": exercise.get("target_sets"),
+                    "target_reps_min": exercise.get("target_reps_min"),
+                    "target_reps_max": exercise.get("target_reps_max"),
+                    "target_reps_text": exercise.get("target_reps_text"),
+                    "target_weight_kg": exercise.get("target_weight_kg"),
+                    "notes": exercise.get("notes"),
+                },
+            )
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:id, 'replaced', CAST(:old_value AS JSONB), CAST(:new_value AS JSONB), :source_text, NULL)
+            """),
+            {
+                "id": target_workout_id,
+                "old_value": json.dumps(old_value, ensure_ascii=False) if old_value else None,
+                "new_value": json.dumps({"replacement_id": replacement_id, "replacement": replacement}, ensure_ascii=False),
+                "source_text": source_text,
+            },
+        )
+
+        await session.commit()
+        return replacement_id
