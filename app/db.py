@@ -664,29 +664,49 @@ async def get_last_measurement(telegram_user_id: str | None) -> dict | None:
 
 async def get_planned_workout_by_focus(telegram_user_id: str | None, focus: str | None, focus_label: str | None = None) -> dict | None:
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            text("""
-            SELECT *
-            FROM planned_workouts
-            WHERE telegram_user_id = :telegram_user_id
-              AND status = 'planned'
-              AND (
-                (:focus IS NOT NULL AND focus = :focus)
-                OR (:focus_label IS NOT NULL AND lower(focus_label) = lower(:focus_label))
-              )
-            ORDER BY
-              CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END,
-              planned_date ASC NULLS LAST,
-              sequence_number ASC NULLS LAST,
-              id ASC
-            LIMIT 1
-            """),
-            {
-                "telegram_user_id": telegram_user_id,
-                "focus": focus,
-                "focus_label": focus_label,
-            },
-        )
+        if focus:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND status = 'planned'
+                  AND focus = :focus
+                ORDER BY
+                  CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END,
+                  planned_date ASC NULLS LAST,
+                  sequence_number ASC NULLS LAST,
+                  id ASC
+                LIMIT 1
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "focus": focus,
+                },
+            )
+        elif focus_label:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND status = 'planned'
+                  AND lower(focus_label) = lower(:focus_label)
+                ORDER BY
+                  CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END,
+                  planned_date ASC NULLS LAST,
+                  sequence_number ASC NULLS LAST,
+                  id ASC
+                LIMIT 1
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "focus_label": focus_label,
+                },
+            )
+        else:
+            return None
+
         workout = result.mappings().first()
         if not workout:
             return None
