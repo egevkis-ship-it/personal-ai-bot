@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 
 from app.config import settings
+from app.messages import get_ack_message
 from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
@@ -123,7 +124,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = update.message.text
     user_id = str(update.effective_user.id) if update.effective_user else None
 
-    await update.message.reply_text("Принял. Разбираю...")
+    await update.message.reply_text(get_ack_message("default"))
 
     try:
         parsed = parse_message(text)
@@ -164,7 +165,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     user_id = str(update.effective_user.id) if update.effective_user else None
 
-    await update.message.reply_text("Принял голосовое. Расшифровываю...")
+    await update.message.reply_text(get_ack_message("voice"))
 
     audio_path = None
 
