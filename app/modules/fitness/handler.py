@@ -10,6 +10,7 @@ from app.db import (
     get_last_workout,
     get_last_measurement,
     get_planned_workout_by_focus,
+    get_planned_workout_by_id,
     mark_planned_workout_skipped,
     move_planned_workout,
     swap_planned_workouts,
@@ -24,6 +25,7 @@ from app.modules.fitness.formatter import (
     format_measurement,
     format_last_workout,
     format_last_measurement,
+    format_human_date,
 )
 from app.modules.fitness.utils import week_bounds
 
@@ -222,9 +224,11 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
             reason=change.get("reason"),
         )
 
+        updated = await get_planned_workout_by_id(workout["id"])
+
         return (
             "Отметил тренировку как пропущенную.\n\n"
-            + format_planned_workout(data)
+            + format_planned_workout(updated)
         )
 
     if change_type == "move":
@@ -244,7 +248,13 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
             source_text=text,
         )
 
-        return f"Перенёс тренировку: {workout.get('title') or workout.get('focus_label')} → {new_date}."
+        updated = await get_planned_workout_by_id(workout["id"])
+        title = workout.get("title") or workout.get("focus_label") or "тренировка"
+
+        return (
+            f"Перенёс тренировку: {title} → {format_human_date(new_date)}.\n\n"
+            + format_planned_workout(updated)
+        )
 
     if change_type == "swap":
         first = await _find_target_workout(telegram_user_id, target)
@@ -260,10 +270,15 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
             source_text=text,
         )
 
+        first_updated = await get_planned_workout_by_id(first["workout"]["id"])
+        second_updated = await get_planned_workout_by_id(second["workout"]["id"])
+
         return (
-            "Поменял тренировки местами:\n"
-            f"- {first['workout'].get('title') or first['workout'].get('focus_label')}\n"
-            f"- {second['workout'].get('title') or second['workout'].get('focus_label')}"
+            "Поменял тренировки местами.\n\n"
+            "Теперь:\n\n"
+            + format_planned_workout(first_updated)
+            + "\n\n"
+            + format_planned_workout(second_updated)
         )
 
     if change_type == "replace":
@@ -281,11 +296,13 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
             source_text=text,
         )
 
+        updated_replacement = await get_planned_workout_by_id(replacement_id)
+
         return (
             "Заменил тренировку.\n\n"
-            f"Было: {data['workout'].get('title') or data['workout'].get('focus_label')}\n"
-            f"Стало: {replacement.get('title') or replacement.get('focus_label')}\n"
-            f"ID новой тренировки: {replacement_id}"
+            f"Было: {data['workout'].get('title') or data['workout'].get('focus_label')}\n\n"
+            "Стало:\n"
+            + format_planned_workout(updated_replacement)
         )
 
     if change_type == "custom_today":
