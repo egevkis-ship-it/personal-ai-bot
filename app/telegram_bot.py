@@ -139,7 +139,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             status="parsed",
         )
 
-        await update.message.reply_text(build_reply(parsed, text))
+        if parsed.get("intent") == "fitness":
+            await update.message.reply_text(await handle_fitness_text(user_id, text))
+        else:
+            await update.message.reply_text(build_reply(parsed, text))
 
     except Exception as e:
         await save_raw_message(
