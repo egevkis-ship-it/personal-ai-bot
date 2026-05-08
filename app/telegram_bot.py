@@ -17,6 +17,7 @@ from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
 from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement
+from app.modules.fitness.utils import is_likely_fitness_text
 
 
 def is_allowed(update: Update) -> bool:
@@ -140,7 +141,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             status="parsed",
         )
 
-        if parsed.get("intent") == "fitness":
+        if parsed.get("intent") == "fitness" or is_likely_fitness_text(text):
             await update.message.reply_text(await handle_fitness_text(user_id, text))
         else:
             await update.message.reply_text(build_reply(parsed, text))
