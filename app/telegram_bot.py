@@ -35,17 +35,17 @@ def build_reply(parsed: dict) -> str:
 
     if parsed.get("requires_confirmation"):
         return (
-            f"Я понял задачу так:\\n\\n"
-            f"Тип: {intent}\\n"
-            f"Уверенность: {confidence}\\n"
-            f"Сводка: {summary}\\n\\n"
+            f"Я понял задачу так:\n\n"
+            f"Тип: {intent}\n"
+            f"Уверенность: {confidence}\n"
+            f"Сводка: {summary}\n\n"
             f"Пока v0.1 только логирует такие действия. "
             f"В следующем этапе добавим подтверждение кнопками."
         )
 
     return (
-        f"Записал.\\n\\n"
-        f"Тип: {intent}\\n"
+        f"Записал.\n\n"
+        f"Тип: {intent}\n"
         f"Сводка: {summary}"
     )
 
@@ -57,10 +57,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id if update.effective_user else "unknown"
 
     await update.message.reply_text(
-        "Personal AI Bot запущен.\\n"
-        f"Твой Telegram user_id: {user_id}\\n\\n"
-        "Команды:\\n"
-        "/status — статус системы\\n"
+        "Personal AI Bot запущен.\n"
+        f"Твой Telegram user_id: {user_id}\n\n"
+        "Команды:\n"
+        "/status — статус системы\n"
         "/start — показать это сообщение"
     )
 
@@ -145,7 +145,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
         await update.message.reply_text(
-            f"Расшифровка:\\n{transcript}\\n\\n{build_reply(parsed)}"
+            f"Расшифровка:\n{transcript}\n\n{build_reply(parsed)}"
         )
 
     except Exception as e:

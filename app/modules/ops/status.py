@@ -7,9 +7,9 @@ async def build_status_text() -> str:
     redis_ok = await redis_healthcheck()
 
     return (
-        "System status:\\n"
-        f"Bot: running\\n"
-        f"PostgreSQL: {'healthy' if db_ok else 'error'}\\n"
-        f"Redis: {'healthy' if redis_ok else 'error'}\\n"
+        "System status:\n"
+        f"Bot: running\n"
+        f"PostgreSQL: {'healthy' if db_ok else 'error'}\n"
+        f"Redis: {'healthy' if redis_ok else 'error'}\n"
         "Version: v0.1.0"
     )
