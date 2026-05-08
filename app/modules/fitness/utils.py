@@ -101,3 +101,75 @@ def short_weekday_from_date(date_str: str | None) -> str | None:
     if not d:
         return None
     return WEEKDAY_NUM_TO_RU[d.weekday()]
+
+
+def is_likely_fitness_text(text: str | None) -> bool:
+    """
+    Conservative pre-router for obvious fitness messages.
+
+    Important:
+    - Action words like "перенеси", "дай", "покажи", "замени" are NOT enough.
+    - We only route to fitness when there is a fitness-specific anchor.
+    """
+
+    if not text:
+        return False
+
+    t = text.lower()
+
+    muscle_anchors = [
+        "грудь", "спина", "плечи", "ноги", "руки",
+        "бицепс", "трицепс", "пресс", "дельты", "ягодицы", "икры",
+    ]
+
+    workout_anchors = [
+        "тренировка", "треню", "потрен", "зал",
+        "упражнение", "подход", "подходы", "повтор", "повторы",
+        "rpe", "рабочий вес", "разминка",
+    ]
+
+    exercise_anchors = [
+        "жим", "присед", "тяга", "подтяг", "разводка", "махи",
+        "брусья", "становая", "жим ногами", "тяга блока", "гантел",
+        "штанг",
+    ]
+
+    measurement_anchors = [
+        "вес утром", "мой вес", "вес тела", "талия", "замеры",
+        "обхват", "грудь ", "рука ", "бедро ", "шея ",
+    ]
+
+    action_words = [
+        "перенеси", "перенести", "поменяй", "замени", "заменить",
+        "пропусти", "пропустил", "пропускаем",
+        "дай", "покажи", "что сегодня", "что дальше",
+    ]
+
+    has_fitness_anchor = any(w in t for w in muscle_anchors + workout_anchors + exercise_anchors + measurement_anchors)
+    has_action = any(w in t for w in action_words)
+
+    # Plan/change/query cases:
+    # "перенеси спину", "дай грудь", "покажи тренировку", "замени ноги"
+    if has_fitness_anchor and has_action:
+        return True
+
+    # Explicit plan:
+    # "план на неделю: грудь, спина..."
+    if "план" in t and has_fitness_anchor:
+        return True
+
+    # Workout fact:
+    # "сделал грудь", "выполнил жим", "сегодня была тренировка"
+    if any(w in t for w in ["сделал", "выполнил", "была тренировка", "сегодня тренировка"]) and has_fitness_anchor:
+        return True
+
+    # Typical workout numbers:
+    # "жим 80 на 10", "разводка 16 по 12"
+    if any(w in t for w in exercise_anchors) and any(w in t for w in [" на ", " по ", "×", "x"]):
+        return True
+
+    # Body measurements:
+    if any(w in t for w in measurement_anchors):
+        return True
+
+    return False
