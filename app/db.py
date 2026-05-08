@@ -746,14 +746,16 @@ async def mark_planned_workout_skipped(
         )
         old_value = old_result.scalar_one_or_none()
 
+        reason_note = "" if not reason else "\nПричина пропуска: " + reason
+
         await session.execute(
             text("""
             UPDATE planned_workouts
             SET status = 'skipped',
-                notes = COALESCE(notes, '') || CASE WHEN :reason IS NULL THEN '' ELSE '\nПричина пропуска: ' || :reason END
+                notes = COALESCE(notes, '') || :reason_note
             WHERE id = :id
             """),
-            {"id": planned_workout_id, "reason": reason},
+            {"id": planned_workout_id, "reason_note": reason_note},
         )
 
         new_result = await session.execute(
@@ -793,19 +795,22 @@ async def move_planned_workout(
         )
         old_value = old_result.scalar_one_or_none()
 
+        parsed_new_date = to_date(new_date)
+
         await session.execute(
             text("""
             UPDATE planned_workouts
             SET planned_date = :new_date,
                 weekday = :new_weekday,
-                is_floating = CASE WHEN :new_date IS NULL THEN true ELSE false END,
+                is_floating = :is_floating,
                 status = 'planned'
             WHERE id = :id
             """),
             {
                 "id": planned_workout_id,
-                "new_date": to_date(new_date),
+                "new_date": parsed_new_date,
                 "new_weekday": new_weekday,
+                "is_floating": parsed_new_date is None,
             },
         )
 
