@@ -1,0 +1,103 @@
+from datetime import date, datetime, timedelta
+
+
+WEEKDAY_RU_TO_NUM = {
+    "понедельник": 0,
+    "пн": 0,
+    "вторник": 1,
+    "вт": 1,
+    "среда": 2,
+    "ср": 2,
+    "четверг": 3,
+    "чт": 3,
+    "пятница": 4,
+    "пт": 4,
+    "суббота": 5,
+    "сб": 5,
+    "воскресенье": 6,
+    "вс": 6,
+}
+
+WEEKDAY_NUM_TO_RU = {
+    0: "Пн",
+    1: "Вт",
+    2: "Ср",
+    3: "Чт",
+    4: "Пт",
+    5: "Сб",
+    6: "Вс",
+}
+
+FOCUS_MAP = {
+    "грудь": "chest",
+    "грудные": "chest",
+    "спина": "back",
+    "плечи": "shoulders",
+    "дельты": "shoulders",
+    "ноги": "legs",
+    "квадрицепс": "legs",
+    "бицепс": "arms",
+    "трицепс": "arms",
+    "руки": "arms",
+    "пресс": "abs",
+    "кардио": "cardio",
+    "фулбади": "full_body",
+    "full body": "full_body",
+    "фуллбади": "full_body",
+}
+
+
+def today_iso() -> str:
+    return date.today().isoformat()
+
+
+def parse_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def week_bounds(target: date | None = None) -> tuple[str, str]:
+    target = target or date.today()
+    start = target - timedelta(days=target.weekday())
+    end = start + timedelta(days=6)
+    return start.isoformat(), end.isoformat()
+
+
+def next_week_bounds() -> tuple[str, str]:
+    today = date.today()
+    start = today - timedelta(days=today.weekday()) + timedelta(days=7)
+    end = start + timedelta(days=6)
+    return start.isoformat(), end.isoformat()
+
+
+def normalize_focus(label: str | None) -> tuple[str | None, str | None]:
+    if not label:
+        return None, None
+
+    clean = label.strip().lower()
+    focus = FOCUS_MAP.get(clean)
+
+    if focus:
+        return focus, label.strip()
+
+    return clean.replace(" ", "_"), label.strip()
+
+
+def format_number(value) -> str:
+    if value is None:
+        return ""
+    try:
+        value = float(value)
+        if value.is_integer():
+            return str(int(value))
+        return str(value)
+    except Exception:
+        return str(value)
+
+
+def short_weekday_from_date(date_str: str | None) -> str | None:
+    d = parse_iso_date(date_str)
+    if not d:
+        return None
+    return WEEKDAY_NUM_TO_RU[d.weekday()]

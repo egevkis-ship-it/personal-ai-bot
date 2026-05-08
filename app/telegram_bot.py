@@ -15,6 +15,7 @@ from app.config import settings
 from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
+from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement
 
 
 def is_allowed(update: Update) -> bool:
@@ -64,6 +65,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Твой Telegram user_id: {user_id}\n\n"
         "Команды:\n"
         "/status — статус системы\n"
+        "/today_workout — тренировка на сегодня\n"
+        "/next_workout — следующая тренировка\n"
+        "/week_plan — план недели\n"
+        "/last_workout — последняя тренировка\n"
+        "/last_measurement — последние замеры\n"
         "/start — показать это сообщение"
     )
 
@@ -73,6 +79,41 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await update.message.reply_text(await build_status_text())
+
+
+async def today_workout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_today_workout(user_id))
+
+
+async def next_workout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_next_workout(user_id))
+
+
+async def week_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_week_plan(user_id))
+
+
+async def last_workout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_last_workout(user_id))
+
+
+async def last_measurement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_last_measurement(user_id))
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -174,6 +215,11 @@ def build_application() -> Application:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("today_workout", today_workout))
+    app.add_handler(CommandHandler("next_workout", next_workout))
+    app.add_handler(CommandHandler("week_plan", week_plan))
+    app.add_handler(CommandHandler("last_workout", last_workout))
+    app.add_handler(CommandHandler("last_measurement", last_measurement))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 

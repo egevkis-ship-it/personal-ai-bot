@@ -29,8 +29,7 @@ def parse_message(text: str) -> dict:
 Твоя задача — определить intent сообщения и вернуть строго JSON.
 
 Поддерживаемые intent:
-- fitness_workout
-- body_measurement
+- fitness
 - nutrition
 - translation
 - task
@@ -56,6 +55,7 @@ def parse_message(text: str) -> dict:
 Правила:
 - Ответ только JSON, без markdown.
 - Если дата не указана, используй сегодняшнюю.
+- Если сообщение связано с тренировками, фитнес-планом, выполненной тренировкой, весом, замерами тела, пропуском тренировки или запросом тренировки — intent="fitness".
 - Если это расход, задача, ops-действие или изменение данных — requires_confirmation=true.
 - Если это фитнес, замеры или питание — можно requires_confirmation=false.
 - Не выдумывай точные калории, если пользователь явно не просит посчитать.
