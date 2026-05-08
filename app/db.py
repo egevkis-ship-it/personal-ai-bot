@@ -1176,3 +1176,122 @@ async def get_fitness_debug_week(telegram_user_id: str | None, start_date: str, 
             },
         )
         return [dict(row) for row in result.mappings().all()]
+
+
+async def create_fitness_pending_decision(
+    telegram_user_id: str | None,
+    decision_type: str,
+    context: dict,
+    source_text: str,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        # Close previous pending decision of same type for this user
+        await session.execute(
+            text("""
+            UPDATE fitness_pending_decisions
+            SET status = 'cancelled',
+                resolved_at = now()
+            WHERE telegram_user_id = :telegram_user_id
+              AND decision_type = :decision_type
+              AND status = 'pending'
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "decision_type": decision_type,
+            },
+        )
+
+        result = await session.execute(
+            text("""
+            INSERT INTO fitness_pending_decisions
+            (telegram_user_id, decision_type, status, context_json, source_text)
+            VALUES
+            (:telegram_user_id, :decision_type, 'pending', CAST(:context_json AS JSONB), :source_text)
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "decision_type": decision_type,
+                "context_json": json.dumps(context, ensure_ascii=False),
+                "source_text": source_text,
+            },
+        )
+        decision_id = result.scalar_one()
+        await session.commit()
+        return decision_id
+
+
+async def get_latest_fitness_pending_decision(
+    telegram_user_id: str | None,
+) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, decision_type, context_json, source_text, created_at
+            FROM fitness_pending_decisions
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'pending'
+            ORDER BY id DESC
+            LIMIT 1
+            """),
+            {"telegram_user_id": telegram_user_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
+async def resolve_fitness_pending_decision(
+    decision_id: int,
+    status: str = "resolved",
+) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""
+            UPDATE fitness_pending_decisions
+            SET status = :status,
+                resolved_at = now()
+            WHERE id = :decision_id
+            """),
+            {
+                "decision_id": decision_id,
+                "status": status,
+            },
+        )
+        await session.commit()
+
+
+async def find_nearest_free_training_date(
+    telegram_user_id: str | None,
+    start_date: str,
+    max_days: int = 14,
+) -> str | None:
+    """
+    Finds the nearest date after start_date with no planned active workouts.
+    """
+    from datetime import timedelta
+
+    base = to_date(start_date)
+    if base is None:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        for offset in range(1, max_days + 1):
+            candidate = base + timedelta(days=offset)
+            result = await session.execute(
+                text("""
+                SELECT COUNT(*) AS cnt
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date = :candidate
+                  AND status = 'planned'
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "candidate": candidate,
+                },
+            )
+            count = result.scalar_one()
+            if count == 0:
+                return candidate.isoformat()
+
+    return None

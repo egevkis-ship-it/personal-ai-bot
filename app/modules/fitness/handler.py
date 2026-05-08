@@ -18,9 +18,14 @@ from app.db import (
     get_latest_planned_workout_template_by_focus,
     get_planned_workouts_on_date,
     get_fitness_debug_week,
+    create_fitness_pending_decision,
+    get_latest_fitness_pending_decision,
+    resolve_fitness_pending_decision,
+    find_nearest_free_training_date,
 )
 from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
+from app.modules.fitness.pending_parser import parse_pending_decision_response
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_week_plan,
@@ -34,6 +39,10 @@ from app.modules.fitness.utils import week_bounds
 
 
 async def handle_fitness_text(telegram_user_id: str | None, text: str) -> str:
+    pending_reply = await maybe_handle_pending_decision(telegram_user_id, text)
+    if pending_reply is not None:
+        return pending_reply
+
     parsed = parse_fitness_action(text)
     action = parsed.get("action")
 
@@ -335,6 +344,112 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
     return "Я понял, что ты хочешь изменить план, но пока не смог уверенно разобрать действие."
 
 
+
+async def maybe_handle_pending_decision(telegram_user_id: str | None, text: str) -> str | None:
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    if not pending:
+        return None
+
+    decision_type = pending.get("decision_type")
+    context = pending.get("context_json") or {}
+
+    if decision_type != "same_day_conflict":
+        return None
+
+    parsed = parse_pending_decision_response(text, context)
+
+    if not parsed.get("relates_to_pending"):
+        return None
+
+    action = parsed.get("action")
+
+    if action == "keep_both":
+        await resolve_fitness_pending_decision(pending["id"], status="resolved")
+        return "Оставил обе тренировки в этот день. Конфликт закрыл."
+
+    if action == "cancel_pending":
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return "Окей, ничего дополнительно не меняю. Конфликт закрыл."
+
+    if action == "show_week_plan":
+        return await command_week_plan(telegram_user_id)
+
+    if action in ("move_workout", "move_to_nearest_free_day"):
+        target = parsed.get("target") or {}
+        target_id = target.get("planned_workout_id")
+
+        target_workout = _find_workout_in_pending_context(context, target)
+
+        if target_workout:
+            target_id = target_workout.get("planned_workout_id")
+
+        if not target_id:
+            return (
+                "Я понял, что нужно перенести тренировку, но не понял какую именно. "
+                "Напиши, например: “перенеси грудь на воскресенье”."
+            )
+
+        if action == "move_to_nearest_free_day":
+            new_date = await find_nearest_free_training_date(
+                telegram_user_id=telegram_user_id,
+                start_date=context.get("planned_date"),
+            )
+            if not new_date:
+                return "Не нашёл свободный день в ближайшие 14 дней."
+        else:
+            new_date = parsed.get("new_date")
+
+        if not new_date:
+            return "Я понял перенос, но не понял новую дату."
+
+        workout_before = await get_planned_workout_by_id(int(target_id))
+        await move_planned_workout(
+            planned_workout_id=int(target_id),
+            new_date=new_date,
+            new_weekday=parsed.get("new_weekday"),
+            source_text=text,
+        )
+
+        await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+        workout_after = await get_planned_workout_by_id(int(target_id))
+        title = None
+        if workout_before:
+            title = workout_before["workout"].get("title") or workout_before["workout"].get("focus_label")
+        title = title or "тренировка"
+
+        return (
+            f"Готово. Перенёс {title} на {format_human_date(new_date)}.\\n\\n"
+            + format_planned_workout(workout_after)
+        )
+
+    return (
+        "Я понял, что это ответ на конфликт, но не смог уверенно разобрать действие. "
+        "Напиши, например: “оставь обе” или “перенеси грудь на воскресенье”."
+    )
+
+
+def _find_workout_in_pending_context(context: dict, target: dict) -> dict | None:
+    workouts = context.get("workouts") or []
+
+    target_id = target.get("planned_workout_id")
+    if target_id:
+        for w in workouts:
+            if str(w.get("planned_workout_id")) == str(target_id):
+                return w
+
+    focus = target.get("focus")
+    focus_label = (target.get("focus_label") or "").lower()
+
+    for w in workouts:
+        if focus and w.get("focus") == focus:
+            return w
+        if focus_label and (w.get("focus_label") or "").lower() == focus_label:
+            return w
+
+    return None
+
+
 async def _enrich_replacement_from_template(
     telegram_user_id: str | None,
     target_workout_id: int,
@@ -383,21 +498,55 @@ async def _build_same_day_warning(telegram_user_id: str | None, planned_date) ->
     if not planned_date:
         return ""
 
-    items = await get_planned_workouts_on_date(telegram_user_id, str(planned_date))
+    planned_date_str = str(planned_date)
+    items = await get_planned_workouts_on_date(telegram_user_id, planned_date_str)
     if len(items) <= 1:
         return ""
 
+    context_items = []
     lines = [
         "",
         "",
-        f"Внимание: на {format_human_date(str(planned_date))} теперь несколько тренировок:"
+        f"Внимание: на {format_human_date(planned_date_str)} теперь несколько тренировок:"
     ]
 
     for item in items:
         w = item["workout"]
-        lines.append(f"- {w.get('title') or w.get('focus_label') or 'тренировка'}")
+        title = w.get("title") or w.get("focus_label") or "тренировка"
+        lines.append(f"- {title}")
+        context_items.append({
+            "planned_workout_id": w.get("id"),
+            "title": title,
+            "focus": w.get("focus"),
+            "focus_label": w.get("focus_label"),
+            "planned_date": str(w.get("planned_date")) if w.get("planned_date") else None,
+        })
 
-    lines.append("Оставить так или разнести по дням?")
+    context = {
+        "decision_type": "same_day_conflict",
+        "planned_date": planned_date_str,
+        "workouts": context_items,
+    }
+
+    await create_fitness_pending_decision(
+        telegram_user_id=telegram_user_id,
+        decision_type="same_day_conflict",
+        context=context,
+        source_text="auto_detected_same_day_conflict",
+    )
+
+    lines.extend([
+        "",
+        "Я пока ничего дополнительно не менял.",
+        "",
+        "Можешь написать обычным текстом, например:",
+        "- оставь обе в этот день",
+        "- перенеси грудь на воскресенье",
+        "- перенеси плечи на понедельник",
+        "- перенеси грудь на ближайший свободный день",
+        "- покажи план недели",
+    ])
+
     return "\n".join(lines)
 
 
