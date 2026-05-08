@@ -1,4 +1,5 @@
 import json
+from datetime import date, datetime
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import text
 
@@ -7,6 +8,15 @@ from app.config import settings
 
 engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def to_date(value):
+    if value is None or isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    return value
+
 
 
 async def init_db() -> None:
@@ -307,8 +317,8 @@ async def save_training_plan(
                 "telegram_user_id": telegram_user_id,
                 "plan_name": plan_name,
                 "period_type": period_type,
-                "start_date": start_date,
-                "end_date": end_date,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
                 "source_text": source_text,
                 "notes": notes,
             },
@@ -329,7 +339,7 @@ async def save_training_plan(
                 {
                     "plan_id": plan_id,
                     "telegram_user_id": telegram_user_id,
-                    "planned_date": workout.get("planned_date"),
+                    "planned_date": to_date(workout.get("planned_date")),
                     "weekday": workout.get("weekday"),
                     "sequence_number": workout.get("sequence_number"),
                     "is_floating": workout.get("is_floating", False),
@@ -397,7 +407,7 @@ async def get_today_planned_workout(telegram_user_id: str | None, today: str) ->
             ORDER BY sequence_number NULLS LAST, id
             LIMIT 1
             """),
-            {"telegram_user_id": telegram_user_id, "today": today},
+            {"telegram_user_id": telegram_user_id, "today": to_date(today)},
         )
         workout = result.mappings().first()
         if not workout:
@@ -450,8 +460,8 @@ async def get_week_plan(telegram_user_id: str | None, start_date: str, end_date:
             """),
             {
                 "telegram_user_id": telegram_user_id,
-                "start_date": start_date,
-                "end_date": end_date,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
             },
         )
 
@@ -502,7 +512,7 @@ async def save_fitness_workout(
             {
                 "telegram_user_id": telegram_user_id,
                 "planned_workout_id": planned_workout_id,
-                "workout_date": workout_date,
+                "workout_date": to_date(workout_date),
                 "workout_type": workout_type,
                 "focus": focus,
                 "focus_label": focus_label,
@@ -586,7 +596,7 @@ async def save_body_measurement(
             """),
             {
                 "telegram_user_id": telegram_user_id,
-                "measurement_date": measurement_date,
+                "measurement_date": to_date(measurement_date),
                 "weight_kg": data.get("weight_kg"),
                 "waist_cm": data.get("waist_cm"),
                 "chest_cm": data.get("chest_cm"),
