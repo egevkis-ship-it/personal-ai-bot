@@ -15,6 +15,9 @@ from app.db import (
     move_planned_workout,
     swap_planned_workouts,
     replace_planned_workout,
+    get_latest_planned_workout_template_by_focus,
+    get_planned_workouts_on_date,
+    get_fitness_debug_week,
 )
 from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
@@ -250,10 +253,12 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
 
         updated = await get_planned_workout_by_id(workout["id"])
         title = workout.get("title") or workout.get("focus_label") or "тренировка"
+        conflicts = await _build_same_day_warning(telegram_user_id, new_date)
 
         return (
             f"Перенёс тренировку: {title} → {format_human_date(new_date)}.\n\n"
             + format_planned_workout(updated)
+            + conflicts
         )
 
     if change_type == "swap":
@@ -273,12 +278,22 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
         first_updated = await get_planned_workout_by_id(first["workout"]["id"])
         second_updated = await get_planned_workout_by_id(second["workout"]["id"])
 
+        first_date = first_updated["workout"].get("planned_date") if first_updated else None
+        second_date = second_updated["workout"].get("planned_date") if second_updated else None
+
+        warnings = ""
+        if first_date:
+            warnings += await _build_same_day_warning(telegram_user_id, first_date)
+        if second_date and second_date != first_date:
+            warnings += await _build_same_day_warning(telegram_user_id, second_date)
+
         return (
             "Поменял тренировки местами.\n\n"
             "Теперь:\n\n"
             + format_planned_workout(first_updated)
             + "\n\n"
             + format_planned_workout(second_updated)
+            + warnings
         )
 
     if change_type == "replace":
@@ -290,6 +305,12 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
         if not replacement.get("focus") and not replacement.get("focus_label") and not replacement.get("title"):
             return "Понял замену, но не понял, на какую тренировку заменить."
 
+        replacement = await _enrich_replacement_from_template(
+            telegram_user_id=telegram_user_id,
+            target_workout_id=data["workout"]["id"],
+            replacement=replacement,
+        )
+
         replacement_id = await replace_planned_workout(
             target_workout_id=data["workout"]["id"],
             replacement=replacement,
@@ -297,15 +318,102 @@ async def handle_plan_change(telegram_user_id: str | None, text: str) -> str:
         )
 
         updated_replacement = await get_planned_workout_by_id(replacement_id)
+        replacement_date = updated_replacement["workout"].get("planned_date") if updated_replacement else None
+        conflicts = await _build_same_day_warning(telegram_user_id, replacement_date)
 
         return (
             "Заменил тренировку.\n\n"
             f"Было: {data['workout'].get('title') or data['workout'].get('focus_label')}\n\n"
             "Стало:\n"
             + format_planned_workout(updated_replacement)
+            + conflicts
         )
 
     if change_type == "custom_today":
         return "Понял кастомную тренировку на сегодня. В следующем пакете добавлю создание кастомной плановой тренировки."
 
     return "Я понял, что ты хочешь изменить план, но пока не смог уверенно разобрать действие."
+
+
+async def _enrich_replacement_from_template(
+    telegram_user_id: str | None,
+    target_workout_id: int,
+    replacement: dict,
+) -> dict:
+    exercises = replacement.get("exercises") or []
+    real_exercises = [e for e in exercises if e.get("exercise_name")]
+
+    if real_exercises:
+        replacement["exercises"] = real_exercises
+        return replacement
+
+    template = await get_latest_planned_workout_template_by_focus(
+        telegram_user_id=telegram_user_id,
+        focus=replacement.get("focus"),
+        exclude_workout_id=target_workout_id,
+    )
+
+    if not template:
+        replacement["exercises"] = []
+        replacement["notes"] = (replacement.get("notes") or "") + "\nУпражнения не найдены: нужен ручной ввод."
+        return replacement
+
+    copied = []
+    for i, ex in enumerate(template.get("exercises") or [], start=1):
+        copied.append({
+            "exercise_order": i,
+            "exercise_name": ex.get("exercise_name"),
+            "target_sets": ex.get("target_sets"),
+            "target_reps_min": ex.get("target_reps_min"),
+            "target_reps_max": ex.get("target_reps_max"),
+            "target_reps_text": ex.get("target_reps_text"),
+            "target_weight_kg": ex.get("target_weight_kg"),
+            "notes": ex.get("notes"),
+        })
+
+    replacement["exercises"] = copied
+    if not replacement.get("title"):
+        replacement["title"] = replacement.get("focus_label") or template["workout"].get("title")
+    replacement["notes"] = (replacement.get("notes") or "") + f"\nУпражнения скопированы из: {template['workout'].get('title') or template['workout'].get('focus_label')}."
+
+    return replacement
+
+
+async def _build_same_day_warning(telegram_user_id: str | None, planned_date) -> str:
+    if not planned_date:
+        return ""
+
+    items = await get_planned_workouts_on_date(telegram_user_id, str(planned_date))
+    if len(items) <= 1:
+        return ""
+
+    lines = [
+        "",
+        "",
+        f"Внимание: на {format_human_date(str(planned_date))} теперь несколько тренировок:"
+    ]
+
+    for item in items:
+        w = item["workout"]
+        lines.append(f"- {w.get('title') or w.get('focus_label') or 'тренировка'}")
+
+    lines.append("Оставить так или разнести по дням?")
+    return "\n".join(lines)
+
+
+async def command_fitness_debug_week(telegram_user_id: str | None) -> str:
+    start, end = week_bounds()
+    rows = await get_fitness_debug_week(telegram_user_id, start, end)
+
+    if not rows:
+        return "Debug: на эту неделю записей нет."
+
+    lines = ["Fitness debug week:"]
+    for r in rows:
+        lines.append(
+            f"ID {r.get('id')} | plan {r.get('plan_id')} | {r.get('planned_date')} | "
+            f"seq {r.get('sequence_number')} | {r.get('focus_label')} | "
+            f"{r.get('status')} | replaced_by={r.get('replaced_by_id')}"
+        )
+
+    return "\n".join(lines)

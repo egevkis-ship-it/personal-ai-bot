@@ -1001,6 +1001,10 @@ async def replace_planned_workout(
         )
 
         for exercise in replacement.get("exercises", []):
+            exercise_name = exercise.get("exercise_name")
+            if not exercise_name:
+                continue
+
             await session.execute(
                 text("""
                 INSERT INTO planned_exercises
@@ -1013,7 +1017,7 @@ async def replace_planned_workout(
                 {
                     "planned_workout_id": replacement_id,
                     "exercise_order": exercise.get("exercise_order"),
-                    "exercise_name": exercise.get("exercise_name"),
+                    "exercise_name": exercise_name,
                     "target_sets": exercise.get("target_sets"),
                     "target_reps_min": exercise.get("target_reps_min"),
                     "target_reps_max": exercise.get("target_reps_max"),
@@ -1040,3 +1044,135 @@ async def replace_planned_workout(
 
         await session.commit()
         return replacement_id
+
+
+async def get_latest_planned_workout_template_by_focus(
+    telegram_user_id: str | None,
+    focus: str | None,
+    exclude_workout_id: int | None = None,
+) -> dict | None:
+    if not focus:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        if exclude_workout_id is not None:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND focus = :focus
+                  AND id != :exclude_workout_id
+                ORDER BY
+                  CASE
+                    WHEN status = 'planned' THEN 0
+                    WHEN status = 'skipped' THEN 1
+                    WHEN status = 'completed' THEN 2
+                    WHEN status = 'completed_modified' THEN 3
+                    ELSE 4
+                  END,
+                  planned_date DESC NULLS LAST,
+                  id DESC
+                LIMIT 1
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "focus": focus,
+                    "exclude_workout_id": exclude_workout_id,
+                },
+            )
+        else:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND focus = :focus
+                ORDER BY
+                  CASE
+                    WHEN status = 'planned' THEN 0
+                    WHEN status = 'skipped' THEN 1
+                    WHEN status = 'completed' THEN 2
+                    WHEN status = 'completed_modified' THEN 3
+                    ELSE 4
+                  END,
+                  planned_date DESC NULLS LAST,
+                  id DESC
+                LIMIT 1
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "focus": focus,
+                },
+            )
+
+        workout = result.mappings().first()
+        if not workout:
+            return None
+
+        exercises = await _get_planned_exercises(session, workout["id"])
+        return {"workout": dict(workout), "exercises": exercises}
+
+
+async def get_planned_workouts_on_date(
+    telegram_user_id: str | None,
+    planned_date: str | None,
+) -> list[dict]:
+    if not planned_date:
+        return []
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date = :planned_date
+              AND status = 'planned'
+            ORDER BY sequence_number NULLS LAST, id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "planned_date": to_date(planned_date),
+            },
+        )
+
+        rows = []
+        for workout in result.mappings().all():
+            exercises = await _get_planned_exercises(session, workout["id"])
+            rows.append({"workout": dict(workout), "exercises": exercises})
+        return rows
+
+
+async def get_fitness_debug_week(telegram_user_id: str | None, start_date: str, end_date: str) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT
+                id,
+                plan_id,
+                planned_date,
+                weekday,
+                sequence_number,
+                is_floating,
+                title,
+                focus,
+                focus_label,
+                workout_type,
+                status,
+                replaced_by_id
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND (
+                planned_date BETWEEN :start_date AND :end_date
+                OR planned_date IS NULL
+              )
+            ORDER BY planned_date ASC NULLS LAST, sequence_number ASC NULLS LAST, id ASC
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+        return [dict(row) for row in result.mappings().all()]
