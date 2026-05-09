@@ -593,6 +593,40 @@ def _extract_set_number(text: str):
     return None
 
 
+
+
+def _is_explicit_workout_recording_command(text: str) -> bool:
+    """
+    Long explicit workout-recording commands must go to the full AI parser,
+    not to the short active-session regex parser.
+
+    Example:
+    “Записываем сегодняшнюю тренировку. Жим гантелей сидя.
+     Первый подход 17.5 на 20, второй 20 на 12.”
+    """
+    t = (text or "").strip().lower().replace("ё", "е")
+
+    explicit_start = any(x in t for x in [
+        "записываем",
+        "записываю",
+        "записать тренировку",
+        "запиши тренировку",
+        "сегодняшнюю тренировку",
+        "сегодняшняя тренировка",
+        "начинаем тренировку",
+        "начал тренировку",
+    ])
+
+    has_multiple_sets = (
+        ("перв" in t and "втор" in t)
+        or t.count(" на ") >= 2
+        or t.count("×") >= 2
+        or t.count(" x ") >= 2
+        or t.count(" х ") >= 2
+    )
+
+    return explicit_start or (has_multiple_sets and len(t) > 45)
+
 def _parse_set_from_short_text(text: str, active_session: dict | None) -> dict | None:
     if not active_session or not active_session.get("current_exercise"):
         return None
@@ -626,6 +660,48 @@ def _parse_set_from_short_text(text: str, active_session: dict | None) -> dict |
 def _fast_finish_response(text: str) -> str | None:
     t = (text or "").strip().lower().replace("ё", "е")
 
+    danger_terms = [
+        "удали",
+        "сотри",
+        "не сохраняй",
+        "отмени тренировку",
+        "удали тренировку",
+        "очисти",
+    ]
+
+    continue_exact = {
+        "нет",
+        "не закончил",
+        "не закончена",
+        "продолжаю",
+        "еще",
+        "ещё",
+        "еще делаю",
+        "ещё делаю",
+        "еще тренируюсь",
+        "ещё тренируюсь",
+        "продолжим",
+        "пока нет",
+        "не закрывай",
+        "оставь открытой",
+        "сейчас продолжу",
+        "дай еще время",
+        "дай ещё время",
+    }
+
+    continue_contains = [
+        "не закончил",
+        "не закрывай",
+        "еще делаю",
+        "ещё делаю",
+        "еще тренируюсь",
+        "ещё тренируюсь",
+        "сейчас продолжу",
+        "продолжаю",
+        "дай еще",
+        "дай ещё",
+    ]
+
     finish_exact = {
         "да",
         "да закончил",
@@ -646,42 +722,26 @@ def _fast_finish_response(text: str) -> str | None:
         "хватит",
     }
 
-    continue_exact = {
-        "нет",
-        "не закончил",
-        "продолжаю",
-        "еще",
-        "ещё",
-        "еще делаю",
-        "ещё делаю",
-        "еще тренируюсь",
-        "ещё тренируюсь",
-        "продолжим",
-        "пока нет",
-        "не закрывай",
-        "оставь открытой",
-        "сейчас продолжу",
-        "дай еще время",
-        "дай ещё время",
-    }
-
-    danger_terms = [
-        "удали",
-        "сотри",
-        "не сохраняй",
-        "отмени тренировку",
-        "удали тренировку",
-        "очисти",
+    finish_contains = [
+        "закончил тренировку",
+        "тренировку закончил",
+        "тренировка закончена",
+        "закрывай тренировку",
+        "закрой тренировку",
+        "сохрани тренировку",
+        "на сегодня все",
+        "на сегодня всё",
+        "на сегодня хватит",
     ]
-
-    if t in finish_exact:
-        return "finish"
-
-    if t in continue_exact:
-        return "continue"
 
     if any(x in t for x in danger_terms):
         return "danger"
+
+    if t in continue_exact or any(x in t for x in continue_contains):
+        return "continue"
+
+    if t in finish_exact or any(x in t for x in finish_contains):
+        return "finish"
 
     return None
 
@@ -745,9 +805,15 @@ async def _continue_active_workout_session(telegram_user_id: str | None, active_
 async def try_handle_active_workout_message(telegram_user_id: str | None, text: str) -> str | None:
     """
     Called before generic router.
-    Handles short context-only messages during an active workout:
+
+    Handles context-only active workout messages:
     - “Третий 20 на 10”
+    - “закончил тренировку”
     - replies to “Ты закончил тренировку?”
+
+    But it must NOT swallow explicit new commands like:
+    - “Записываем сегодняшнюю тренировку. Первый подход..., второй...”
+    - “Запиши план на следующую неделю...”
     """
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
@@ -757,11 +823,32 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
     active_session = pending.get("context_json") or {}
     status = _session_status(active_session)
 
-    normalized = (text or "").strip().lower()
+    normalized = (text or "").strip().lower().replace("ё", "е")
 
     # Do not swallow explicit new planning commands.
     if "план" in normalized and any(w in normalized for w in ["запиши", "создай", "поставь", "составь"]):
         return None
+
+    # Do not swallow full workout-recording commands.
+    # They must go through the full Fitness Core v2 parser so multiple sets are preserved.
+    if _is_explicit_workout_recording_command(text):
+        return None
+
+    # Finish/continue/danger commands should work even when session is just active,
+    # not only when status == awaiting_finish_confirmation.
+    fast = _fast_finish_response(text)
+
+    if fast == "finish":
+        return await _close_active_workout_session(telegram_user_id, active_session)
+
+    if fast == "continue":
+        return await _continue_active_workout_session(telegram_user_id, active_session)
+
+    if fast == "danger":
+        return (
+            "Это опасное действие. Я не удаляю тренировку автоматически.\n"
+            "Напиши явно: “да, удали текущую тренировку” или “нет, оставь”."
+        )
 
     # If user sends a short set message, continue workout regardless of status.
     if _looks_like_set_message(text):
@@ -773,22 +860,8 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
                 await update_fitness_pending_decision_context(pending["id"], active_session)
             return await _continue_current_exercise(telegram_user_id, text, parsed, active_session)
 
-    # If bot is waiting for finish confirmation.
+    # If bot is waiting for finish confirmation, use AI parser as fallback.
     if status == "awaiting_finish_confirmation":
-        fast = _fast_finish_response(text)
-
-        if fast == "finish":
-            return await _close_active_workout_session(telegram_user_id, active_session)
-
-        if fast == "continue":
-            return await _continue_active_workout_session(telegram_user_id, active_session)
-
-        if fast == "danger":
-            return (
-                "Это опасное действие. Я не удаляю тренировку автоматически.\n"
-                "Напиши явно: “да, удали текущую тренировку” или “нет, оставь”."
-            )
-
         parsed = _parse_finish_confirmation_with_ai(text, active_session)
         action = parsed.get("action")
         confidence = float(parsed.get("confidence") or 0)
