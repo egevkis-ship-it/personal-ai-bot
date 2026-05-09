@@ -18,6 +18,7 @@ python3 -m py_compile \
   app/modules/fitness/change_parser.py \
   app/modules/fitness/pending_parser.py \
   app/modules/fitness/pending_plan_parser.py \
+  app/modules/fitness/action_v2.py \
   app/modules/fitness/formatter.py \
   app/modules/fitness/utils.py \
   app/modules/ops/status.py
@@ -82,6 +83,8 @@ from app.modules.fitness.utils import is_likely_fitness_text
 cases = [
     ("Перенеси спину на субботу", True),
     ("Дай тренировку на грудь", True),
+    ("Какая тренировка сегодня?", True),
+    ("Покажи следующую неделю тренировок", True),
     ("Плечи замени на грудь", True),
     ("Убери присед из сегодняшней тренировки", True),
     ("Перенеси встречу на субботу", False),

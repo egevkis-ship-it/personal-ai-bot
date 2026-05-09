@@ -1555,3 +1555,195 @@ async def get_planned_workouts_in_period(
             exercises = await _get_planned_exercises(session, workout["id"])
             rows.append({"workout": dict(workout), "exercises": exercises})
         return rows
+
+
+async def save_fitness_workout_session_v2(
+    telegram_user_id: str | None,
+    workout_date: str,
+    workout_type: str | None,
+    focus: str | None,
+    focus_label: str | None,
+    source_text: str,
+    notes: str | None,
+    exercises: list[dict],
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO fitness_workouts
+            (telegram_user_id, workout_date, workout_type, focus, focus_label, completion_type, source_text, notes)
+            VALUES
+            (:telegram_user_id, :workout_date, :workout_type, :focus, :focus_label, 'custom', :source_text, :notes)
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "workout_date": to_date(workout_date),
+                "workout_type": workout_type,
+                "focus": focus,
+                "focus_label": focus_label,
+                "source_text": source_text,
+                "notes": notes,
+            },
+        )
+        workout_id = result.scalar_one()
+
+        for exercise in exercises:
+            exercise_name = exercise.get("exercise_name")
+            if not exercise_name:
+                continue
+            for i, item in enumerate(exercise.get("sets") or [], start=1):
+                await session.execute(
+                    text("""
+                    INSERT INTO fitness_exercise_sets
+                    (workout_id, exercise_name, set_number, weight_kg, reps, rpe, notes)
+                    VALUES
+                    (:workout_id, :exercise_name, :set_number, :weight_kg, :reps, :rpe, :notes)
+                    """),
+                    {
+                        "workout_id": workout_id,
+                        "exercise_name": exercise_name,
+                        "set_number": item.get("set_number") or i,
+                        "weight_kg": item.get("weight_kg"),
+                        "reps": item.get("reps"),
+                        "rpe": item.get("rpe"),
+                        "notes": item.get("notes"),
+                    },
+                )
+
+        await session.commit()
+        return workout_id
+
+
+async def append_fitness_workout_sets_v2(
+    workout_id: int,
+    exercise_name: str,
+    sets: list[dict],
+    source_text: str,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        max_result = await session.execute(
+            text("""
+            SELECT COALESCE(MAX(set_number), 0)
+            FROM fitness_exercise_sets
+            WHERE workout_id = :workout_id
+              AND exercise_name = :exercise_name
+            """),
+            {"workout_id": workout_id, "exercise_name": exercise_name},
+        )
+        current_max = max_result.scalar_one() or 0
+
+        inserted = 0
+        for i, item in enumerate(sets or [], start=1):
+            if item.get("weight_kg") is None and item.get("reps") is None:
+                continue
+
+            await session.execute(
+                text("""
+                INSERT INTO fitness_exercise_sets
+                (workout_id, exercise_name, set_number, weight_kg, reps, rpe, notes)
+                VALUES
+                (:workout_id, :exercise_name, :set_number, :weight_kg, :reps, :rpe, :notes)
+                """),
+                {
+                    "workout_id": workout_id,
+                    "exercise_name": exercise_name,
+                    "set_number": item.get("set_number") or (current_max + i),
+                    "weight_kg": item.get("weight_kg"),
+                    "reps": item.get("reps"),
+                    "rpe": item.get("rpe"),
+                    "notes": item.get("notes") or source_text,
+                },
+            )
+            inserted += 1
+
+        await session.commit()
+        return inserted
+
+
+async def update_fitness_pending_decision_context(decision_id: int, context: dict) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""
+            UPDATE fitness_pending_decisions
+            SET context_json = CAST(:context_json AS JSONB)
+            WHERE id = :decision_id
+            """),
+            {
+                "decision_id": decision_id,
+                "context_json": json.dumps(context, ensure_ascii=False),
+            },
+        )
+        await session.commit()
+
+
+async def delete_last_fitness_set_v2(workout_id: int) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, exercise_name, weight_kg, reps
+            FROM fitness_exercise_sets
+            WHERE workout_id = :workout_id
+            ORDER BY id DESC
+            LIMIT 1
+            """),
+            {"workout_id": workout_id},
+        )
+        row = result.mappings().first()
+        if not row:
+            return None
+
+        await session.execute(
+            text("DELETE FROM fitness_exercise_sets WHERE id = :id"),
+            {"id": row["id"]},
+        )
+        await session.commit()
+        return dict(row)
+
+
+async def update_last_fitness_set_v2(
+    workout_id: int,
+    field: str,
+    new_value,
+) -> dict | None:
+    if field not in ("weight_kg", "reps"):
+        return None
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id
+            FROM fitness_exercise_sets
+            WHERE workout_id = :workout_id
+            ORDER BY id DESC
+            LIMIT 1
+            """),
+            {"workout_id": workout_id},
+        )
+        row = result.mappings().first()
+        if not row:
+            return None
+
+        if field == "weight_kg":
+            await session.execute(
+                text("UPDATE fitness_exercise_sets SET weight_kg = :new_value WHERE id = :id"),
+                {"new_value": new_value, "id": row["id"]},
+            )
+        else:
+            await session.execute(
+                text("UPDATE fitness_exercise_sets SET reps = :new_value WHERE id = :id"),
+                {"new_value": new_value, "id": row["id"]},
+            )
+
+        updated_result = await session.execute(
+            text("""
+            SELECT exercise_name, weight_kg, reps
+            FROM fitness_exercise_sets
+            WHERE id = :id
+            """),
+            {"id": row["id"]},
+        )
+
+        await session.commit()
+        updated = updated_result.mappings().first()
+        return dict(updated) if updated else None

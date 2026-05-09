@@ -31,6 +31,7 @@ from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
 from app.modules.fitness.pending_parser import parse_pending_decision_response
 from app.modules.fitness.pending_plan_parser import parse_create_plan_conflict_response
+from app.modules.fitness.action_v2 import handle_fitness_action_v2
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_week_plan,
@@ -48,6 +49,10 @@ async def handle_fitness_text(telegram_user_id: str | None, text: str) -> str:
     pending_reply = await maybe_handle_pending_decision(telegram_user_id, text)
     if pending_reply is not None:
         return pending_reply
+
+    v2_reply = await handle_fitness_action_v2(telegram_user_id, text)
+    if v2_reply is not None:
+        return v2_reply
 
     parsed = parse_fitness_action(text)
     action = parsed.get("action")
