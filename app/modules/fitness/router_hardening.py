@@ -312,6 +312,7 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
         "да очисти",
         "да, очисти",
         "подтверждаю",
+        "подтверджаю",
         "подтверждаю отмену",
         "подтверждаю удаление",
         "отменяй",
@@ -420,6 +421,16 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
 
+    # Dangerous/safety pending confirmations must have priority over parser.
+    reply = await _handle_cancel_planned_confirmation(telegram_user_id, text, pending)
+    if reply is not None:
+        return reply
+
+    # Exercise disambiguation pending also has priority.
+    reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
+    if reply is not None:
+        return reply
+
     # Parser-first layer for planned workout operations.
     # Hard commands are only shortcuts; free speech goes through parser -> structured action -> executor.
     planned_action = await parse_planned_workout_action(
@@ -439,16 +450,6 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
 
     # 0. Pending details for custom workout creation.
     reply = await _handle_custom_workout_details(telegram_user_id, text, pending)
-    if reply is not None:
-        return reply
-
-    # 1. Pending уточнение упражнения должно иметь приоритет.
-    reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
-    if reply is not None:
-        return reply
-
-    # 2. Pending отмена планового периода.
-    reply = await _handle_cancel_planned_confirmation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
 

@@ -29,11 +29,16 @@ def _is_non_empty_workout(item: dict) -> bool:
 
 
 def _format_workouts_on_date(items: list[dict], target_date: str, include_weights: bool = False) -> str:
-    if not items:
+    active_items = [
+        item for item in (items or [])
+        if (item.get("workout") or {}).get("status") == "planned"
+    ]
+
+    if not active_items:
         return f"На {target_date} активных плановых тренировок не найдено."
 
-    non_empty = [item for item in items if _is_non_empty_workout(item)]
-    empty = [item for item in items if not _is_non_empty_workout(item)]
+    non_empty = [item for item in active_items if _is_non_empty_workout(item)]
+    empty = [item for item in active_items if not _is_non_empty_workout(item)]
 
     ordered = non_empty + empty
 
@@ -229,9 +234,16 @@ async def _preview_cancel_planned(
         source_text=source_text,
     )
 
+    if action.get("scope") == "all":
+        preview_title = "Будут отменены все активные плановые тренировки"
+    elif action.get("scope") == "future":
+        preview_title = f"Будут отменены плановые тренировки от {start_date} и дальше"
+    else:
+        preview_title = f"Будут отменены плановые тренировки {start_date} — {end_date}"
+
     preview = format_period_plan(
         active_items,
-        title=f"Будут отменены плановые тренировки {start_date} — {end_date}",
+        title=preview_title,
     )
 
     return (
