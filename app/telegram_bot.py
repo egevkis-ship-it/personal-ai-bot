@@ -172,13 +172,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not is_allowed(update):
         return
 
-    text = update.message.text
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    text = update.message.text or ""
 
     pending_reply = await maybe_handle_pending_decision(user_id, text)
     if pending_reply is not None:
         await update.message.reply_text(pending_reply)
         return
-    user_id = str(update.effective_user.id) if update.effective_user else None
+
+
+    pending_reply = await maybe_handle_pending_decision(user_id, text)
+    if pending_reply is not None:
+        await update.message.reply_text(pending_reply)
+        return
 
     await update.message.reply_text(get_ack_message("default"))
 
@@ -213,7 +219,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             error=str(e),
         )
         await update.message.reply_text(f"Ошибка обработки: {e}")
-
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(update):
