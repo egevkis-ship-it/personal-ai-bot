@@ -52,7 +52,12 @@ required = [
     'CommandHandler("today_workout"',
     'CommandHandler("next_workout"',
     'CommandHandler("week_plan"',
+    'CommandHandler("next_week_plan"',
+    'CommandHandler("month_plan"',
+    'CommandHandler("next_month_plan"',
     'CommandHandler("fitness_debug_week"',
+    'CommandHandler("fitness_debug_next_week"',
+    'CommandHandler("fitness_debug_month"',
     'CommandHandler("fitness_reset_week"',
 ]
 

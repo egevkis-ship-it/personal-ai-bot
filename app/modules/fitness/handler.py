@@ -25,6 +25,7 @@ from app.db import (
     reset_fitness_week_plan,
     get_active_planned_workouts_in_period,
     cancel_active_planned_workouts_in_period,
+    get_planned_workouts_in_period,
 )
 from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
@@ -37,8 +38,9 @@ from app.modules.fitness.formatter import (
     format_last_workout,
     format_last_measurement,
     format_human_date,
+    format_period_plan,
 )
-from app.modules.fitness.utils import week_bounds
+from app.modules.fitness.utils import week_bounds, next_week_bounds, month_bounds, next_month_bounds
 
 
 async def handle_fitness_text(telegram_user_id: str | None, text: str) -> str:
@@ -799,3 +801,72 @@ async def command_fitness_reset_week(telegram_user_id: str | None) -> str:
         f"Архивировано активных планов: {result.get('affected_plans')}\n\n"
         "Фактические выполненные тренировки не трогал."
     )
+
+
+async def command_next_week_plan(telegram_user_id: str | None) -> str:
+    start, end = next_week_bounds()
+    items = await get_planned_workouts_in_period(
+        telegram_user_id=telegram_user_id,
+        start_date=start,
+        end_date=end,
+        include_cancelled=False,
+    )
+    return format_period_plan(items, title=f"План на следующую неделю ({start} — {end})")
+
+
+async def command_month_plan(telegram_user_id: str | None) -> str:
+    start, end = month_bounds()
+    items = await get_planned_workouts_in_period(
+        telegram_user_id=telegram_user_id,
+        start_date=start,
+        end_date=end,
+        include_cancelled=False,
+    )
+    return format_period_plan(items, title=f"План на текущий месяц ({start} — {end})")
+
+
+async def command_next_month_plan(telegram_user_id: str | None) -> str:
+    start, end = next_month_bounds()
+    items = await get_planned_workouts_in_period(
+        telegram_user_id=telegram_user_id,
+        start_date=start,
+        end_date=end,
+        include_cancelled=False,
+    )
+    return format_period_plan(items, title=f"План на следующий месяц ({start} — {end})")
+
+
+async def command_fitness_debug_next_week(telegram_user_id: str | None) -> str:
+    start, end = next_week_bounds()
+    rows = await get_fitness_debug_week(telegram_user_id, start, end)
+
+    if not rows:
+        return "Debug: на следующую неделю записей нет."
+
+    lines = [f"Fitness debug next week ({start} — {end}):"]
+    for r in rows:
+        lines.append(
+            f"ID {r.get('id')} | plan {r.get('plan_id')} | {r.get('planned_date')} | "
+            f"seq {r.get('sequence_number')} | {r.get('focus_label')} | "
+            f"{r.get('status')} | replaced_by={r.get('replaced_by_id')}"
+        )
+
+    return "\n".join(lines)
+
+
+async def command_fitness_debug_month(telegram_user_id: str | None) -> str:
+    start, end = month_bounds()
+    rows = await get_fitness_debug_week(telegram_user_id, start, end)
+
+    if not rows:
+        return "Debug: на текущий месяц записей нет."
+
+    lines = [f"Fitness debug month ({start} — {end}):"]
+    for r in rows:
+        lines.append(
+            f"ID {r.get('id')} | plan {r.get('plan_id')} | {r.get('planned_date')} | "
+            f"seq {r.get('sequence_number')} | {r.get('focus_label')} | "
+            f"{r.get('status')} | replaced_by={r.get('replaced_by_id')}"
+        )
+
+    return "\n".join(lines)

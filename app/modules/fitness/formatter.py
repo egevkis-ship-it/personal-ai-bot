@@ -384,3 +384,55 @@ def format_last_measurement(row: dict | None) -> str:
             lines.append(f"{label}: {format_number(row.get(key))} {unit}")
 
     return "\n".join(lines)
+
+
+def format_period_plan(items: list[dict], title: str = "План периода") -> str:
+    if not items:
+        return f"{title}:\n\nАктивный план на этот период не найден."
+
+    active_items = []
+    closed_items = []
+
+    for item in items:
+        status = item["workout"].get("status")
+        if status == "cancelled":
+            continue
+        if status in ("completed", "completed_modified", "skipped", "replaced"):
+            closed_items.append(item)
+        else:
+            active_items.append(item)
+
+    lines = [f"{title}:"]
+
+    def line_for(item: dict) -> str:
+        workout = item["workout"]
+        date_part = format_human_date(workout.get("planned_date")) if workout.get("planned_date") else "без даты"
+        title = workout.get("title") or workout.get("focus_label") or "Тренировка"
+        status = status_label(workout.get("status"))
+        return f"- {date_part}: {title} — {status}"
+
+    if active_items:
+        lines.append("")
+        lines.append("Активные:")
+        for item in active_items:
+            lines.append(line_for(item))
+
+    if closed_items:
+        lines.append("")
+        lines.append("Закрытые / изменённые:")
+        for item in closed_items:
+            lines.append(line_for(item))
+
+    focus_counts = {}
+    for item in active_items:
+        label = item["workout"].get("focus_label") or item["workout"].get("focus") or "другое"
+        focus_counts[label] = focus_counts.get(label, 0) + 1
+
+    if active_items:
+        lines.append("")
+        lines.append("Итог:")
+        lines.append(f"Активных тренировок: {len(active_items)}")
+        for label, count in sorted(focus_counts.items()):
+            lines.append(f"{label}: {count}")
+
+    return "\n".join(lines)

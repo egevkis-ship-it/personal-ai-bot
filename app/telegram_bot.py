@@ -16,7 +16,7 @@ from app.messages import get_ack_message
 from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
-from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week
+from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week, command_next_week_plan, command_month_plan, command_next_month_plan, command_fitness_debug_next_week, command_fitness_debug_month, command_next_week_plan, command_month_plan, command_next_month_plan, command_fitness_debug_next_week, command_fitness_debug_month
 from app.modules.fitness.utils import is_likely_fitness_text
 
 
@@ -132,6 +132,42 @@ async def fitness_reset_week(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(await command_fitness_reset_week(user_id))
 
 
+
+async def next_week_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_next_week_plan(user_id))
+
+
+async def month_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_month_plan(user_id))
+
+
+async def next_month_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_next_month_plan(user_id))
+
+
+async def fitness_debug_next_week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_fitness_debug_next_week(user_id))
+
+
+async def fitness_debug_month(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_fitness_debug_month(user_id))
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(update):
         return
@@ -237,9 +273,14 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("today_workout", today_workout))
     app.add_handler(CommandHandler("next_workout", next_workout))
     app.add_handler(CommandHandler("week_plan", week_plan))
+    app.add_handler(CommandHandler("next_week_plan", next_week_plan))
+    app.add_handler(CommandHandler("month_plan", month_plan))
+    app.add_handler(CommandHandler("next_month_plan", next_month_plan))
     app.add_handler(CommandHandler("last_workout", last_workout))
     app.add_handler(CommandHandler("last_measurement", last_measurement))
     app.add_handler(CommandHandler("fitness_debug_week", fitness_debug_week))
+    app.add_handler(CommandHandler("fitness_debug_next_week", fitness_debug_next_week))
+    app.add_handler(CommandHandler("fitness_debug_month", fitness_debug_month))
     app.add_handler(CommandHandler("fitness_reset_week", fitness_reset_week))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

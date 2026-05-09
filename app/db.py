@@ -1509,3 +1509,49 @@ async def cancel_active_planned_workouts_in_period(
 
         await session.commit()
         return affected
+
+
+async def get_planned_workouts_in_period(
+    telegram_user_id: str | None,
+    start_date: str,
+    end_date: str,
+    include_cancelled: bool = False,
+) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        if include_cancelled:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date BETWEEN :start_date AND :end_date
+                ORDER BY planned_date ASC, sequence_number ASC NULLS LAST, id ASC
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "start_date": to_date(start_date),
+                    "end_date": to_date(end_date),
+                },
+            )
+        else:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date BETWEEN :start_date AND :end_date
+                  AND status != 'cancelled'
+                ORDER BY planned_date ASC, sequence_number ASC NULLS LAST, id ASC
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "start_date": to_date(start_date),
+                    "end_date": to_date(end_date),
+                },
+            )
+
+        rows = []
+        for workout in result.mappings().all():
+            exercises = await _get_planned_exercises(session, workout["id"])
+            rows.append({"workout": dict(workout), "exercises": exercises})
+        return rows
