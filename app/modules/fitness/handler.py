@@ -30,6 +30,7 @@ from app.db import (
 from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
 from app.modules.fitness.pending_parser import parse_pending_decision_response
+from app.modules.fitness.pending_plan_parser import parse_create_plan_conflict_response
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_week_plan,
@@ -688,36 +689,24 @@ async def handle_create_plan_conflict_decision(
     pending: dict,
     text: str,
 ) -> str | None:
-    t = text.strip().lower()
     context = pending.get("context_json") or {}
 
-    replace_phrases = [
-        "да, замени",
-        "замени план",
-        "замени старый",
-        "замени старый план",
-        "да замени план",
-        "подтверждаю замену",
-    ]
+    parsed_decision = parse_create_plan_conflict_response(text, context)
 
-    append_phrases = [
-        "добавь к существующему",
-        "добавь",
-        "добавь к старому",
-        "оставь старый и добавь",
-    ]
+    if not parsed_decision.get("relates_to_pending"):
+        return None
 
-    cancel_phrases = [
-        "отмена",
-        "ничего не делай",
-        "не надо",
-        "забей",
-        "отмени",
-    ]
+    action = parsed_decision.get("action")
+    confidence = float(parsed_decision.get("confidence") or 0)
 
-    if any(p in t for p in cancel_phrases):
-        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
-        return "Окей, новый план не добавляю. Старый план оставил как есть."
+    if action == "unclear" or confidence < 0.55:
+        return (
+            "Я понял, что ты отвечаешь по новому плану, но не уверен, что именно сделать.\n\n"
+            "Напиши обычным текстом, например:\n"
+            "- замени старый план новым\n"
+            "- добавь к существующему\n"
+            "- ничего не делай"
+        )
 
     parsed_plan = context.get("parsed_plan") or {}
     plan = parsed_plan.get("plan") or {}
@@ -728,7 +717,24 @@ async def handle_create_plan_conflict_decision(
     source_text = context.get("source_text") or text
     planned_workouts = plan.get("planned_workouts") or []
 
-    if any(p in t for p in append_phrases):
+    if action == "cancel":
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return "Окей, новый план не добавляю. Старый план оставил как есть."
+
+    if action == "show_existing_plan":
+        # Show the relevant period, not always current week.
+        check_command = _plan_check_command_for_period(start_date, end_date)
+
+        if check_command == "/next_week_plan":
+            return await command_next_week_plan(telegram_user_id)
+        if check_command == "/month_plan":
+            return await command_month_plan(telegram_user_id)
+        if check_command == "/next_month_plan":
+            return await command_next_month_plan(telegram_user_id)
+
+        return await command_week_plan(telegram_user_id)
+
+    if action == "append_to_existing_plan":
         plan_id = await save_training_plan(
             telegram_user_id=telegram_user_id,
             plan_name=plan.get("plan_name"),
@@ -742,14 +748,16 @@ async def handle_create_plan_conflict_decision(
 
         await resolve_fitness_pending_decision(pending["id"], status="resolved")
 
+        check_command = _plan_check_command_for_period(start_date, end_date)
+
         return (
             "Добавил новый план к существующему.\n"
             f"ID нового плана: {plan_id}\n"
             f"Добавлено тренировок: {len(planned_workouts)}\n\n"
-            "Проверь /week_plan — возможно, теперь в периоде стало больше тренировок."
+            f"Проверь {check_command} — возможно, теперь в периоде стало больше тренировок."
         )
 
-    if any(p in t for p in replace_phrases):
+    if action == "replace_existing_plan":
         cancelled_count = await cancel_active_planned_workouts_in_period(
             telegram_user_id=telegram_user_id,
             start_date=start_date,
@@ -781,37 +789,13 @@ async def handle_create_plan_conflict_decision(
         )
 
     return (
-        "Я жду решение по новому плану.\n\n"
-        "Напиши:\n"
-        "- да, замени план\n"
+        "Я понял, что ты отвечаешь по новому плану, но не смог выбрать действие.\n\n"
+        "Напиши, например:\n"
+        "- замени старый план новым\n"
         "- добавь к существующему\n"
         "- отмена"
     )
 
-
-
-def _plan_check_command_for_period(start_date: str | None, end_date: str | None) -> str:
-    if not start_date or not end_date:
-        return "/week_plan"
-
-    current_week_start, current_week_end = week_bounds()
-    next_week_start, next_week_end = next_week_bounds()
-    current_month_start, current_month_end = month_bounds()
-    next_month_start, next_month_end = next_month_bounds()
-
-    if start_date == current_week_start and end_date == current_week_end:
-        return "/week_plan"
-
-    if start_date == next_week_start and end_date == next_week_end:
-        return "/next_week_plan"
-
-    if start_date == current_month_start and end_date == current_month_end:
-        return "/month_plan"
-
-    if start_date == next_month_start and end_date == next_month_end:
-        return "/next_month_plan"
-
-    return "/month_plan"
 
 async def command_fitness_reset_week(telegram_user_id: str | None) -> str:
     start, end = week_bounds()

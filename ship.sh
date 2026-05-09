@@ -17,6 +17,7 @@ python3 -m py_compile \
   app/modules/fitness/parser.py \
   app/modules/fitness/change_parser.py \
   app/modules/fitness/pending_parser.py \
+  app/modules/fitness/pending_plan_parser.py \
   app/modules/fitness/formatter.py \
   app/modules/fitness/utils.py \
   app/modules/ops/status.py
