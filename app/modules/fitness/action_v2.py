@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import re
 from datetime import date, datetime, timezone
@@ -18,6 +19,7 @@ from app.db import (
     delete_last_fitness_set_v2,
     update_last_fitness_set_v2,
 )
+from app.modules.fitness.exercise_history import handle_exercise_history_request
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_period_plan,
@@ -890,6 +892,14 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
+
+    history_reply = await handle_exercise_history_request(
+        telegram_user_id=telegram_user_id,
+        text=text,
+        active_session=active_session,
+    )
+    if history_reply is not None:
+        return history_reply
 
     parsed = parse_fitness_action_v2(text, active_session=active_session)
 

@@ -1827,3 +1827,91 @@ async def auto_close_stale_active_workout_sessions(timeout_minutes: int = 60) ->
 
         await session.commit()
         return closed_count
+
+
+async def get_recent_exercise_history(
+    telegram_user_id: str | None,
+    exercise_key: str,
+    limit_workouts: int = 3,
+) -> list[dict]:
+    """
+    Returns recent workouts where normalized exercise key matches.
+
+    v0.2.0 note:
+    This does not require an exercise_key column yet.
+    It normalizes exercise_name in Python, so it works with existing data.
+    """
+    from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+
+    async with AsyncSessionLocal() as session:
+        if telegram_user_id:
+            result = await session.execute(
+                text("""
+                SELECT
+                    w.id AS workout_id,
+                    w.workout_date AS workout_date,
+                    s.exercise_name,
+                    s.set_number,
+                    s.weight_kg,
+                    s.reps,
+                    s.rpe,
+                    s.notes
+                FROM fitness_workouts w
+                JOIN fitness_exercise_sets s ON s.workout_id = w.id
+                WHERE w.telegram_user_id = :telegram_user_id
+                ORDER BY w.workout_date DESC, w.id DESC, s.id ASC
+                LIMIT 1000
+                """),
+                {"telegram_user_id": telegram_user_id},
+            )
+        else:
+            result = await session.execute(
+                text("""
+                SELECT
+                    w.id AS workout_id,
+                    w.workout_date AS workout_date,
+                    s.exercise_name,
+                    s.set_number,
+                    s.weight_kg,
+                    s.reps,
+                    s.rpe,
+                    s.notes
+                FROM fitness_workouts w
+                JOIN fitness_exercise_sets s ON s.workout_id = w.id
+                ORDER BY w.workout_date DESC, w.id DESC, s.id ASC
+                LIMIT 1000
+                """)
+            )
+
+        rows = [dict(row) for row in result.mappings().all()]
+
+    grouped = {}
+
+    for row in rows:
+        normalized = normalize_exercise_name(row.get("exercise_name"))
+
+        if normalized.get("exercise_key") != exercise_key:
+            continue
+
+        workout_id = row.get("workout_id")
+
+        if workout_id not in grouped:
+            grouped[workout_id] = {
+                "workout_id": workout_id,
+                "workout_date": str(row.get("workout_date")),
+                "exercise_name": row.get("exercise_name"),
+                "sets": [],
+            }
+
+        grouped[workout_id]["sets"].append(
+            {
+                "exercise_name": row.get("exercise_name"),
+                "set_number": row.get("set_number"),
+                "weight_kg": row.get("weight_kg"),
+                "reps": row.get("reps"),
+                "rpe": row.get("rpe"),
+                "notes": row.get("notes"),
+            }
+        )
+
+    return list(grouped.values())[:limit_workouts]

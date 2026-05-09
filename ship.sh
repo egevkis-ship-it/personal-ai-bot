@@ -19,6 +19,8 @@ python3 -m py_compile \
   app/modules/fitness/pending_parser.py \
   app/modules/fitness/pending_plan_parser.py \
   app/modules/fitness/action_v2.py \
+  app/modules/fitness/exercise_history.py \
+  app/modules/fitness/exercise_normalizer.py \
   app/modules/fitness/formatter.py \
   app/modules/fitness/utils.py \
   app/modules/ops/status.py
@@ -105,6 +107,13 @@ if failed:
         print(f" - {text!r}: expected {expected}, got {actual}")
     raise SystemExit(1)
 
+from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+from app.modules.fitness.exercise_history import handle_exercise_history_request
+assert normalize_exercise_name("жим гантелей сидя")["exercise_key"] == "seated_dumbbell_press"
+assert normalize_exercise_name("жим на плечи")["exercise_key"] == "seated_dumbbell_press"
+assert normalize_exercise_name("махи в стороны")["exercise_key"] in ("lateral_raise_seated", "lateral_raise_standing")
+
+print("Exercise history imports: OK")
 print("Fitness router: OK")
 PY
 
