@@ -574,6 +574,31 @@ async def command_fitness_debug_week(telegram_user_id: str | None) -> str:
 
 
 
+
+
+def _plan_check_command_for_period(start_date: str | None, end_date: str | None) -> str:
+    if not start_date or not end_date:
+        return "/week_plan"
+
+    current_week_start, current_week_end = week_bounds()
+    next_week_start, next_week_end = next_week_bounds()
+    current_month_start, current_month_end = month_bounds()
+    next_month_start, next_month_end = next_month_bounds()
+
+    if start_date == current_week_start and end_date == current_week_end:
+        return "/week_plan"
+
+    if start_date == next_week_start and end_date == next_week_end:
+        return "/next_week_plan"
+
+    if start_date == current_month_start and end_date == current_month_end:
+        return "/month_plan"
+
+    if start_date == next_month_start and end_date == next_month_end:
+        return "/next_month_plan"
+
+    return "/month_plan"
+
 async def handle_create_plan_with_duplicate_protection(
     telegram_user_id: str | None,
     text: str,
