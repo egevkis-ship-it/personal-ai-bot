@@ -175,10 +175,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = str(update.effective_user.id) if update.effective_user else None
     text = update.message.text or ""
 
-    pending_reply = await maybe_handle_pending_decision(user_id, text)
-    if pending_reply is not None:
-        await update.message.reply_text(pending_reply)
-        return
+    normalized_for_pending = text.strip().lower()
+
+    is_explicit_new_plan_command = (
+        "план" in normalized_for_pending
+        and any(word in normalized_for_pending for word in [
+            "запиши",
+            "создай",
+            "поставь",
+            "составь",
+            "новый план",
+            "пересобери план",
+        ])
+    )
+
+    if not is_explicit_new_plan_command:
+        pending_reply = await maybe_handle_pending_decision(user_id, text)
+        if pending_reply is not None:
+            await update.message.reply_text(pending_reply)
+            return
 
 
 
