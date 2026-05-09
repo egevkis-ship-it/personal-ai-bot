@@ -220,6 +220,10 @@ async def _preview_cancel_planned(
     ]
 
     if not active_items:
+        if action.get("scope") == "all":
+            return "Активных плановых тренировок не найдено."
+        if action.get("scope") == "future":
+            return "Активных будущих плановых тренировок не найдено."
         return f"За период {start_date} — {end_date} активных плановых тренировок не найдено."
 
     await create_fitness_pending_decision(
