@@ -295,17 +295,25 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
 
     t = _clean(text)
 
-    confirm_words = [
-        "да",
-        "давай",
-        "подтверж",
+    # Confirmation must be explicit.
+    # Do NOT treat generic words like "давай" as confirmation:
+    # "давай добавим тренировку" is a new command, not approval to delete plans.
+    confirm_phrases = [
+        "да отмени",
+        "да, отмени",
+        "да отменяй",
+        "да, отменяй",
+        "да удали",
+        "да, удали",
+        "да удаляй",
+        "да, удаляй",
+        "да очисти",
+        "да, очисти",
         "подтверждаю",
-        "отмени",
+        "подтверждаю отмену",
+        "подтверждаю удаление",
         "отменяй",
-        "удали",
         "удаляй",
-        "очисти",
-        "очищай",
     ]
 
     cancel_words = [
@@ -317,12 +325,33 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
         "стоп",
     ]
 
-    if not any(x in t for x in confirm_words):
-        if any(x in t for x in cancel_words):
-            await resolve_fitness_pending_decision(pending["id"], status="cancelled")
-            return "Ок, план не трогаю."
+    new_command_markers = [
+        "добав",
+        "создай",
+        "поставь",
+        "покажи",
+        "дай",
+        "какая",
+        "какой",
+        "что у меня",
+        "запиши",
+        "перенеси",
+        "хочу",
+    ]
+
+    if any(x in t for x in cancel_words):
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return "Ок, план не трогаю."
+
+    if any(x in t for x in new_command_markers):
         return (
-            "Я жду подтверждение отмены плановых тренировок. "
+            "Сейчас ожидается подтверждение отмены плановых тренировок. "
+            "Чтобы не удалить план случайно, сначала ответь: “да, отмени” или “отмена”."
+        )
+
+    if not any(x in t for x in confirm_phrases):
+        return (
+            "Я жду явное подтверждение отмены плановых тренировок. "
             "Напиши: “да, отмени” или “отмена”."
         )
 

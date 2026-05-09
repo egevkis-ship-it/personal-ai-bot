@@ -258,6 +258,21 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await tg_file.download_to_drive(audio_path)
 
         transcript = transcribe_audio(audio_path)
+
+        pending_reply = await maybe_handle_pending_decision(user_id, transcript)
+        if pending_reply is not None:
+            await save_raw_message(
+                telegram_user_id=user_id,
+                message_type="voice",
+                original_text=None,
+                transcript=transcript,
+                intent="fitness_pending",
+                parsed_json=json.dumps({"handled_by": "maybe_handle_pending_decision"}, ensure_ascii=False),
+                status="parsed",
+            )
+            await update.message.reply_text(f"Расшифровка:\n{transcript}\n\n{pending_reply}")
+            return
+
         parsed = parse_message(transcript)
         parsed_json = json.dumps(parsed, ensure_ascii=False)
 
@@ -271,9 +286,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             status="parsed",
         )
 
-        await update.message.reply_text(
-            f"Расшифровка:\n{transcript}\n\n{build_reply(parsed, transcript)}"
-        )
+        if parsed.get("intent") == "fitness" or is_likely_fitness_text(transcript):
+            fitness_reply = await handle_fitness_text(user_id, transcript)
+            await update.message.reply_text(f"Расшифровка:\n{transcript}\n\n{fitness_reply}")
+        else:
+            await update.message.reply_text(
+                f"Расшифровка:\n{transcript}\n\n{build_reply(parsed, transcript)}"
+            )
 
     except Exception as e:
         await save_raw_message(
