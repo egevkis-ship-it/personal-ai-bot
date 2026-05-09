@@ -18,6 +18,7 @@ from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
 from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week, command_next_week_plan, command_month_plan, command_next_month_plan, command_fitness_debug_next_week, command_fitness_debug_month, maybe_handle_pending_decision
 from app.modules.fitness.action_v2 import try_handle_active_workout_message
+from app.modules.fitness.session_autoclose import fitness_session_autoclose_loop
 from app.modules.fitness.utils import is_likely_fitness_text
 
 
@@ -292,8 +293,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             os.remove(audio_path)
 
 
+async def post_init(application) -> None:
+    application.create_task(fitness_session_autoclose_loop())
+
+
 def build_application() -> Application:
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    app = Application.builder().token(settings.telegram_bot_token).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))

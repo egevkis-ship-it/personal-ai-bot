@@ -1747,3 +1747,83 @@ async def update_last_fitness_set_v2(
         await session.commit()
         updated = updated_result.mappings().first()
         return dict(updated) if updated else None
+
+
+async def auto_close_stale_active_workout_sessions(timeout_minutes: int = 60) -> int:
+    """
+    Close active workout sessions after timeout_minutes since the last
+    training-related activity. Does not send Telegram messages.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, context_json
+            FROM fitness_pending_decisions
+            WHERE decision_type = 'active_workout_session'
+              AND status = 'pending'
+            """)
+        )
+
+        rows = result.mappings().all()
+        closed_count = 0
+
+        for row in rows:
+            context = row.get("context_json") or {}
+            session_status = context.get("session_status") or "active"
+
+            if session_status != "active":
+                continue
+
+            last_activity_raw = (
+                context.get("last_training_activity_at")
+                or context.get("last_activity_at")
+                or context.get("started_at")
+            )
+
+            if not last_activity_raw:
+                continue
+
+            try:
+                if isinstance(last_activity_raw, str):
+                    last_activity = datetime.fromisoformat(
+                        last_activity_raw.replace("Z", "+00:00")
+                    )
+                else:
+                    last_activity = last_activity_raw
+
+                if last_activity.tzinfo is None:
+                    last_activity = last_activity.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+
+            if last_activity > cutoff:
+                continue
+
+            context["session_status"] = "closed_auto"
+            context["closed_at"] = datetime.now(timezone.utc).isoformat()
+            context["close_reason"] = (
+                f"auto_closed_after_{timeout_minutes}_minutes_training_inactivity"
+            )
+
+            await session.execute(
+                text("""
+                UPDATE fitness_pending_decisions
+                SET status = 'resolved',
+                    resolved_at = now(),
+                    context_json = CAST(:context_json AS JSONB)
+                WHERE id = :decision_id
+                """),
+                {
+                    "decision_id": row["id"],
+                    "context_json": json.dumps(context, ensure_ascii=False),
+                },
+            )
+
+            closed_count += 1
+
+        await session.commit()
+        return closed_count

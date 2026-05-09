@@ -417,6 +417,7 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
         "session_status": "active",
         "started_at": _now_iso(),
         "last_activity_at": _now_iso(),
+        "last_training_activity_at": _now_iso(),
         "last_action": "log_workout_sets",
     }
 
@@ -491,6 +492,7 @@ async def _continue_current_exercise(telegram_user_id: str | None, text: str, pa
     active_session["current_exercise"] = exercise_name
     active_session["session_status"] = "active"
     active_session["last_activity_at"] = _now_iso()
+    active_session["last_training_activity_at"] = _now_iso()
     active_session["last_action"] = "continue_current_exercise"
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
