@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 
@@ -138,6 +139,8 @@ def is_likely_fitness_text(text: str | None) -> bool:
     action_words = [
         "перенеси", "перенести",
         "поменяй", "замени", "заменить",
+        "убери", "убрать", "удали", "удалить", "исключи",
+        "добавь", "добавить",
         "пропусти", "пропустил", "пропускаем",
         "дай", "покажи",
         "что сегодня", "что дальше",

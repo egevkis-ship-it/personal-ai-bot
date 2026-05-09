@@ -615,16 +615,27 @@ async def save_body_measurement(
 
 async def get_last_workout(telegram_user_id: str | None) -> dict | None:
     async with AsyncSessionLocal() as session:
-        workout_result = await session.execute(
-            text("""
-            SELECT id, workout_date, workout_type, focus, focus_label, bodyweight_kg, completion_type, notes
-            FROM fitness_workouts
-            WHERE (:telegram_user_id IS NULL OR telegram_user_id = :telegram_user_id)
-            ORDER BY workout_date DESC, id DESC
-            LIMIT 1
-            """),
-            {"telegram_user_id": telegram_user_id},
-        )
+        if telegram_user_id:
+            workout_result = await session.execute(
+                text("""
+                SELECT id, workout_date, workout_type, focus, focus_label, bodyweight_kg, completion_type, notes
+                FROM fitness_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                ORDER BY workout_date DESC, id DESC
+                LIMIT 1
+                """),
+                {"telegram_user_id": telegram_user_id},
+            )
+        else:
+            workout_result = await session.execute(
+                text("""
+                SELECT id, workout_date, workout_type, focus, focus_label, bodyweight_kg, completion_type, notes
+                FROM fitness_workouts
+                ORDER BY workout_date DESC, id DESC
+                LIMIT 1
+                """)
+            )
+
         workout = workout_result.mappings().first()
 
         if not workout:
@@ -648,16 +659,27 @@ async def get_last_workout(telegram_user_id: str | None) -> dict | None:
 
 async def get_last_measurement(telegram_user_id: str | None) -> dict | None:
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            text("""
-            SELECT *
-            FROM body_measurements
-            WHERE (:telegram_user_id IS NULL OR telegram_user_id = :telegram_user_id)
-            ORDER BY measurement_date DESC, id DESC
-            LIMIT 1
-            """),
-            {"telegram_user_id": telegram_user_id},
-        )
+        if telegram_user_id:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM body_measurements
+                WHERE telegram_user_id = :telegram_user_id
+                ORDER BY measurement_date DESC, id DESC
+                LIMIT 1
+                """),
+                {"telegram_user_id": telegram_user_id},
+            )
+        else:
+            result = await session.execute(
+                text("""
+                SELECT *
+                FROM body_measurements
+                ORDER BY measurement_date DESC, id DESC
+                LIMIT 1
+                """)
+            )
+
         row = result.mappings().first()
         return dict(row) if row else None
 
@@ -1403,3 +1425,87 @@ async def reset_fitness_week_plan(
             "start_date": start_date,
             "end_date": end_date,
         }
+
+
+async def get_active_planned_workouts_in_period(
+    telegram_user_id: str | None,
+    start_date: str,
+    end_date: str,
+) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT *
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date BETWEEN :start_date AND :end_date
+              AND status = 'planned'
+            ORDER BY planned_date ASC, sequence_number ASC NULLS LAST, id ASC
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
+async def cancel_active_planned_workouts_in_period(
+    telegram_user_id: str | None,
+    start_date: str,
+    end_date: str,
+    source_text: str,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        count_result = await session.execute(
+            text("""
+            SELECT COUNT(*) AS cnt
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date BETWEEN :start_date AND :end_date
+              AND status = 'planned'
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+        affected = count_result.scalar_one()
+
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET status = 'cancelled',
+                notes = COALESCE(notes, '') || '\nCancelled by plan replacement.'
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date BETWEEN :start_date AND :end_date
+              AND status = 'planned'
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+
+        await session.execute(
+            text("""
+            UPDATE training_plans
+            SET status = 'archived',
+                notes = COALESCE(notes, '') || '\nArchived by plan replacement.'
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'active'
+              AND start_date <= :end_date
+              AND end_date >= :start_date
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+
+        await session.commit()
+        return affected

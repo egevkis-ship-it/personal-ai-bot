@@ -23,6 +23,8 @@ from app.db import (
     resolve_fitness_pending_decision,
     find_nearest_free_training_date,
     reset_fitness_week_plan,
+    get_active_planned_workouts_in_period,
+    cancel_active_planned_workouts_in_period,
 )
 from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
@@ -48,20 +50,11 @@ async def handle_fitness_text(telegram_user_id: str | None, text: str) -> str:
     action = parsed.get("action")
 
     if action == "create_plan":
-        plan = parsed.get("plan") or {}
-        plan_id = await save_training_plan(
+        return await handle_create_plan_with_duplicate_protection(
             telegram_user_id=telegram_user_id,
-            plan_name=plan.get("plan_name"),
-            period_type=plan.get("period_type") or (parsed.get("period") or {}).get("period_type"),
-            start_date=plan.get("start_date") or (parsed.get("period") or {}).get("start_date"),
-            end_date=plan.get("end_date") or (parsed.get("period") or {}).get("end_date"),
-            source_text=text,
-            notes=plan.get("notes"),
-            planned_workouts=plan.get("planned_workouts") or [],
+            text=text,
+            parsed=parsed,
         )
-
-        count = len(plan.get("planned_workouts") or [])
-        return f"Создал тренировочный план.\nID плана: {plan_id}\nТренировок: {count}\n\nНапиши /week_plan, чтобы посмотреть неделю."
 
     if action == "get_today_workout":
         today = date.today().isoformat()
@@ -354,6 +347,13 @@ async def maybe_handle_pending_decision(telegram_user_id: str | None, text: str)
     decision_type = pending.get("decision_type")
     context = pending.get("context_json") or {}
 
+    if decision_type == "create_plan_conflict":
+        return await handle_create_plan_conflict_decision(
+            telegram_user_id=telegram_user_id,
+            pending=pending,
+            text=text,
+        )
+
     if decision_type != "same_day_conflict":
         return None
 
@@ -568,6 +568,219 @@ async def command_fitness_debug_week(telegram_user_id: str | None) -> str:
 
     return "\n".join(lines)
 
+
+
+
+async def handle_create_plan_with_duplicate_protection(
+    telegram_user_id: str | None,
+    text: str,
+    parsed: dict,
+) -> str:
+    plan = parsed.get("plan") or {}
+    period = parsed.get("period") or {}
+
+    start_date = plan.get("start_date") or period.get("start_date")
+    end_date = plan.get("end_date") or period.get("end_date")
+    planned_workouts = plan.get("planned_workouts") or []
+
+    if not start_date or not end_date:
+        # If parser did not give dates, create directly for now.
+        plan_id = await save_training_plan(
+            telegram_user_id=telegram_user_id,
+            plan_name=plan.get("plan_name"),
+            period_type=plan.get("period_type") or period.get("period_type"),
+            start_date=start_date,
+            end_date=end_date,
+            source_text=text,
+            notes=plan.get("notes"),
+            planned_workouts=planned_workouts,
+        )
+        return (
+            "Создал тренировочный план.\n"
+            f"ID плана: {plan_id}\n"
+            f"Тренировок: {len(planned_workouts)}\n\n"
+            "Напиши /week_plan, чтобы посмотреть неделю."
+        )
+
+    existing = await get_active_planned_workouts_in_period(
+        telegram_user_id=telegram_user_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    if existing:
+        context = {
+            "decision_type": "create_plan_conflict",
+            "start_date": start_date,
+            "end_date": end_date,
+            "source_text": text,
+            "parsed_plan": parsed,
+            "existing_workouts": [
+                {
+                    "id": w.get("id"),
+                    "planned_date": str(w.get("planned_date")) if w.get("planned_date") else None,
+                    "title": w.get("title"),
+                    "focus": w.get("focus"),
+                    "focus_label": w.get("focus_label"),
+                    "status": w.get("status"),
+                }
+                for w in existing
+            ],
+            "new_workouts_count": len(planned_workouts),
+        }
+
+        await create_fitness_pending_decision(
+            telegram_user_id=telegram_user_id,
+            decision_type="create_plan_conflict",
+            context=context,
+            source_text=text,
+        )
+
+        lines = [
+            f"На этот период уже есть активные тренировки: {len(existing)}.",
+            f"Новый план содержит тренировок: {len(planned_workouts)}.",
+            "",
+            "Старые активные тренировки:",
+        ]
+
+        for w in existing:
+            date_part = format_human_date(w.get("planned_date")) if w.get("planned_date") else "без даты"
+            title = w.get("title") or w.get("focus_label") or "тренировка"
+            lines.append(f"- {date_part}: {title}")
+
+        lines.extend([
+            "",
+            "Я не стал добавлять новый план поверх старого.",
+            "",
+            "Напиши обычным текстом:",
+            "- да, замени план",
+            "- добавь к существующему",
+            "- отмена",
+        ])
+
+        return "\n".join(lines)
+
+    plan_id = await save_training_plan(
+        telegram_user_id=telegram_user_id,
+        plan_name=plan.get("plan_name"),
+        period_type=plan.get("period_type") or period.get("period_type"),
+        start_date=start_date,
+        end_date=end_date,
+        source_text=text,
+        notes=plan.get("notes"),
+        planned_workouts=planned_workouts,
+    )
+
+    return (
+        "Создал тренировочный план.\n"
+        f"ID плана: {plan_id}\n"
+        f"Тренировок: {len(planned_workouts)}\n\n"
+        "Напиши /week_plan, чтобы посмотреть неделю."
+    )
+
+
+async def handle_create_plan_conflict_decision(
+    telegram_user_id: str | None,
+    pending: dict,
+    text: str,
+) -> str | None:
+    t = text.strip().lower()
+    context = pending.get("context_json") or {}
+
+    replace_phrases = [
+        "да, замени",
+        "замени план",
+        "замени старый",
+        "замени старый план",
+        "да замени план",
+        "подтверждаю замену",
+    ]
+
+    append_phrases = [
+        "добавь к существующему",
+        "добавь",
+        "добавь к старому",
+        "оставь старый и добавь",
+    ]
+
+    cancel_phrases = [
+        "отмена",
+        "ничего не делай",
+        "не надо",
+        "забей",
+        "отмени",
+    ]
+
+    if any(p in t for p in cancel_phrases):
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return "Окей, новый план не добавляю. Старый план оставил как есть."
+
+    parsed_plan = context.get("parsed_plan") or {}
+    plan = parsed_plan.get("plan") or {}
+    period = parsed_plan.get("period") or {}
+
+    start_date = context.get("start_date")
+    end_date = context.get("end_date")
+    source_text = context.get("source_text") or text
+    planned_workouts = plan.get("planned_workouts") or []
+
+    if any(p in t for p in append_phrases):
+        plan_id = await save_training_plan(
+            telegram_user_id=telegram_user_id,
+            plan_name=plan.get("plan_name"),
+            period_type=plan.get("period_type") or period.get("period_type"),
+            start_date=start_date,
+            end_date=end_date,
+            source_text=source_text,
+            notes=plan.get("notes"),
+            planned_workouts=planned_workouts,
+        )
+
+        await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+        return (
+            "Добавил новый план к существующему.\n"
+            f"ID нового плана: {plan_id}\n"
+            f"Добавлено тренировок: {len(planned_workouts)}\n\n"
+            "Проверь /week_plan — возможно, теперь в периоде стало больше тренировок."
+        )
+
+    if any(p in t for p in replace_phrases):
+        cancelled_count = await cancel_active_planned_workouts_in_period(
+            telegram_user_id=telegram_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            source_text=text,
+        )
+
+        plan_id = await save_training_plan(
+            telegram_user_id=telegram_user_id,
+            plan_name=plan.get("plan_name"),
+            period_type=plan.get("period_type") or period.get("period_type"),
+            start_date=start_date,
+            end_date=end_date,
+            source_text=source_text,
+            notes=plan.get("notes"),
+            planned_workouts=planned_workouts,
+        )
+
+        await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+        return (
+            "Заменил план периода.\n\n"
+            f"Отменено старых активных тренировок: {cancelled_count}\n"
+            f"Создан новый план ID: {plan_id}\n"
+            f"Новых тренировок: {len(planned_workouts)}\n\n"
+            "Напиши /week_plan, чтобы проверить."
+        )
+
+    return (
+        "Я жду решение по новому плану.\n\n"
+        "Напиши:\n"
+        "- да, замени план\n"
+        "- добавь к существующему\n"
+        "- отмена"
+    )
 
 async def command_fitness_reset_week(telegram_user_id: str | None) -> str:
     start, end = week_bounds()
