@@ -2139,3 +2139,166 @@ async def cleanup_empty_planned_workouts(
 
         await session.commit()
         return len(ids)
+
+
+async def replace_exercise_in_planned_workout(
+    telegram_user_id: str | None,
+    target_date: str,
+    old_exercise_name: str,
+    new_exercise_name: str,
+    source_text: str | None = None,
+) -> dict:
+    """
+    Replace one exercise inside the best matching active planned workout on target_date.
+
+    Safety:
+    - Does NOT replace whole workout.
+    - Preserves sets/reps/weight/notes/order.
+    - If old exercise is not found, returns available exercises.
+    """
+    from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+
+    old_norm = normalize_exercise_name(old_exercise_name)
+    new_norm = normalize_exercise_name(new_exercise_name)
+
+    old_key = old_norm.get("exercise_key")
+    new_title = new_norm.get("canonical_ru") or new_exercise_name
+
+    async with AsyncSessionLocal() as session:
+        workouts_result = await session.execute(
+            text("""
+            SELECT pw.id
+            FROM planned_workouts pw
+            WHERE pw.telegram_user_id = :telegram_user_id
+              AND pw.planned_date = :target_date
+              AND pw.status = 'planned'
+            ORDER BY
+              CASE WHEN EXISTS (
+                SELECT 1
+                FROM planned_exercises ex
+                WHERE ex.planned_workout_id = pw.id
+              ) THEN 0 ELSE 1 END,
+              pw.id DESC
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "target_date": to_date(target_date),
+            },
+        )
+
+        workout_ids = [row["id"] for row in workouts_result.mappings().all()]
+
+        if not workout_ids:
+            return {
+                "ok": False,
+                "message": f"На {target_date} активная плановая тренировка не найдена.",
+                "available_exercises": [],
+            }
+
+        available_exercises = []
+
+        for workout_id in workout_ids:
+            ex_result = await session.execute(
+                text("""
+                SELECT
+                    id,
+                    exercise_name,
+                    exercise_order,
+                    target_sets,
+                    target_reps_min,
+                    target_reps_max,
+                    target_reps_text,
+                    target_weight_kg,
+                    notes
+                FROM planned_exercises
+                WHERE planned_workout_id = :planned_workout_id
+                ORDER BY exercise_order ASC, id ASC
+                """),
+                {"planned_workout_id": workout_id},
+            )
+
+            exercises = [dict(row) for row in ex_result.mappings().all()]
+
+            if not exercises:
+                continue
+
+            available_exercises = [ex.get("exercise_name") for ex in exercises if ex.get("exercise_name")]
+
+            target_exercise = None
+
+            for ex in exercises:
+                candidate_name = ex.get("exercise_name") or ""
+                candidate_norm = normalize_exercise_name(candidate_name)
+                candidate_key = candidate_norm.get("exercise_key")
+
+                direct_match = old_exercise_name.strip().lower().replace("ё", "е") in candidate_name.lower().replace("ё", "е")
+                reverse_direct_match = candidate_name.lower().replace("ё", "е") in old_exercise_name.strip().lower().replace("ё", "е")
+
+                key_match = old_key and candidate_key and old_key == candidate_key
+
+                if key_match or direct_match or reverse_direct_match:
+                    target_exercise = ex
+                    break
+
+            if not target_exercise:
+                continue
+
+            old_name = target_exercise.get("exercise_name")
+
+            await session.execute(
+                text("""
+                UPDATE planned_exercises
+                SET exercise_name = :new_exercise_name,
+                    notes = COALESCE(notes, '')
+                WHERE id = :exercise_id
+                """),
+                {
+                    "exercise_id": target_exercise["id"],
+                    "new_exercise_name": new_title,
+                },
+            )
+
+            await session.execute(
+                text("""
+                INSERT INTO planned_workout_events
+                (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+                VALUES
+                (:planned_workout_id, 'exercise_replaced', CAST(:old_value_json AS JSONB), CAST(:new_value_json AS JSONB), :source_text, :notes)
+                """),
+                {
+                    "planned_workout_id": workout_id,
+                    "old_value_json": json.dumps(
+                        {
+                            "exercise_id": target_exercise["id"],
+                            "exercise_name": old_name,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "new_value_json": json.dumps(
+                        {
+                            "exercise_id": target_exercise["id"],
+                            "exercise_name": new_title,
+                            "preserved_parameters": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "source_text": source_text,
+                    "notes": "Replaced one planned exercise while preserving parameters",
+                },
+            )
+
+            await session.commit()
+
+            return {
+                "ok": True,
+                "planned_workout_id": workout_id,
+                "exercise_id": target_exercise["id"],
+                "old_exercise_name": old_name,
+                "new_exercise_name": new_title,
+            }
+
+        return {
+            "ok": False,
+            "message": f"Не нашёл “{old_exercise_name}” в тренировке на {target_date}.",
+            "available_exercises": available_exercises,
+        }

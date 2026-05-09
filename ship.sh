@@ -20,6 +20,8 @@ python3 -m py_compile \
   app/modules/fitness/pending_plan_parser.py \
   app/modules/fitness/action_v2.py \
   app/modules/fitness/router_hardening.py \
+  app/modules/fitness/planned_workout_executor.py \
+  app/modules/fitness/planned_workout_parser.py \
   app/modules/fitness/custom_workout_builder.py \
   app/modules/fitness/exercise_history.py \
   app/modules/fitness/exercise_normalizer.py \
@@ -121,6 +123,11 @@ from app.modules.fitness.custom_workout_builder import parse_custom_workout_deta
 assert callable(parse_custom_workout_details)
 assert callable(create_custom_workout_from_details)
 print("Custom workout builder imports: OK")
+from app.modules.fitness.planned_workout_parser import parse_planned_workout_action
+from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
+assert callable(parse_planned_workout_action)
+assert callable(execute_planned_workout_action)
+print("Planned workout parser/executor imports: OK")
 print("Router hardening imports: OK")
 print("Exercise history imports: OK")
 print("Fitness router: OK")
