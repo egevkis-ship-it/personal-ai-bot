@@ -1,5 +1,6 @@
 import json
-from datetime import date
+import re
+from datetime import date, datetime, timezone
 
 from app.ai import client
 from app.db import (
@@ -413,6 +414,9 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
         "workout_id": workout_id,
         "workout_date": workout_date,
         "current_exercise": current_exercise,
+        "session_status": "active",
+        "started_at": _now_iso(),
+        "last_activity_at": _now_iso(),
         "last_action": "log_workout_sets",
     }
 
@@ -485,6 +489,8 @@ async def _continue_current_exercise(telegram_user_id: str | None, text: str, pa
     )
 
     active_session["current_exercise"] = exercise_name
+    active_session["session_status"] = "active"
+    active_session["last_activity_at"] = _now_iso()
     active_session["last_action"] = "continue_current_exercise"
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
@@ -540,6 +546,270 @@ async def _correct_previous_action(telegram_user_id: str | None, text: str, pars
         )
 
     return "Понял, что это исправление, но не смог безопасно применить его автоматически."
+
+
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _session_status(active_session: dict | None) -> str:
+    if not active_session:
+        return ""
+    return active_session.get("session_status") or "active"
+
+
+def _looks_like_set_message(text: str) -> bool:
+    t = (text or "").lower().replace(",", ".")
+    has_set_hint = any(x in t for x in [
+        "перв", "втор", "трет", "четвер", "пят", "шест", "седьм",
+        "следующ", "еще", "ещё", "последн"
+    ])
+    has_weight_reps = re.search(
+        r"\d+(?:\.\d+)?\s*(?:кг|килограмм(?:ов|а)?|)?\s*(?:на|x|х|×)\s*\d+",
+        t,
+    )
+    return bool(has_set_hint and has_weight_reps)
+
+
+def _extract_set_number(text: str):
+    t = (text or "").lower()
+    mapping = [
+        ("перв", 1),
+        ("втор", 2),
+        ("трет", 3),
+        ("четвер", 4),
+        ("пят", 5),
+        ("шест", 6),
+        ("седьм", 7),
+        ("восьм", 8),
+        ("девят", 9),
+        ("десят", 10),
+    ]
+    for stem, value in mapping:
+        if stem in t:
+            return value
+    return None
+
+
+def _parse_set_from_short_text(text: str, active_session: dict | None) -> dict | None:
+    if not active_session or not active_session.get("current_exercise"):
+        return None
+
+    t = (text or "").lower().replace(",", ".")
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:кг|килограмм(?:ов|а)?|)?\s*(?:на|x|х|×)\s*(\d+)",
+        t,
+    )
+    if not m:
+        return None
+
+    return {
+        "action": "continue_current_exercise",
+        "confidence": 0.99,
+        "logged_exercises": [
+            {
+                "exercise_name": active_session.get("current_exercise"),
+                "sets": [
+                    {
+                        "set_number": _extract_set_number(text),
+                        "weight_kg": float(m.group(1)),
+                        "reps": int(m.group(2)),
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _fast_finish_response(text: str) -> str | None:
+    t = (text or "").strip().lower().replace("ё", "е")
+
+    finish_exact = {
+        "да",
+        "да закончил",
+        "да, закончил",
+        "закончил",
+        "закончена",
+        "все",
+        "всё",
+        "готово",
+        "закрывай",
+        "закрой",
+        "сохрани",
+        "сохраняй",
+        "на сегодня все",
+        "на сегодня всё",
+        "тренировка закончена",
+        "тренировку закончил",
+        "хватит",
+    }
+
+    continue_exact = {
+        "нет",
+        "не закончил",
+        "продолжаю",
+        "еще",
+        "ещё",
+        "еще делаю",
+        "ещё делаю",
+        "еще тренируюсь",
+        "ещё тренируюсь",
+        "продолжим",
+        "пока нет",
+        "не закрывай",
+        "оставь открытой",
+        "сейчас продолжу",
+        "дай еще время",
+        "дай ещё время",
+    }
+
+    danger_terms = [
+        "удали",
+        "сотри",
+        "не сохраняй",
+        "отмени тренировку",
+        "удали тренировку",
+        "очисти",
+    ]
+
+    if t in finish_exact:
+        return "finish"
+
+    if t in continue_exact:
+        return "continue"
+
+    if any(x in t for x in danger_terms):
+        return "danger"
+
+    return None
+
+
+def _parse_finish_confirmation_with_ai(text: str, active_session: dict | None) -> dict:
+    system_prompt = f"""
+Ты parser ответа на вопрос фитнес-ассистента: "Ты закончил тренировку?"
+
+Активная сессия:
+{json.dumps(active_session or {}, ensure_ascii=False)}
+
+Пользователь ответил:
+{text}
+
+Верни строго JSON:
+{{
+  "action": "finish | continue | danger | unclear",
+  "confidence": 0.0,
+  "summary": ""
+}}
+
+Правила:
+- finish: пользователь говорит, что закончил / хватит / закрывай / сохраняй.
+- continue: пользователь говорит, что продолжает / ещё тренируется / сделает ещё подходы.
+- danger: пользователь хочет удалить/не сохранять/стереть тренировку.
+- unclear: непонятно.
+Ответ только JSON.
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ],
+    )
+
+    return _safe_json_loads(response.choices[0].message.content or "{}")
+
+
+async def _close_active_workout_session(telegram_user_id: str | None, active_session: dict, reason: str = "finished") -> str:
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    if pending and pending.get("decision_type") == "active_workout_session":
+        await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+    return "Ок, тренировку закрыл. Записанные подходы сохранил."
+
+
+async def _continue_active_workout_session(telegram_user_id: str | None, active_session: dict) -> str:
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    if pending and pending.get("decision_type") == "active_workout_session":
+        active_session["session_status"] = "active"
+        active_session["last_activity_at"] = _now_iso()
+        await update_fitness_pending_decision_context(pending["id"], active_session)
+
+    current = active_session.get("current_exercise") or "текущее упражнение"
+    return f"Ок, продолжаем. Текущее упражнение: {current}."
+
+
+async def try_handle_active_workout_message(telegram_user_id: str | None, text: str) -> str | None:
+    """
+    Called before generic router.
+    Handles short context-only messages during an active workout:
+    - “Третий 20 на 10”
+    - replies to “Ты закончил тренировку?”
+    """
+
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    if not pending or pending.get("decision_type") != "active_workout_session":
+        return None
+
+    active_session = pending.get("context_json") or {}
+    status = _session_status(active_session)
+
+    normalized = (text or "").strip().lower()
+
+    # Do not swallow explicit new planning commands.
+    if "план" in normalized and any(w in normalized for w in ["запиши", "создай", "поставь", "составь"]):
+        return None
+
+    # If user sends a short set message, continue workout regardless of status.
+    if _looks_like_set_message(text):
+        parsed = _parse_set_from_short_text(text, active_session)
+        if parsed:
+            if status == "awaiting_finish_confirmation":
+                active_session["session_status"] = "active"
+                active_session["last_activity_at"] = _now_iso()
+                await update_fitness_pending_decision_context(pending["id"], active_session)
+            return await _continue_current_exercise(telegram_user_id, text, parsed, active_session)
+
+    # If bot is waiting for finish confirmation.
+    if status == "awaiting_finish_confirmation":
+        fast = _fast_finish_response(text)
+
+        if fast == "finish":
+            return await _close_active_workout_session(telegram_user_id, active_session)
+
+        if fast == "continue":
+            return await _continue_active_workout_session(telegram_user_id, active_session)
+
+        if fast == "danger":
+            return (
+                "Это опасное действие. Я не удаляю тренировку автоматически.\n"
+                "Напиши явно: “да, удали текущую тренировку” или “нет, оставь”."
+            )
+
+        parsed = _parse_finish_confirmation_with_ai(text, active_session)
+        action = parsed.get("action")
+        confidence = float(parsed.get("confidence") or 0)
+
+        if confidence >= 0.65:
+            if action == "finish":
+                return await _close_active_workout_session(telegram_user_id, active_session)
+            if action == "continue":
+                return await _continue_active_workout_session(telegram_user_id, active_session)
+            if action == "danger":
+                return (
+                    "Это опасное действие. Я не удаляю тренировку автоматически.\n"
+                    "Напиши явно: “да, удали текущую тренировку” или “нет, оставь”."
+                )
+
+        return (
+            "Я не понял, закончил ты тренировку или продолжаешь.\n"
+            "Можешь ответить обычным текстом: “закончил” или “продолжаю”."
+        )
+
+    return None
 
 
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
