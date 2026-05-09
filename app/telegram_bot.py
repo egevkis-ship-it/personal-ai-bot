@@ -14,7 +14,7 @@ from telegram.ext import (
 from app.config import settings
 from app.messages import get_ack_message
 from app.ai import parse_message, transcribe_audio, generate_general_answer
-from app.db import save_raw_message
+from app.db import save_raw_message, get_latest_fitness_pending_decision
 from app.modules.ops.status import build_status_text
 from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week, command_next_week_plan, command_month_plan, command_next_month_plan, command_fitness_debug_next_week, command_fitness_debug_month, maybe_handle_pending_decision
 from app.modules.fitness.action_v2 import try_handle_active_workout_message
@@ -202,7 +202,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text(pending_reply)
             return
 
-
+    # Safety-first: if a fitness pending decision is active, route any text
+    # to the fitness router before generic parsing. This prevents short replies
+    # like "отмена", "отменяем", "подтверждаю", "подтверджаю" from falling into unknown intent.
+    fitness_pending = await get_latest_fitness_pending_decision(user_id)
+    if fitness_pending and fitness_pending.get("decision_type") in {
+        "confirm_cancel_planned_period",
+        "awaiting_custom_workout_details",
+        "awaiting_exercise_disambiguation",
+    }:
+        fitness_reply = await handle_fitness_text(user_id, text)
+        if fitness_reply is not None:
+            await update.message.reply_text(fitness_reply)
+            return
 
     await update.message.reply_text(get_ack_message("default"))
 
@@ -272,6 +284,26 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             await update.message.reply_text(f"Расшифровка:\n{transcript}\n\n{pending_reply}")
             return
+
+        fitness_pending = await get_latest_fitness_pending_decision(user_id)
+        if fitness_pending and fitness_pending.get("decision_type") in {
+            "confirm_cancel_planned_period",
+            "awaiting_custom_workout_details",
+            "awaiting_exercise_disambiguation",
+        }:
+            fitness_reply = await handle_fitness_text(user_id, transcript)
+            if fitness_reply is not None:
+                await save_raw_message(
+                    telegram_user_id=user_id,
+                    message_type="voice",
+                    original_text=None,
+                    transcript=transcript,
+                    intent="fitness_pending",
+                    parsed_json=json.dumps({"handled_by": "fitness_pending_router"}, ensure_ascii=False),
+                    status="parsed",
+                )
+                await update.message.reply_text(f"Расшифровка:\n{transcript}\n\n{fitness_reply}")
+                return
 
         parsed = parse_message(transcript)
         parsed_json = json.dumps(parsed, ensure_ascii=False)

@@ -322,6 +322,8 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
     cancel_words = [
         "нет",
         "отмена",
+        "отменяем",
+        "отмени",
         "не надо",
         "оставь",
         "не трогай",
