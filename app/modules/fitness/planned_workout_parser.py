@@ -90,6 +90,106 @@ def normalize_planning_action(parsed: dict) -> dict:
     return parsed
 
 
+
+WORKOUT_TERMS = [
+    "тренировка",
+    "тренировки",
+    "треня",
+    "треню",
+    "трени",
+    "тренька",
+    "треньку",
+    "занятие",
+    "занятия",
+    "воркаут",
+    "workout",
+    "зал",
+    "план тренировок",
+    "тренировочный план",
+    "программа тренировок",
+    "прога",
+]
+
+PLAN_TERMS = [
+    "план",
+    "планов",
+    "заплан",
+    "программа",
+    "прога",
+    "план тренировок",
+    "тренировочный план",
+]
+
+DELETE_TERMS = [
+    "удали",
+    "удалить",
+    "убери",
+    "убрать",
+    "отмени",
+    "отменить",
+    "снеси",
+    "снести",
+    "очисти",
+    "почисти",
+    "обнули",
+    "сбрось",
+    "сними",
+    "снять",
+    "начать заново",
+    "начнем заново",
+    "начнём заново",
+    "перезапусти",
+    "пересобери",
+]
+
+CREATE_TERMS = [
+    "добавь",
+    "добавить",
+    "создай",
+    "создать",
+    "запланируй",
+    "поставь",
+    "запиши",
+    "накидай",
+    "собери",
+    "составь",
+    "сделай",
+    "хочу сделать",
+    "хочу потренироваться",
+    "давай добавим",
+]
+
+SHOW_TERMS = [
+    "покажи",
+    "дай",
+    "выведи",
+    "что у меня",
+    "какая",
+    "какие упражнения",
+    "что сегодня",
+    "что по плану",
+    "что тренируем",
+    "следующая",
+    "следующий",
+]
+
+REPLACE_TERMS = [
+    "замени",
+    "поменяй",
+    "смени",
+    "вместо",
+    "поставь вместо",
+    "лучше сделаем",
+]
+
+
+def _contains_any(text: str, terms: list[str]) -> bool:
+    return any(term in text for term in terms)
+
+
+def _has_workout_object(text: str) -> bool:
+    return _contains_any(text, WORKOUT_TERMS) or _contains_any(text, PLAN_TERMS)
+
 def fast_parse_planning_action(text: str) -> dict | None:
     """
     Deterministic shortcut layer.
@@ -118,15 +218,27 @@ def fast_parse_planning_action(text: str) -> dict | None:
             "summary": "Показать следующую плановую тренировку",
         }
 
-    # Explicit all planned cancellation.
-    if "планов" in t and "трениров" in t and "все" in t and any(x in t for x in ["удали", "отмени", "очист", "снес"]):
+    # Planned cancellation with clean fitness vocabulary.
+    has_delete_word = _contains_any(t, DELETE_TERMS)
+    has_workout_object = _has_workout_object(t)
+
+    if has_delete_word and has_workout_object:
+        scope = "all"
+
+        if "следующ" in t and "недел" in t:
+            scope = "next_week"
+        elif "текущ" in t and "недел" in t:
+            scope = "current_week"
+        elif "от сегодня" in t or "начиная с сегодня" in t or "будущ" in t:
+            scope = "future"
+
         return {
             "action": "cancel_planned_workouts",
-            "confidence": 0.96,
-            "scope": "all",
+            "confidence": 0.97,
+            "scope": scope,
             "affects": "planned_only",
             "requires_confirmation": True,
-            "summary": "Отменить все активные плановые тренировки",
+            "summary": "Отменить активные плановые тренировки",
         }
 
     return None
@@ -162,6 +274,25 @@ async def parse_planned_workout_action(text: str, context: dict | None = None) -
 Главный принцип:
 Пользователь говорит свободным языком. Нельзя требовать точных команд.
 Твоя задача — вернуть structured action JSON.
+
+Фитнес-лексика и разговорные формы:
+- "тренировка", "тренировки", "треня", "треню", "трени", "тренька", "треньку" = тренировка.
+- "занятие", "занятия", "воркаут", "workout", "зал" могут означать тренировку, если контекст про спорт.
+- "план тренировок", "тренировочный план", "программа тренировок", "прога" = плановые тренировки.
+
+Удаление/отмена планов:
+- "удали", "убери", "отмени", "снеси", "очисти", "почисти", "обнули", "сбрось", "сними" + фитнес-объект
+  => cancel_planned_workouts, planned_only=true.
+- "начать заново", "начнём заново", "перезапусти план", "пересобери план"
+  => cancel_planned_workouts, scope=all, planned_only=true, requires_confirmation=true.
+
+Создание:
+- "добавь", "создай", "запланируй", "поставь", "запиши", "накидай", "собери", "составь", "сделай",
+  "хочу потренироваться", "давай добавим" + фитнес-объект
+  => create_custom_workout.
+
+Важно:
+- dev-слова типа "деплой", "коммит", "терминал", "код", "скрипт", "чекни терминал" НЕ являются фитнес-действиями.
 
 Сегодня: {today_iso()}
 Завтра: {tomorrow_iso()}
