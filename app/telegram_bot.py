@@ -16,7 +16,7 @@ from app.messages import get_ack_message
 from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
-from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week, command_next_week_plan, command_month_plan, command_next_month_plan, command_fitness_debug_next_week, command_fitness_debug_month
+from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week, command_next_week_plan, command_month_plan, command_next_month_plan, command_fitness_debug_next_week, command_fitness_debug_month, maybe_handle_pending_decision
 from app.modules.fitness.utils import is_likely_fitness_text
 
 
@@ -173,6 +173,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = update.message.text
+
+    pending_reply = await maybe_handle_pending_decision(user_id, text)
+    if pending_reply is not None:
+        await update.message.reply_text(pending_reply)
+        return
     user_id = str(update.effective_user.id) if update.effective_user else None
 
     await update.message.reply_text(get_ack_message("default"))
