@@ -165,3 +165,42 @@ def is_likely_fitness_text(text: str | None) -> bool:
         return True
 
     return False
+
+
+
+def month_bounds(today=None):
+    from datetime import date, timedelta
+
+    if today is None:
+        today = date.today()
+
+    start = today.replace(day=1)
+
+    if today.month == 12:
+        next_month = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        next_month = today.replace(month=today.month + 1, day=1)
+
+    end = next_month - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+
+def next_month_bounds(today=None):
+    from datetime import date, timedelta
+
+    if today is None:
+        today = date.today()
+
+    if today.month == 12:
+        start = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        start = today.replace(month=today.month + 1, day=1)
+
+    if start.month == 12:
+        after_next = start.replace(year=start.year + 1, month=1, day=1)
+    else:
+        after_next = start.replace(month=start.month + 1, day=1)
+
+    end = after_next - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
