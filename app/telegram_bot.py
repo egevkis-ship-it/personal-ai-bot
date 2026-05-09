@@ -181,10 +181,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
 
-    pending_reply = await maybe_handle_pending_decision(user_id, text)
-    if pending_reply is not None:
-        await update.message.reply_text(pending_reply)
-        return
 
     await update.message.reply_text(get_ack_message("default"))
 
