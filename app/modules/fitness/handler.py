@@ -673,11 +673,13 @@ async def handle_create_plan_with_duplicate_protection(
         planned_workouts=planned_workouts,
     )
 
+    check_command = _plan_check_command_for_period(start_date, end_date)
+
     return (
         "Создал тренировочный план.\n"
         f"ID плана: {plan_id}\n"
         f"Тренировок: {len(planned_workouts)}\n\n"
-        "Напиши /week_plan, чтобы посмотреть неделю."
+        f"Напиши {check_command}, чтобы посмотреть план."
     )
 
 
@@ -768,12 +770,14 @@ async def handle_create_plan_conflict_decision(
 
         await resolve_fitness_pending_decision(pending["id"], status="resolved")
 
+        check_command = _plan_check_command_for_period(start_date, end_date)
+
         return (
             "Заменил план периода.\n\n"
             f"Отменено старых активных тренировок: {cancelled_count}\n"
             f"Создан новый план ID: {plan_id}\n"
             f"Новых тренировок: {len(planned_workouts)}\n\n"
-            "Напиши /week_plan, чтобы проверить."
+            f"Напиши {check_command}, чтобы проверить."
         )
 
     return (
@@ -783,6 +787,31 @@ async def handle_create_plan_conflict_decision(
         "- добавь к существующему\n"
         "- отмена"
     )
+
+
+
+def _plan_check_command_for_period(start_date: str | None, end_date: str | None) -> str:
+    if not start_date or not end_date:
+        return "/week_plan"
+
+    current_week_start, current_week_end = week_bounds()
+    next_week_start, next_week_end = next_week_bounds()
+    current_month_start, current_month_end = month_bounds()
+    next_month_start, next_month_end = next_month_bounds()
+
+    if start_date == current_week_start and end_date == current_week_end:
+        return "/week_plan"
+
+    if start_date == next_week_start and end_date == next_week_end:
+        return "/next_week_plan"
+
+    if start_date == current_month_start and end_date == current_month_end:
+        return "/month_plan"
+
+    if start_date == next_month_start and end_date == next_month_end:
+        return "/next_month_plan"
+
+    return "/month_plan"
 
 async def command_fitness_reset_week(telegram_user_id: str | None) -> str:
     start, end = week_bounds()
