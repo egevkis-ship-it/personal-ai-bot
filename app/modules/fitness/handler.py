@@ -22,6 +22,7 @@ from app.db import (
     get_latest_fitness_pending_decision,
     resolve_fitness_pending_decision,
     find_nearest_free_training_date,
+    reset_fitness_week_plan,
 )
 from app.modules.fitness.parser import parse_fitness_action
 from app.modules.fitness.change_parser import parse_plan_change
@@ -566,3 +567,22 @@ async def command_fitness_debug_week(telegram_user_id: str | None) -> str:
         )
 
     return "\n".join(lines)
+
+
+async def command_fitness_reset_week(telegram_user_id: str | None) -> str:
+    start, end = week_bounds()
+
+    result = await reset_fitness_week_plan(
+        telegram_user_id=telegram_user_id,
+        start_date=start,
+        end_date=end,
+        source_text="/fitness_reset_week",
+    )
+
+    return (
+        "Сбросил тренировочный план текущей недели.\n\n"
+        f"Период: {start} — {end}\n"
+        f"Отменено плановых тренировок: {result.get('affected_workouts')}\n"
+        f"Архивировано активных планов: {result.get('affected_plans')}\n\n"
+        "Фактические выполненные тренировки не трогал."
+    )

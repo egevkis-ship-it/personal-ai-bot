@@ -1295,3 +1295,143 @@ async def find_nearest_free_training_date(
                 return candidate.isoformat()
 
     return None
+
+
+async def reset_fitness_week_plan(
+    telegram_user_id: str | None,
+    start_date: str,
+    end_date: str,
+    source_text: str = "/fitness_reset_week",
+) -> dict:
+    """
+    Cancels all planned workouts for the selected week and archives active plans
+    that overlap this week. Does not delete completed workout history.
+    """
+    async with AsyncSessionLocal() as session:
+        # Count affected planned workouts first
+        count_result = await session.execute(
+            text("""
+            SELECT COUNT(*) AS cnt
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date BETWEEN :start_date AND :end_date
+              AND status IN ('planned', 'skipped', 'moved', 'replaced')
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+        affected_workouts = count_result.scalar_one()
+
+        # Mark workouts as cancelled
+        await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET status = 'cancelled',
+                notes = COALESCE(notes, '') || '\nCancelled by fitness week reset.'
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date BETWEEN :start_date AND :end_date
+              AND status IN ('planned', 'skipped', 'moved', 'replaced')
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+
+        # Add audit events for cancelled workouts
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            SELECT
+                id,
+                'cancelled',
+                NULL,
+                jsonb_build_object(
+                    'status', 'cancelled',
+                    'reason', 'fitness week reset',
+                    'start_date', :start_date_text,
+                    'end_date', :end_date_text
+                ),
+                :source_text,
+                'Cancelled by fitness week reset'
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date BETWEEN :start_date AND :end_date
+              AND status = 'cancelled'
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+                "start_date_text": start_date,
+                "end_date_text": end_date,
+                "source_text": source_text,
+            },
+        )
+
+        # Archive active plans overlapping this week
+        plan_count_result = await session.execute(
+            text("""
+            SELECT COUNT(*) AS cnt
+            FROM training_plans
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'active'
+              AND (
+                (start_date <= :end_date AND end_date >= :start_date)
+                OR start_date IS NULL
+                OR end_date IS NULL
+              )
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+        affected_plans = plan_count_result.scalar_one()
+
+        await session.execute(
+            text("""
+            UPDATE training_plans
+            SET status = 'archived',
+                notes = COALESCE(notes, '') || '\nArchived by fitness week reset.'
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'active'
+              AND (
+                (start_date <= :end_date AND end_date >= :start_date)
+                OR start_date IS NULL
+                OR end_date IS NULL
+              )
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "start_date": to_date(start_date),
+                "end_date": to_date(end_date),
+            },
+        )
+
+        # Close pending fitness decisions
+        await session.execute(
+            text("""
+            UPDATE fitness_pending_decisions
+            SET status = 'cancelled',
+                resolved_at = now()
+            WHERE telegram_user_id = :telegram_user_id
+              AND status = 'pending'
+            """),
+            {"telegram_user_id": telegram_user_id},
+        )
+
+        await session.commit()
+
+        return {
+            "affected_workouts": affected_workouts,
+            "affected_plans": affected_plans,
+            "start_date": start_date,
+            "end_date": end_date,
+        }

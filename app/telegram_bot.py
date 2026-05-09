@@ -16,7 +16,7 @@ from app.messages import get_ack_message
 from app.ai import parse_message, transcribe_audio, generate_general_answer
 from app.db import save_raw_message
 from app.modules.ops.status import build_status_text
-from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week
+from app.modules.fitness.handler import handle_fitness_text, command_today_workout, command_next_workout, command_week_plan, command_last_workout, command_last_measurement, command_fitness_debug_week, command_fitness_reset_week
 from app.modules.fitness.utils import is_likely_fitness_text
 
 
@@ -123,6 +123,13 @@ async def fitness_debug_week(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     user_id = str(update.effective_user.id) if update.effective_user else None
     await update.message.reply_text(await command_fitness_debug_week(user_id))
+
+
+async def fitness_reset_week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    await update.message.reply_text(await command_fitness_reset_week(user_id))
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -233,6 +240,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("last_workout", last_workout))
     app.add_handler(CommandHandler("last_measurement", last_measurement))
     app.add_handler(CommandHandler("fitness_debug_week", fitness_debug_week))
+    app.add_handler(CommandHandler("fitness_reset_week", fitness_reset_week))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
