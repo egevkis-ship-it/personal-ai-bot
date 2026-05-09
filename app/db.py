@@ -1342,38 +1342,6 @@ async def reset_fitness_week_plan(
             },
         )
 
-        # Add audit events for cancelled workouts
-        await session.execute(
-            text("""
-            INSERT INTO planned_workout_events
-            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
-            SELECT
-                id,
-                'cancelled',
-                NULL,
-                jsonb_build_object(
-                    'status', 'cancelled',
-                    'reason', 'fitness week reset',
-                    'start_date', :start_date_text,
-                    'end_date', :end_date_text
-                ),
-                :source_text,
-                'Cancelled by fitness week reset'
-            FROM planned_workouts
-            WHERE telegram_user_id = :telegram_user_id
-              AND planned_date BETWEEN :start_date AND :end_date
-              AND status = 'cancelled'
-            """),
-            {
-                "telegram_user_id": telegram_user_id,
-                "start_date": to_date(start_date),
-                "end_date": to_date(end_date),
-                "start_date_text": start_date,
-                "end_date_text": end_date,
-                "source_text": source_text,
-            },
-        )
-
         # Archive active plans overlapping this week
         plan_count_result = await session.execute(
             text("""
