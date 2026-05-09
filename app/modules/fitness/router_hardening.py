@@ -4,6 +4,7 @@ import re
 from datetime import date, timedelta
 
 from app.modules.fitness.exercise_history import handle_exercise_history_request
+from app.modules.fitness.custom_workout_builder import create_custom_workout_from_details
 from app.modules.fitness.exercise_normalizer import (
     normalize_exercise_name,
     get_exercise_title,
@@ -294,11 +295,36 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
 
     t = _clean(text)
 
-    if not any(x in t for x in ["да", "подтверж", "отмени", "удали", "очисти"]):
-        if any(x in t for x in ["нет", "отмена", "не надо", "оставь"]):
+    confirm_words = [
+        "да",
+        "давай",
+        "подтверж",
+        "подтверждаю",
+        "отмени",
+        "отменяй",
+        "удали",
+        "удаляй",
+        "очисти",
+        "очищай",
+    ]
+
+    cancel_words = [
+        "нет",
+        "отмена",
+        "не надо",
+        "оставь",
+        "не трогай",
+        "стоп",
+    ]
+
+    if not any(x in t for x in confirm_words):
+        if any(x in t for x in cancel_words):
             await resolve_fitness_pending_decision(pending["id"], status="cancelled")
             return "Ок, план не трогаю."
-        return None
+        return (
+            "Я жду подтверждение отмены плановых тренировок. "
+            "Напиши: “да, отмени” или “отмена”."
+        )
 
     context = pending.get("context_json") or {}
     start_date = context.get("start_date")
@@ -323,6 +349,32 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
     )
 
 
+
+
+async def _handle_custom_workout_details(telegram_user_id: str | None, text: str, pending: dict) -> str | None:
+    if not pending or pending.get("decision_type") != "awaiting_custom_workout_details":
+        return None
+
+    from app.db import resolve_fitness_pending_decision
+
+    context = pending.get("context_json") or {}
+    target_date = context.get("target_date") or _iso(_today())
+
+    t = _clean(text)
+
+    if t in {"отмена", "отмени", "не надо", "не добавляй", "cancel"}:
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return "Ок, тренировку не создаю."
+
+    reply = await create_custom_workout_from_details(
+        telegram_user_id=telegram_user_id,
+        text=text,
+        target_date=target_date,
+    )
+
+    await resolve_fitness_pending_decision(pending["id"], status="resolved")
+    return reply
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -337,6 +389,11 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
 
+    # 0. Pending details for custom workout creation.
+    reply = await _handle_custom_workout_details(telegram_user_id, text, pending)
+    if reply is not None:
+        return reply
+
     # 1. Pending уточнение упражнения должно иметь приоритет.
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
@@ -347,9 +404,21 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     if reply is not None:
         return reply
 
-    # 3. Запрет пустой custom workout.
+    # 3. Запрет пустой custom workout: create pending and ask details.
     if _is_empty_custom_workout_request(text):
-        return "Ок, добавим тренировку. Какие упражнения будем делать?"
+        target_date = _parse_ru_date(text) or _iso(_today())
+
+        await create_fitness_pending_decision(
+            telegram_user_id=telegram_user_id,
+            decision_type="awaiting_custom_workout_details",
+            context={
+                "target_date": target_date,
+                "source_text": text,
+            },
+            source_text=text,
+        )
+
+        return f"Ок, добавим тренировку на {target_date}. Какие упражнения будем делать?"
 
     # 4. Следующая тренировка / следующая тренировка с весами.
     if _is_next_workout_query(text):

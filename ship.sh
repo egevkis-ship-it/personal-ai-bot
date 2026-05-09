@@ -20,6 +20,7 @@ python3 -m py_compile \
   app/modules/fitness/pending_plan_parser.py \
   app/modules/fitness/action_v2.py \
   app/modules/fitness/router_hardening.py \
+  app/modules/fitness/custom_workout_builder.py \
   app/modules/fitness/exercise_history.py \
   app/modules/fitness/exercise_normalizer.py \
   app/modules/fitness/formatter.py \
@@ -116,6 +117,10 @@ assert normalize_exercise_name("махи в стороны")["exercise_key"] in 
 
 from app.modules.fitness.router_hardening import handle_router_hardening
 assert callable(handle_router_hardening)
+from app.modules.fitness.custom_workout_builder import parse_custom_workout_details, create_custom_workout_from_details
+assert callable(parse_custom_workout_details)
+assert callable(create_custom_workout_from_details)
+print("Custom workout builder imports: OK")
 print("Router hardening imports: OK")
 print("Exercise history imports: OK")
 print("Fitness router: OK")
