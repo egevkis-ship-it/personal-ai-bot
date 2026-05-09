@@ -20,6 +20,7 @@ from app.db import (
     update_last_fitness_set_v2,
 )
 from app.modules.fitness.exercise_history import handle_exercise_history_request
+from app.modules.fitness.router_hardening import handle_router_hardening
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_period_plan,
@@ -892,6 +893,10 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
+
+    hardening_reply = await handle_router_hardening(telegram_user_id, text)
+    if hardening_reply is not None:
+        return hardening_reply
 
     history_reply = await handle_exercise_history_request(
         telegram_user_id=telegram_user_id,

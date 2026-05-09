@@ -19,6 +19,7 @@ python3 -m py_compile \
   app/modules/fitness/pending_parser.py \
   app/modules/fitness/pending_plan_parser.py \
   app/modules/fitness/action_v2.py \
+  app/modules/fitness/router_hardening.py \
   app/modules/fitness/exercise_history.py \
   app/modules/fitness/exercise_normalizer.py \
   app/modules/fitness/formatter.py \
@@ -113,6 +114,9 @@ assert normalize_exercise_name("жим гантелей сидя")["exercise_key
 assert normalize_exercise_name("жим на плечи")["exercise_key"] == "seated_dumbbell_press"
 assert normalize_exercise_name("махи в стороны")["exercise_key"] in ("lateral_raise_seated", "lateral_raise_standing")
 
+from app.modules.fitness.router_hardening import handle_router_hardening
+assert callable(handle_router_hardening)
+print("Router hardening imports: OK")
 print("Exercise history imports: OK")
 print("Fitness router: OK")
 PY

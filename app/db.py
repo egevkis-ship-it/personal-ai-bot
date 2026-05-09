@@ -1915,3 +1915,217 @@ async def get_recent_exercise_history(
         )
 
     return list(grouped.values())[:limit_workouts]
+
+
+async def get_next_planned_workouts(
+    telegram_user_id: str | None,
+    limit: int = 3,
+) -> list[dict]:
+    """
+    Return nearest active planned workouts from today onward.
+    """
+    from datetime import date
+
+    today = date.today()
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id
+            FROM planned_workouts
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date >= :today
+              AND status = 'planned'
+            ORDER BY planned_date ASC, sequence_number ASC, id ASC
+            LIMIT :limit
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "today": today,
+                "limit": limit,
+            },
+        )
+
+        rows = result.mappings().all()
+        ids = [row["id"] for row in rows]
+
+    result = []
+    for workout_id in ids:
+        item = await get_planned_workout_by_id(workout_id)
+        if item:
+            result.append(item)
+
+    return result
+
+
+async def move_planned_workouts_between_dates(
+    telegram_user_id: str | None,
+    source_date: str,
+    target_date: str,
+    source_text: str | None = None,
+    mode: str = "move",
+) -> int:
+    """
+    Move or copy active planned workouts from source_date to target_date.
+
+    mode='move' updates original workouts.
+    mode='copy' creates a new day plan with copied workouts and keeps originals.
+    """
+    source_items = await get_planned_workouts_in_period(
+        telegram_user_id=telegram_user_id,
+        start_date=source_date,
+        end_date=source_date,
+        include_cancelled=False,
+    )
+
+    active_items = [
+        item for item in source_items
+        if (item.get("workout") or {}).get("status") == "planned"
+    ]
+
+    if not active_items:
+        return 0
+
+    if mode == "copy":
+        planned_workouts = []
+        for i, item in enumerate(active_items, start=1):
+            workout = item.get("workout") or {}
+            exercises = item.get("exercises") or []
+
+            copied_exercises = []
+            for ex_index, ex in enumerate(exercises, start=1):
+                copied_exercises.append(
+                    {
+                        "exercise_order": ex.get("exercise_order") or ex_index,
+                        "exercise_name": ex.get("exercise_name"),
+                        "target_sets": ex.get("target_sets"),
+                        "target_reps_min": ex.get("target_reps_min"),
+                        "target_reps_max": ex.get("target_reps_max"),
+                        "target_reps_text": ex.get("target_reps_text"),
+                        "target_weight_kg": ex.get("target_weight_kg"),
+                        "notes": ex.get("notes"),
+                    }
+                )
+
+            planned_workouts.append(
+                {
+                    "planned_date": target_date,
+                    "weekday": None,
+                    "sequence_number": i,
+                    "is_floating": False,
+                    "title": workout.get("title"),
+                    "focus": workout.get("focus"),
+                    "focus_label": workout.get("focus_label"),
+                    "workout_type": workout.get("workout_type") or "copied",
+                    "status": "planned",
+                    "notes": f"Copied from {source_date}",
+                    "exercises": copied_exercises,
+                }
+            )
+
+        await save_training_plan(
+            telegram_user_id=telegram_user_id,
+            plan_name=f"Copied workout from {source_date}",
+            period_type="day",
+            start_date=target_date,
+            end_date=target_date,
+            source_text=source_text,
+            notes=f"Copied from {source_date}",
+            planned_workouts=planned_workouts,
+        )
+        return len(planned_workouts)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET planned_date = :target_date,
+                notes = COALESCE(notes, '') || :note
+            WHERE telegram_user_id = :telegram_user_id
+              AND planned_date = :source_date
+              AND status = 'planned'
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "source_date": to_date(source_date),
+                "target_date": to_date(target_date),
+                "note": f"\nMoved from {source_date}",
+            },
+        )
+
+        rows = result.mappings().all()
+        ids = [row["id"] for row in rows]
+
+        for workout_id in ids:
+            await session.execute(
+                text("""
+                INSERT INTO planned_workout_events
+                (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+                VALUES
+                (:planned_workout_id, 'moved', CAST(:old_value_json AS JSONB), CAST(:new_value_json AS JSONB), :source_text, :notes)
+                """),
+                {
+                    "planned_workout_id": workout_id,
+                    "old_value_json": json.dumps({"planned_date": source_date}, ensure_ascii=False),
+                    "new_value_json": json.dumps({"planned_date": target_date}, ensure_ascii=False),
+                    "source_text": source_text,
+                    "notes": "Moved planned workout between dates",
+                },
+            )
+
+        await session.commit()
+        return len(ids)
+
+
+async def cleanup_empty_planned_workouts(
+    telegram_user_id: str | None,
+) -> int:
+    """
+    Cancel planned workouts that have no exercises and no focus.
+    Does not touch actual workout history.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            UPDATE planned_workouts pw
+            SET status = 'cancelled',
+                notes = COALESCE(pw.notes, '') || '\nCancelled by empty workout cleanup'
+            WHERE pw.telegram_user_id = :telegram_user_id
+              AND pw.status = 'planned'
+              AND COALESCE(pw.focus, '') = ''
+              AND COALESCE(pw.focus_label, '') = ''
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM planned_workout_exercises ex
+                  WHERE ex.planned_workout_id = pw.id
+              )
+            RETURNING id
+            """),
+            {"telegram_user_id": telegram_user_id},
+        )
+
+        rows = result.mappings().all()
+        ids = [row["id"] for row in rows]
+
+        for workout_id in ids:
+            await session.execute(
+                text("""
+                INSERT INTO planned_workout_events
+                (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+                VALUES
+                (:planned_workout_id, 'cancelled', NULL, CAST(:new_value_json AS JSONB), :source_text, :notes)
+                """),
+                {
+                    "planned_workout_id": workout_id,
+                    "new_value_json": json.dumps(
+                        {"status": "cancelled", "reason": "empty workout cleanup"},
+                        ensure_ascii=False,
+                    ),
+                    "source_text": "/fitness_cleanup_empty_planned",
+                    "notes": "Cancelled by empty planned workout cleanup",
+                },
+            )
+
+        await session.commit()
+        return len(ids)
