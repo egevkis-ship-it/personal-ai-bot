@@ -399,12 +399,19 @@ async def get_today_planned_workout(telegram_user_id: str | None, today: str) ->
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
-            SELECT *
-            FROM planned_workouts
-            WHERE telegram_user_id = :telegram_user_id
-              AND planned_date = :today
-              AND status = 'planned'
-            ORDER BY sequence_number NULLS LAST, id
+            SELECT pw.*
+            FROM planned_workouts pw
+            WHERE pw.telegram_user_id = :telegram_user_id
+              AND pw.planned_date = :today
+              AND pw.status = 'planned'
+            ORDER BY
+              CASE WHEN EXISTS (
+                SELECT 1
+                FROM planned_exercises ex
+                WHERE ex.planned_workout_id = pw.id
+              ) THEN 0 ELSE 1 END,
+              pw.sequence_number NULLS LAST,
+              pw.id DESC
             LIMIT 1
             """),
             {"telegram_user_id": telegram_user_id, "today": to_date(today)},
@@ -1931,12 +1938,15 @@ async def get_next_planned_workouts(
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
-            SELECT id
-            FROM planned_workouts
-            WHERE telegram_user_id = :telegram_user_id
-              AND planned_date >= :today
-              AND status = 'planned'
-            ORDER BY planned_date ASC, sequence_number ASC, id ASC
+            SELECT pw.id
+            FROM planned_workouts pw
+            WHERE pw.telegram_user_id = :telegram_user_id
+              AND pw.planned_date >= :today
+              AND pw.status = 'planned'
+              AND EXISTS (
+                SELECT 1 FROM planned_exercises ex WHERE ex.planned_workout_id = pw.id
+              )
+            ORDER BY pw.planned_date ASC, pw.sequence_number ASC, pw.id DESC
             LIMIT :limit
             """),
             {
@@ -2097,7 +2107,7 @@ async def cleanup_empty_planned_workouts(
               AND COALESCE(pw.focus_label, '') = ''
               AND NOT EXISTS (
                   SELECT 1
-                  FROM planned_workout_exercises ex
+                  FROM planned_exercises ex
                   WHERE ex.planned_workout_id = pw.id
               )
             RETURNING id
