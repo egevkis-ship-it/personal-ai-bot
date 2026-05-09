@@ -183,7 +183,9 @@ def format_week_plan(items: list[dict]) -> str:
         planned_date = parse_date(workout.get("planned_date"))
         status = workout.get("status")
 
-        if status in ("completed", "completed_modified", "skipped", "cancelled", "replaced"):
+        if status == "cancelled":
+            continue
+        if status in ("completed", "completed_modified", "skipped", "replaced"):
             done.append(item)
         elif not planned_date:
             floating.append(item)
