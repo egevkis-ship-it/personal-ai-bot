@@ -18,11 +18,15 @@ echo "== 2. Fitness regression smoke =="
 python3 scripts/smoke_fitness.py
 
 echo
-echo "== 3. Existing ship =="
+echo "== 3. Internal parser scenarios =="
+python3 scripts/run_internal_scenarios.py
+
+echo
+echo "== 4. Existing ship =="
 ./ship.sh "$MSG"
 
 echo
-echo "== 4. Coolify deploy webhook =="
+echo "== 5. Coolify deploy webhook =="
 if [[ -f ".env" ]]; then
   set -a
   source .env
@@ -46,5 +50,5 @@ else
 fi
 
 echo
-echo "== 5. Last commits =="
+echo "== 6. Last commits =="
 git log --oneline -3
