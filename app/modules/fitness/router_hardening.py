@@ -742,7 +742,9 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     # Delete currently selected workout only:
     # “удали эту тренировку”, “отмени эту тренировку”.
     if _looks_like_delete_selected_workout(text):
-        selected_context = pending.get("context") if pending and pending.get("decision_type") == "selected_planned_workout_context" else None
+        from app.modules.fitness.planned_workout_executor import _get_selected_planned_workout_context
+
+        selected_context = await _get_selected_planned_workout_context(telegram_user_id)
         target_date = selected_context.get("target_date") if selected_context else None
 
         if target_date:
