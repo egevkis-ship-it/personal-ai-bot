@@ -22,6 +22,12 @@ def get_build_hash() -> str:
     if env_build:
         return env_build.strip()
 
+    build_file = Path(__file__).resolve().parent.parent / "BUILD"
+    if build_file.exists():
+        value = build_file.read_text().strip()
+        if value:
+            return value
+
     try:
         repo_root = Path(__file__).resolve().parent.parent
         return subprocess.check_output(
