@@ -1970,6 +1970,242 @@ async def get_next_planned_workouts(
 
 
 
+
+
+async def copy_planned_workouts_period(
+    telegram_user_id: str | None,
+    source_start_date: str,
+    source_end_date: str,
+    target_start_date: str,
+    target_end_date: str,
+    collision_policy: str = "skip_existing",
+    source_text: str | None = None,
+) -> dict:
+    """
+    Copy all active planned workouts from source period to target period,
+    preserving day offsets. Duplicate-safe by default.
+    """
+    from datetime import date as date_type, timedelta
+
+    if not telegram_user_id:
+        return {"ok": False, "created": [], "skipped": [], "reason": "telegram_user_id is missing"}
+
+    source_start = date_type.fromisoformat(source_start_date) if isinstance(source_start_date, str) else source_start_date
+    source_end = date_type.fromisoformat(source_end_date) if isinstance(source_end_date, str) else source_end_date
+    target_start = date_type.fromisoformat(target_start_date) if isinstance(target_start_date, str) else target_start_date
+    target_end = date_type.fromisoformat(target_end_date) if isinstance(target_end_date, str) else target_end_date
+
+    created = []
+    skipped = []
+
+    async with AsyncSessionLocal() as session:
+        source_result = await session.execute(
+            text(
+                """
+                SELECT id, planned_date, title, focus, focus_label, workout_type, notes
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date >= :source_start
+                  AND planned_date <= :source_end
+                  AND status = 'planned'
+                ORDER BY planned_date, id
+                """
+            ),
+            {
+                "telegram_user_id": str(telegram_user_id),
+                "source_start": source_start,
+                "source_end": source_end,
+            },
+        )
+        source_workouts = list(source_result.mappings())
+
+        if not source_workouts:
+            return {
+                "ok": True,
+                "created": [],
+                "skipped": [],
+                "source_count": 0,
+            }
+
+        source_period_days = (source_end - source_start).days + 1
+        target_period_days = (target_end - target_start).days + 1
+
+        for period_offset in range(0, target_period_days, source_period_days):
+            for workout in source_workouts:
+                source_date = workout["planned_date"]
+                offset_days = (source_date - source_start).days
+                target_date = target_start + timedelta(days=period_offset + offset_days)
+
+                if target_date > target_end:
+                    continue
+
+                existing_result = await session.execute(
+                    text(
+                        """
+                        SELECT id, title
+                        FROM planned_workouts
+                        WHERE telegram_user_id = :telegram_user_id
+                          AND planned_date = :target_date
+                          AND status = 'planned'
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "telegram_user_id": str(telegram_user_id),
+                        "target_date": target_date,
+                    },
+                )
+                existing = existing_result.mappings().first()
+
+                if existing and collision_policy != "replace_existing":
+                    skipped.append({
+                        "target_date": target_date.isoformat(),
+                        "reason": f"уже есть активная тренировка — {existing['title'] or 'Плановая тренировка'}",
+                    })
+                    continue
+
+                if existing and collision_policy == "replace_existing":
+                    await session.execute(
+                        text(
+                            """
+                            UPDATE planned_workouts
+                            SET status = 'cancelled'
+                            WHERE telegram_user_id = :telegram_user_id
+                              AND planned_date = :target_date
+                              AND status = 'planned'
+                            """
+                        ),
+                        {
+                            "telegram_user_id": str(telegram_user_id),
+                            "target_date": target_date,
+                        },
+                    )
+
+                insert_result = await session.execute(
+                    text(
+                        """
+                        INSERT INTO planned_workouts (
+                            telegram_user_id,
+                            training_plan_id,
+                            planned_date,
+                            weekday,
+                            sequence_number,
+                            is_floating,
+                            title,
+                            focus,
+                            focus_label,
+                            workout_type,
+                            status,
+                            notes
+                        )
+                        VALUES (
+                            :telegram_user_id,
+                            NULL,
+                            :planned_date,
+                            :weekday,
+                            1,
+                            false,
+                            :title,
+                            :focus,
+                            :focus_label,
+                            :workout_type,
+                            'planned',
+                            :notes
+                        )
+                        RETURNING id
+                        """
+                    ),
+                    {
+                        "telegram_user_id": str(telegram_user_id),
+                        "planned_date": target_date,
+                        "weekday": target_date.strftime("%A"),
+                        "title": workout["title"],
+                        "focus": workout["focus"],
+                        "focus_label": workout["focus_label"],
+                        "workout_type": workout["workout_type"] or "planned",
+                        "notes": workout["notes"],
+                    },
+                )
+                new_workout_id = insert_result.scalar_one()
+
+                exercises_result = await session.execute(
+                    text(
+                        """
+                        SELECT
+                            exercise_order,
+                            exercise_name,
+                            target_sets,
+                            target_reps_min,
+                            target_reps_max,
+                            target_reps_text,
+                            target_weight_kg,
+                            notes
+                        FROM planned_exercises
+                        WHERE planned_workout_id = :planned_workout_id
+                        ORDER BY exercise_order, id
+                        """
+                    ),
+                    {"planned_workout_id": int(workout["id"])},
+                )
+                exercises = list(exercises_result.mappings())
+
+                for exercise in exercises:
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO planned_exercises (
+                                planned_workout_id,
+                                exercise_order,
+                                exercise_name,
+                                target_sets,
+                                target_reps_min,
+                                target_reps_max,
+                                target_reps_text,
+                                target_weight_kg,
+                                notes
+                            )
+                            VALUES (
+                                :planned_workout_id,
+                                :exercise_order,
+                                :exercise_name,
+                                :target_sets,
+                                :target_reps_min,
+                                :target_reps_max,
+                                :target_reps_text,
+                                :target_weight_kg,
+                                :notes
+                            )
+                            """
+                        ),
+                        {
+                            "planned_workout_id": int(new_workout_id),
+                            "exercise_order": exercise["exercise_order"],
+                            "exercise_name": exercise["exercise_name"],
+                            "target_sets": exercise["target_sets"],
+                            "target_reps_min": exercise["target_reps_min"],
+                            "target_reps_max": exercise["target_reps_max"],
+                            "target_reps_text": exercise["target_reps_text"],
+                            "target_weight_kg": exercise["target_weight_kg"],
+                            "notes": exercise["notes"],
+                        },
+                    )
+
+                created.append({
+                    "target_date": target_date.isoformat(),
+                    "title": workout["title"] or "Плановая тренировка",
+                    "source_date": source_date.isoformat(),
+                })
+
+        await session.commit()
+
+    return {
+        "ok": True,
+        "created": created,
+        "skipped": skipped,
+        "source_count": len(source_workouts),
+    }
+
+
 async def has_active_planned_workout_on_date(
     telegram_user_id: str | None,
     target_date: str,

@@ -697,6 +697,60 @@ def _parse_delete_from_date(text: str | None) -> str | None:
         return None
 
 
+
+
+def _parse_copy_week_period_action(text: str | None) -> dict | None:
+    from datetime import date, timedelta
+
+    t = _clean(text).replace("ё", "е")
+    if not t:
+        return None
+
+    if not any(x in t for x in ["скопируй", "копируй", "продублируй", "дублируй"]):
+        return None
+
+    if not any(x in t for x in ["эту неделю", "текущую неделю", "неделю"]):
+        return None
+
+    # Do not hijack selected single workout copy.
+    if any(x in t for x in ["эту тренировку", "тренировку", "треньку", "треню"]):
+        return None
+
+    today = date.today()
+
+    # On Sunday, users usually mean the upcoming training week.
+    if today.weekday() == 6:
+        source_start = today + timedelta(days=1)
+    else:
+        source_start = today - timedelta(days=today.weekday())
+
+    source_end = source_start + timedelta(days=6)
+
+    target_weeks = 1
+    if "4 недели" in t or "четыре недели" in t or "следующие 4 недели" in t:
+        target_weeks = 4
+    elif "3 недели" in t or "три недели" in t or "следующие 3 недели" in t:
+        target_weeks = 3
+    elif "2 недели" in t or "две недели" in t or "следующие 2 недели" in t:
+        target_weeks = 2
+
+    target_start = source_start + timedelta(days=7)
+    target_end = target_start + timedelta(days=7 * target_weeks - 1)
+
+    return {
+        "action": "copy_period_workouts",
+        "confidence": 0.97,
+        "source_scope": "week",
+        "source_start_date": source_start.isoformat(),
+        "source_end_date": source_end.isoformat(),
+        "target_start_date": target_start.isoformat(),
+        "target_end_date": target_end.isoformat(),
+        "target_weeks": target_weeks,
+        "collision_policy": "skip_existing",
+        "summary": "Скопировать тренировки недели на следующий период",
+    }
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -738,6 +792,17 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # Copy whole week/period before generic selected-workout copy.
+    copy_week_action = _parse_copy_week_period_action(text)
+    if copy_week_action:
+        planned_reply = await execute_planned_workout_action(
+            telegram_user_id=telegram_user_id,
+            action=copy_week_action,
+            source_text=text,
+        )
+        if planned_reply:
+            return planned_reply
 
     # Delete currently selected workout only:
     # “удали эту тренировку”, “отмени эту тренировку”.

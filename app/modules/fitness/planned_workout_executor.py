@@ -946,6 +946,56 @@ async def execute_planned_workout_action(
         )
         return f"Перенёс плановые тренировки с {source_date} на {target_date}.\nПеренесено: {moved}"
 
+    if action_name == "copy_period_workouts":
+        from app.db import copy_planned_workouts_period
+
+        source_start_date = action.get("source_start_date")
+        source_end_date = action.get("source_end_date")
+        target_start_date = action.get("target_start_date")
+        target_end_date = action.get("target_end_date")
+        collision_policy = action.get("collision_policy") or "skip_existing"
+
+        result = await copy_planned_workouts_period(
+            telegram_user_id=telegram_user_id,
+            source_start_date=source_start_date,
+            source_end_date=source_end_date,
+            target_start_date=target_start_date,
+            target_end_date=target_end_date,
+            collision_policy=collision_policy,
+            source_text=source_text,
+        )
+
+        created = result.get("created") or []
+        skipped = result.get("skipped") or []
+
+        lines = [
+            f"Скопировал неделю {source_start_date} — {source_end_date}.",
+            "",
+            f"Целевой период: {target_start_date} — {target_end_date}",
+            "",
+            f"Создано тренировок: {len(created)}",
+        ]
+
+        for item in created[:20]:
+            lines.append(
+                f"- {item.get('target_date')}: {item.get('title')} "
+                f"(из {item.get('source_date')})"
+            )
+
+        if len(created) > 20:
+            lines.append(f"- ... ещё {len(created) - 20}")
+
+        if skipped:
+            lines.append("")
+            lines.append(f"Пропущено: {len(skipped)}")
+            for item in skipped[:20]:
+                lines.append(f"- {item.get('target_date')}: {item.get('reason')}")
+
+            if len(skipped) > 20:
+                lines.append(f"- ... ещё {len(skipped) - 20}")
+
+        return "\n".join(lines)
+
     if action_name == "compound_edit_workout":
         from app.modules.fitness.planned_workout_editor import fast_parse_workout_edit
 
