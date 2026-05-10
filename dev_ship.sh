@@ -30,8 +30,15 @@ if [[ -f ".env" ]]; then
 fi
 
 if [[ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]]; then
-  curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" || \
-  curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK"
+  if [[ -n "${COOLIFY_TOKEN:-}" ]]; then
+    curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" \
+      -H "Authorization: Bearer $COOLIFY_TOKEN" || \
+    curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK" \
+      -H "Authorization: Bearer $COOLIFY_TOKEN"
+  else
+    curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" || \
+    curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK"
+  fi
   echo
   echo "Coolify deploy triggered"
 else
