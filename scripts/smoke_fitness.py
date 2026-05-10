@@ -12,6 +12,8 @@ from app.modules.fitness.program_import_executor import (
     _build_dates_every_other_day,
     _parse_weekday_layout,
 )
+from app.modules.fitness.utils import is_likely_fitness_text
+
 from app.modules.fitness.program_importer import (
     format_program_import_preview,
     parse_training_program_text,
@@ -77,10 +79,26 @@ def test_cancel_confirmation_parser() -> None:
     assert_equal(_parse_pending_cancel_confirmation("покажи план"), "unknown", "unknown unrelated command")
 
 
+
+def test_fitness_pre_router_copy_commands() -> None:
+    truthy = [
+        "скопируй на следующую неделю",
+        "продублируй на следующую неделю",
+        "скопируй на весь месяц",
+        "повтори на следующий месяц",
+    ]
+
+    for text in truthy:
+        assert_equal(is_likely_fitness_text(text), True, f"fitness pre-router {text}")
+
+    assert_equal(is_likely_fitness_text("скопируй файл"), False, "non-fitness copy file")
+
+
 def main() -> None:
     test_program_preview()
     test_program_layout()
     test_cancel_confirmation_parser()
+    test_fitness_pre_router_copy_commands()
     print("Fitness smoke tests: OK")
 
 

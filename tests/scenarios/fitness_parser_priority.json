@@ -86,6 +86,26 @@
       "name": "implicit copy selected workout full month",
       "input": "скопируй на весь месяц",
       "expect_action": "copy_workout"
+    },
+    {
+      "name": "show all workouts means future active planned",
+      "input": "покажи все тренировки",
+      "expect_action": "show_period_plan",
+      "expect_scope": "future"
+    },
+    {
+      "name": "show all planned workouts means future active planned",
+      "input": "покажи все запланированные тренировки",
+      "expect_action": "show_period_plan",
+      "expect_scope": "future"
+    },
+    {
+      "name": "show all workouts for month still means month period",
+      "input": "покажи все тренировки на месяц",
+      "expect_action": "show_period_plan",
+      "expect_scope": "period",
+      "expect_start_date": "2026-05-01",
+      "expect_end_date": "2026-05-31"
     }
   ]
 }
