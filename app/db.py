@@ -3271,9 +3271,65 @@ async def import_training_program_to_calendar(
 
     created = []
     skipped = []
+    replaced = []
 
     for index, target_date in enumerate(target_dates):
         day = days[index % len(days)]
+
+        if not skip_existing:
+            from datetime import date as date_type
+
+            target_date_value = (
+                date_type.fromisoformat(target_date)
+                if isinstance(target_date, str)
+                else target_date
+            )
+
+            async with AsyncSessionLocal() as session:
+                existing_result = await session.execute(
+                    text(
+                        """
+                        SELECT id, title
+                        FROM planned_workouts
+                        WHERE telegram_user_id = :telegram_user_id
+                          AND planned_date = :target_date
+                          AND status = 'planned'
+                        ORDER BY id
+                        """
+                    ),
+                    {
+                        "telegram_user_id": str(telegram_user_id),
+                        "target_date": target_date_value,
+                    },
+                )
+                existing_rows = list(existing_result.mappings())
+
+                if existing_rows:
+                    await session.execute(
+                        text(
+                            """
+                            UPDATE planned_workouts
+                            SET status = 'cancelled'
+                            WHERE telegram_user_id = :telegram_user_id
+                              AND planned_date = :target_date
+                              AND status = 'planned'
+                            """
+                        ),
+                        {
+                            "telegram_user_id": str(telegram_user_id),
+                            "target_date": target_date_value,
+                        },
+                    )
+                    await session.commit()
+
+                    for row in existing_rows:
+                        replaced.append(
+                            {
+                                "target_date": target_date,
+                                "planned_workout_id": int(row["id"]),
+                                "title": row["title"] or "Плановая тренировка",
+                            }
+                        )
 
         result = await create_planned_workout_from_program_day(
             telegram_user_id=telegram_user_id,
@@ -3295,4 +3351,5 @@ async def import_training_program_to_calendar(
         "ok": True,
         "created": created,
         "skipped": skipped,
+        "replaced": replaced,
     }
