@@ -378,6 +378,13 @@ async def run_scenario(path: Path) -> tuple[int, int]:
     print(f"DB dialog scenario: {data.get('name') or path.name}")
     print(f"  test_user={user_id}")
 
+    seed_many = data.get("seed_many") or []
+    if seed_many:
+        for seed_item in seed_many:
+            seed_reply = await seed_scenario(user_id, seed_item)
+            first_line = seed_reply.splitlines()[0] if seed_reply else "seed done"
+            print(f"  🌱 seed: {first_line}")
+
     seed = data.get("seed")
     if seed:
         seed_reply = await seed_scenario(user_id, seed)
