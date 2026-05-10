@@ -763,6 +763,168 @@ def _parse_copy_week_period_action(text: str | None) -> dict | None:
     }
 
 
+
+
+def _month_bounds(year: int, month: int) -> tuple[str, str]:
+    from datetime import date, timedelta
+
+    start = date(year, month, 1)
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+
+    end = next_month - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+def _parse_russian_day_month(value: str | None):
+    import re
+    from datetime import date
+
+    t = _clean(value).replace("ё", "е")
+
+    months = {
+        "января": 1, "январь": 1,
+        "февраля": 2, "февраль": 2,
+        "марта": 3, "март": 3,
+        "апреля": 4, "апрель": 4,
+        "мая": 5, "май": 5,
+        "июня": 6, "июнь": 6,
+        "июля": 7, "июль": 7,
+        "августа": 8, "август": 8,
+        "сентября": 9, "сентябрь": 9,
+        "октября": 10, "октябрь": 10,
+        "ноября": 11, "ноябрь": 11,
+        "декабря": 12, "декабрь": 12,
+    }
+
+    m = re.search(r"(\d{1,2})\s+([а-яa-z]+)(?:\s+(\d{4}))?", t)
+    if not m:
+        return None
+
+    day = int(m.group(1))
+    month = months.get(m.group(2))
+    year = int(m.group(3)) if m.group(3) else date.today().year
+
+    if not month:
+        return None
+
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _parse_copy_month_or_custom_period_action(text: str | None) -> dict | None:
+    import re
+    from datetime import date
+
+    t = _clean(text).replace("ё", "е")
+    if not t:
+        return None
+
+    if not any(x in t for x in ["скопируй", "копируй", "продублируй", "дублируй"]):
+        return None
+
+    months = {
+        "январь": 1, "января": 1,
+        "февраль": 2, "февраля": 2,
+        "март": 3, "марта": 3,
+        "апрель": 4, "апреля": 4,
+        "май": 5, "мая": 5,
+        "июнь": 6, "июня": 6,
+        "июль": 7, "июля": 7,
+        "август": 8, "августа": 8,
+        "сентябрь": 9, "сентября": 9,
+        "октябрь": 10, "октября": 10,
+        "ноябрь": 11, "ноября": 11,
+        "декабрь": 12, "декабря": 12,
+    }
+
+    today = date.today()
+
+    # "скопируй этот месяц на следующий"
+    if "этот месяц" in t and "следующ" in t:
+        source_start, source_end = _month_bounds(today.year, today.month)
+
+        target_month = today.month + 1
+        target_year = today.year
+        if target_month == 13:
+            target_month = 1
+            target_year += 1
+
+        target_start, target_end = _month_bounds(target_year, target_month)
+
+        return {
+            "action": "copy_period_workouts",
+            "confidence": 0.97,
+            "source_scope": "month",
+            "source_start_date": source_start,
+            "source_end_date": source_end,
+            "target_start_date": target_start,
+            "target_end_date": target_end,
+            "collision_policy": "skip_existing",
+            "summary": "Скопировать текущий месяц на следующий",
+        }
+
+    # "скопируй май на июнь"
+    m = re.search(r"скопируй\s+([а-я]+)\s+на\s+([а-я]+)", t)
+    if m:
+        source_month = months.get(m.group(1))
+        target_month = months.get(m.group(2))
+
+        if source_month and target_month:
+            source_year = today.year
+            target_year = today.year
+
+            if target_month < source_month:
+                target_year += 1
+
+            source_start, source_end = _month_bounds(source_year, source_month)
+            target_start, target_end = _month_bounds(target_year, target_month)
+
+            return {
+                "action": "copy_period_workouts",
+                "confidence": 0.97,
+                "source_scope": "named_month",
+                "source_start_date": source_start,
+                "source_end_date": source_end,
+                "target_start_date": target_start,
+                "target_end_date": target_end,
+                "collision_policy": "skip_existing",
+                "summary": "Скопировать месяц на месяц",
+            }
+
+    # "скопируй период с 11 мая по 15 мая начиная с 18 мая"
+    m = re.search(
+        r"период\s+с\s+(.+?)\s+по\s+(.+?)(?:\s+начиная\s+с|\s+с)\s+(.+)$",
+        t,
+    )
+    if m:
+        source_start_d = _parse_russian_day_month(m.group(1))
+        source_end_d = _parse_russian_day_month(m.group(2))
+        target_start_d = _parse_russian_day_month(m.group(3))
+
+        if source_start_d and source_end_d and target_start_d:
+            duration_days = (source_end_d - source_start_d).days
+            target_end_d = target_start_d.fromordinal(target_start_d.toordinal() + duration_days)
+
+            return {
+                "action": "copy_period_workouts",
+                "confidence": 0.97,
+                "source_scope": "custom_period",
+                "source_start_date": source_start_d.isoformat(),
+                "source_end_date": source_end_d.isoformat(),
+                "target_start_date": target_start_d.isoformat(),
+                "target_end_date": target_end_d.isoformat(),
+                "collision_policy": "skip_existing",
+                "summary": "Скопировать произвольный период",
+            }
+
+    return None
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -804,6 +966,17 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # Copy month/custom period before week/single workout copy.
+    copy_period_action = _parse_copy_month_or_custom_period_action(text)
+    if copy_period_action:
+        planned_reply = await execute_planned_workout_action(
+            telegram_user_id=telegram_user_id,
+            action=copy_period_action,
+            source_text=text,
+        )
+        if planned_reply:
+            return planned_reply
 
     # Copy whole week/period before generic selected-workout copy.
     copy_week_action = _parse_copy_week_period_action(text)

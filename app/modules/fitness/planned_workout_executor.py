@@ -969,7 +969,7 @@ async def execute_planned_workout_action(
         skipped = result.get("skipped") or []
 
         lines = [
-            f"Скопировал неделю {source_start_date} — {source_end_date}.",
+            f"Скопировал период {source_start_date} — {source_end_date}.",
             "",
             f"Целевой период: {target_start_date} — {target_end_date}",
             "",
