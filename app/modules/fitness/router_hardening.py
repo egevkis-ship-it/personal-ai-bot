@@ -638,6 +638,13 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
 
+    # Pending details must be handled before generic planned-workout parser.
+    # Otherwise a reply like “сделаем жим присед...” is parsed as a new workout for today,
+    # instead of filling the pending workout date selected in the previous message.
+    reply = await _handle_custom_workout_details(telegram_user_id, text, pending)
+    if reply is not None:
+        return reply
+
     # Program import pending has priority over generic parser:
     # user answers with schedule like “пн ср пт сб на 4 недели” or “отмена”.
     reply = await handle_training_program_import_pending(telegram_user_id, text)
@@ -703,11 +710,6 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     )
     if planned_reply is not None:
         return planned_reply
-
-    # 0. Pending details for custom workout creation.
-    reply = await _handle_custom_workout_details(telegram_user_id, text, pending)
-    if reply is not None:
-        return reply
 
     # 3. Запрет пустой custom workout: create pending and ask details.
     if _is_empty_custom_workout_request(text):
