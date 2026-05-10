@@ -953,20 +953,37 @@ def _is_period_copy_reject(text: str | None) -> bool:
     }
 
 
+
+
+async def _clear_period_copy_pending(telegram_user_id: str) -> None:
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                """
+                DELETE FROM fitness_pending_decisions
+                WHERE telegram_user_id = :telegram_user_id
+                  AND decision_type = 'pending_period_copy_confirmation'
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id)},
+        )
+        await session.commit()
+
+
 async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pending: dict | None) -> str | None:
     if not pending or pending.get("decision_type") != "pending_period_copy_confirmation":
         return None
 
-    from app.db import clear_fitness_pending_decision
     from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
 
     context = pending.get("context") or {}
 
     if _is_period_copy_reject(text):
-        await clear_fitness_pending_decision(
-            telegram_user_id=telegram_user_id,
-            decision_type="pending_period_copy_confirmation",
-        )
+        await _clear_period_copy_pending(telegram_user_id)
         return "Ок, не копирую. План тренировок не изменён."
 
     if not _is_period_copy_confirm(text):
@@ -976,10 +993,7 @@ async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pen
             "Чтобы отменить — “не надо” или “стоп”."
         )
 
-    await clear_fitness_pending_decision(
-        telegram_user_id=telegram_user_id,
-        decision_type="pending_period_copy_confirmation",
-    )
+    await _clear_period_copy_pending(telegram_user_id)
 
     action = context.get("action") or {}
     return await execute_planned_workout_action(
