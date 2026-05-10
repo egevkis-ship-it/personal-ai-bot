@@ -1,0 +1,59 @@
+{
+  "name": "fitness parser priority smoke",
+  "cases": [
+    {
+      "name": "delete planned must not be show planned",
+      "input": "удали запланированные тренировки",
+      "expect_action": "cancel_planned_workouts"
+    },
+    {
+      "name": "show planned must be show period plan",
+      "input": "покажи запланированные тренировки",
+      "expect_action": "show_period_plan"
+    },
+    {
+      "name": "month plan current",
+      "input": "покажи план тренировок на месяц",
+      "expect_action": "show_period_plan"
+    },
+    {
+      "name": "month plan next",
+      "input": "покажи план тренировок на следующий месяц",
+      "expect_action": "show_period_plan"
+    },
+    {
+      "name": "create workout must not be edit",
+      "input": "давай добавим тренировку в понедельник грудь жим лежа 4 по 10",
+      "expect_not_action": "edit_planned_workout"
+    },
+    {
+      "name": "copy selected workout phrase",
+      "input": "скопируй эту тренировку на следующую неделю",
+      "expect_action_any": [
+        "copy_planned_workout",
+        "copy_workout",
+        "copy_workout_recurring"
+      ],
+      "todo": true,
+      "todo_reason": "Copy selected workout parser is planned but not implemented yet."
+    },
+    {
+      "name": "cancel confirmation confirm",
+      "parser": "cancel_confirmation",
+      "input": "отмена",
+      "expect_decision": "confirm"
+    },
+    {
+      "name": "cancel confirmation reject",
+      "parser": "cancel_confirmation",
+      "input": "не надо",
+      "expect_decision": "reject"
+    },
+    {
+      "name": "cancel confirmation unknown",
+      "parser": "cancel_confirmation",
+      "input": "покажи план",
+      "expect_decision": "unknown"
+    }
+  ]
+}
