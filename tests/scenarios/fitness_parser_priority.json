@@ -29,13 +29,7 @@
     {
       "name": "copy selected workout phrase",
       "input": "скопируй эту тренировку на следующую неделю",
-      "expect_action_any": [
-        "copy_planned_workout",
-        "copy_workout",
-        "copy_workout_recurring"
-      ],
-      "todo": true,
-      "todo_reason": "Copy selected workout parser is planned but not implemented yet."
+      "expect_action": "copy_workout"
     },
     {
       "name": "cancel confirmation confirm",
@@ -54,6 +48,21 @@
       "parser": "cancel_confirmation",
       "input": "покажи план",
       "expect_decision": "unknown"
+    },
+    {
+      "name": "copy selected workout next month",
+      "input": "скопируй эту тренировку на следующий месяц",
+      "expect_action": "copy_workout"
+    },
+    {
+      "name": "copy selected workout two months",
+      "input": "скопируй эту тренировку на два месяца",
+      "expect_action": "copy_workout"
+    },
+    {
+      "name": "copy selected workout next mondays",
+      "input": "скопируй эту тренировку на следующие понедельники",
+      "expect_action": "copy_workout"
     }
   ]
 }

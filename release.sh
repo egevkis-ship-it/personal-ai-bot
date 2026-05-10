@@ -41,28 +41,34 @@ echo "== 5. Existing ship =="
 ./ship.sh "$MSG"
 
 echo
-echo "== 6. Coolify deploy webhook =="
-if [[ -f ".env" ]]; then
-  set -a
-  source .env
-  set +a
+echo "== 6. Coolify deploy =="
+if [[ "${FORCE_COOLIFY_WEBHOOK:-}" == "1" ]]; then
+  if [[ -f ".env" ]]; then
+    set -a
+    source .env
+    set +a
+  fi
+
+  if [[ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]]; then
+    if [[ -n "${COOLIFY_TOKEN:-}" ]]; then
+      curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" \
+        -H "Authorization: Bearer $COOLIFY_TOKEN" || \
+      curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK" \
+        -H "Authorization: Bearer $COOLIFY_TOKEN"
+    else
+      curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" || \
+      curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK"
+    fi
+    echo
+    echo "Coolify deploy triggered by FORCE_COOLIFY_WEBHOOK=1"
+  else
+    echo "FORCE_COOLIFY_WEBHOOK=1 set, but COOLIFY_DEPLOY_WEBHOOK is missing"
+  fi
+else
+  echo "Skipping manual webhook. Coolify Git App should auto-deploy after push."
+  echo "To force webhook deploy: FORCE_COOLIFY_WEBHOOK=1 ./release.sh \"message\""
 fi
 
-if [[ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]]; then
-  if [[ -n "${COOLIFY_TOKEN:-}" ]]; then
-    curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" \
-      -H "Authorization: Bearer $COOLIFY_TOKEN" || \
-    curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK" \
-      -H "Authorization: Bearer $COOLIFY_TOKEN"
-  else
-    curl -fsS -X GET "$COOLIFY_DEPLOY_WEBHOOK" || \
-    curl -fsS -X POST "$COOLIFY_DEPLOY_WEBHOOK"
-  fi
-  echo
-  echo "Coolify deploy triggered"
-else
-  echo "COOLIFY_DEPLOY_WEBHOOK not set; redeploy manually"
-fi
 
 echo
 echo "== 7. Last commits =="
