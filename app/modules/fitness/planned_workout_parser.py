@@ -297,6 +297,90 @@ def _month_range(offset_months: int = 0) -> tuple[str, str]:
     end = next_start - timedelta(days=1)
     return start.isoformat(), end.isoformat()
 
+
+
+def _clean(text: str | None) -> str:
+    return (text or "").strip().lower().replace("ё", "е")
+
+
+def _parse_copy_selected_workout_action(text: str | None) -> dict | None:
+    t = _clean(text)
+
+    if not any(x in t for x in ["скоп", "копир", "дублир", "продублир", "повтори", "поставь такую же"]):
+        return None
+
+    if not any(x in t for x in ["трениров", "трени", "треньк", "занятие", "эту", "такую же", "ее", "её"]):
+        return None
+
+    action = {
+        "action": "copy_workout",
+        "confidence": 0.93,
+        "source": "selected_context",
+        "source_date": None,
+        "target_date": None,
+        "target_dates": None,
+        "copy_mode": "single",
+        "skip_existing": True,
+        "summary": "Скопировать выбранную плановую тренировку",
+    }
+
+    # Single copy: selected workout + 7 days.
+    if "следующую неделю" in t or "на неделю вперед" in t or "на неделю вперёд" in t:
+        action["target_rule"] = "source_plus_7_days"
+        return action
+
+    # Recurring same weekday by source workout weekday.
+    if "следующий месяц" in t or "следующем месяце" in t:
+        action["copy_mode"] = "recurring"
+        action["target_rule"] = "next_month_same_weekday"
+        return action
+
+    if "месяц" in t:
+        action["copy_mode"] = "recurring"
+        action["target_rule"] = "months_same_weekday"
+
+        # на два месяца / на 2 месяца
+        if "два месяц" in t:
+            action["months"] = 2
+        else:
+            import re
+            m = re.search(r"(\d+)\s*месяц", t)
+            action["months"] = int(m.group(1)) if m else 1
+
+        return action
+
+    # Explicit weekday recurring: следующие понедельники / по средам / каждый вторник.
+    weekday_map = {
+        "понедельник": 0, "понедельникам": 0, "понедельники": 0, "пн": 0,
+        "вторник": 1, "вторникам": 1, "вторники": 1, "вт": 1,
+        "сред": 2, "средам": 2, "среды": 2, "ср": 2,
+        "четверг": 3, "четвергам": 3, "четверги": 3, "чт": 3,
+        "пятниц": 4, "пятницам": 4, "пятницы": 4, "пт": 4,
+        "суббот": 5, "субботам": 5, "субботы": 5, "сб": 5,
+        "воскрес": 6, "воскресеньям": 6, "воскресенья": 6, "вс": 6,
+    }
+
+    explicit_weekday = None
+    for key, value in weekday_map.items():
+        if key in t:
+            explicit_weekday = value
+            break
+
+    if explicit_weekday is not None and any(x in t for x in ["следующ", "кажд", "по ", "все "]):
+        action["copy_mode"] = "recurring"
+        action["target_rule"] = "next_weekdays"
+        action["weekday"] = explicit_weekday
+
+        import re
+        m = re.search(r"следующ(?:ие|их)?\s+(\d+)", t)
+        if not m:
+            m = re.search(r"(\d+)\s+(?:понедельник|вторник|сред|четверг|пятниц|суббот|воскрес)", t)
+
+        action["count"] = int(m.group(1)) if m else 4
+        return action
+
+    return None
+
 def fast_parse_planning_action(text: str) -> dict | None:
     """
     Deterministic shortcut layer.
@@ -307,6 +391,10 @@ def fast_parse_planning_action(text: str) -> dict | None:
 
     if not t:
         return None
+
+    copy_action = _parse_copy_selected_workout_action(text)
+    if copy_action:
+        return copy_action
 
     # Delete/cancel planned workouts has priority over show-planned intents.
     # Example: “удали запланированные тренировки” must not be parsed as “show planned workouts”.

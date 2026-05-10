@@ -373,6 +373,129 @@ async def _get_selected_planned_workout_context(
     return pending.get("context_json") or {}
 
 
+
+
+def _copy_month_range(offset_months: int = 0) -> tuple[date, date]:
+    today = date.today()
+    year = today.year
+    month = today.month + offset_months
+
+    while month > 12:
+        month -= 12
+        year += 1
+
+    while month < 1:
+        month += 12
+        year -= 1
+
+    start = date(year, month, 1)
+
+    if month == 12:
+        next_start = date(year + 1, 1, 1)
+    else:
+        next_start = date(year, month + 1, 1)
+
+    return start, next_start - timedelta(days=1)
+
+
+def _copy_dates_for_weekday_between(weekday: int, start: date, end: date) -> list[str]:
+    result = []
+    d = start
+
+    while d.weekday() != weekday:
+        d += timedelta(days=1)
+
+    while d <= end:
+        result.append(d.isoformat())
+        d += timedelta(days=7)
+
+    return result
+
+
+def _copy_next_month_dates_same_weekday(source_date: str, explicit_weekday: int | None = None) -> list[str]:
+    src = date.fromisoformat(source_date)
+    weekday = explicit_weekday if explicit_weekday is not None else src.weekday()
+    start, end = _copy_month_range(1)
+    return _copy_dates_for_weekday_between(weekday, start, end)
+
+
+def _copy_months_dates_same_weekday(
+    source_date: str,
+    months: int = 1,
+    explicit_weekday: int | None = None,
+) -> list[str]:
+    src = date.fromisoformat(source_date)
+    weekday = explicit_weekday if explicit_weekday is not None else src.weekday()
+
+    result = []
+    for offset in range(0, max(1, months)):
+        start, end = _copy_month_range(offset)
+        result.extend(_copy_dates_for_weekday_between(weekday, start, end))
+
+    # Only future/current dates, no duplicates.
+    today_s = date.today().isoformat()
+    return sorted({d for d in result if d >= today_s})
+
+
+def _copy_next_weekdays(weekday: int, count: int = 4, start_after: str | None = None) -> list[str]:
+    if start_after:
+        d = date.fromisoformat(start_after) + timedelta(days=1)
+    else:
+        d = date.today()
+
+    while d.weekday() != weekday:
+        d += timedelta(days=1)
+
+    result = []
+    for _ in range(max(1, count)):
+        result.append(d.isoformat())
+        d += timedelta(days=7)
+
+    return result
+
+
+def _build_copy_target_dates(action: dict, source_date: str) -> list[str]:
+    dates: list[str] = []
+
+    if action.get("target_dates"):
+        dates = list(action.get("target_dates") or [])
+
+    elif action.get("target_date"):
+        dates = [action["target_date"]]
+
+    else:
+        rule = action.get("target_rule")
+
+        if rule == "source_plus_7_days":
+            src = date.fromisoformat(source_date)
+            dates = [(src + timedelta(days=7)).isoformat()]
+
+        elif rule == "next_month_same_weekday":
+            dates = _copy_next_month_dates_same_weekday(
+                source_date=source_date,
+                explicit_weekday=action.get("weekday"),
+            )
+
+        elif rule == "months_same_weekday":
+            dates = _copy_months_dates_same_weekday(
+                source_date=source_date,
+                months=int(action.get("months") or 1),
+                explicit_weekday=action.get("weekday"),
+            )
+
+        elif rule == "next_weekdays":
+            weekday = action.get("weekday")
+            if weekday is None:
+                dates = []
+            else:
+                dates = _copy_next_weekdays(
+                    weekday=int(weekday),
+                    count=int(action.get("count") or 4),
+                    start_after=source_date,
+                )
+
+    return sorted({d for d in dates if d and d != source_date})
+
 def _apply_selected_context_to_action(action: dict, selected_context: dict) -> dict:
     if not selected_context:
         return action
@@ -691,20 +814,76 @@ async def execute_planned_workout_action(
         return f"Перенёс плановые тренировки с {source_date} на {target_date}.\nПеренесено: {moved}"
 
     if action_name == "copy_workout":
+        from app.db import move_planned_workouts_between_dates
+
+        selected_context = await _get_selected_planned_workout_context(telegram_user_id)
+
         source_date = action.get("source_date")
-        target_date = action.get("target_date")
-        if not source_date or not target_date:
-            return "Понял, что нужно скопировать тренировку, но не понял дату-источник или дату-назначение."
+        if not source_date and action.get("source") == "selected_context":
+            source_date = selected_context.get("target_date")
 
-        copied = await move_planned_workouts_between_dates(
-            telegram_user_id=telegram_user_id,
-            source_date=source_date,
-            target_date=target_date,
-            source_text=source_text,
-            mode="copy",
-        )
-        return f"Скопировал плановые тренировки с {source_date} на {target_date}.\nСоздано копий: {copied}"
+        if not source_date:
+            return (
+                "Не понял, какую тренировку копировать. "
+                "Сначала покажи нужную тренировку, потом скажи: “скопируй эту тренировку на следующую неделю”."
+            )
 
+        target_dates = _build_copy_target_dates(action, source_date=source_date)
+
+        if not target_dates:
+            return (
+                "Не понял, на какие даты копировать тренировку. "
+                "Например: “на следующую неделю”, “на следующий месяц”, “на следующие понедельники”."
+            )
+
+        created = []
+        skipped = []
+
+        for target_date in target_dates:
+            if target_date == source_date:
+                skipped.append({
+                    "target_date": target_date,
+                    "reason": "дата совпадает с исходной",
+                })
+                continue
+
+            copied_count = await move_planned_workouts_between_dates(
+                telegram_user_id=telegram_user_id,
+                source_date=source_date,
+                target_date=target_date,
+                mode="copy",
+                source_text=source_text,
+            )
+
+            if copied_count:
+                created.append({
+                    "target_date": target_date,
+                    "count": copied_count,
+                })
+            else:
+                skipped.append({
+                    "target_date": target_date,
+                    "reason": "нет исходной тренировки или на дату уже ничего не скопировано",
+                })
+
+        lines = [
+            f"Скопировал выбранную тренировку с {source_date}.",
+            "",
+            f"Создано копий: {sum(x['count'] for x in created)}",
+        ]
+
+        for item in created:
+            lines.append(f"- {item['target_date']}: создано {item['count']}")
+
+        if skipped:
+            lines.append("")
+            lines.append("Пропущено:")
+            for item in skipped:
+                lines.append(f"- {item['target_date']}: {item['reason']}")
+
+        return "\n".join(lines)
+
+    
     if action_name == "create_custom_workout":
         target_date = action.get("target_date") or _today_iso()
 
