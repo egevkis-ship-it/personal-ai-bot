@@ -258,6 +258,36 @@ def fast_parse_workout_edit(text: str | None) -> dict | None:
                 "summary": "Добавить упражнение в выбранную плановую тренировку",
             }
 
+    # replace by position:
+    # "заменим третье упражнение прессом v-складка"
+    # "замени третье на пресс v-складка"
+    if any(x in t for x in ["замени", "заменим", "вместо"]) and "упражнен" in t:
+        position = _parse_position(t)
+
+        if position:
+            new_name = None
+
+            m = re.search(r"(?:упражнение|упражнением|на)\s+(.+)$", t)
+            if m:
+                candidate = m.group(1).strip()
+                candidate = re.sub(r"^(на|поставь|сделай)\s+", "", candidate).strip()
+                if candidate and not candidate.startswith(("на ", "в ")):
+                    new_name = candidate
+
+            if not new_name and "пресс" in t:
+                new_name = "Пресс V-складка" if "склад" in t else "Пресс"
+
+            if new_name:
+                return {
+                    "action": "replace_exercise",
+                    "confidence": 0.88,
+                    "target_date": target_date,
+                    "exercise_position": position,
+                    "new_exercise_name": new_name,
+                    "preserve_parameters": True,
+                    "summary": "Заменить упражнение по порядковому номеру",
+                }
+
     # reorder: "присед в конец", "подтягивания в начало", "сделай жим вторым"
     if any(x in t for x in ["в начало", "в конец", "сделай", "поставь", "перенеси"]):
         position_mode = None
@@ -375,6 +405,11 @@ exercise_name обязателен.
 Можно указать old_exercise_name или exercise_position.
 new_exercise_name обязателен.
 preserve_parameters=true по умолчанию.
+
+Дополнительные правила:
+- "заменим третье упражнение прессом V-складка" = replace_exercise, exercise_position=3, new_exercise_name="Пресс V-складка".
+- "третьим сделай пресс V-складка" = replace_exercise, exercise_position=3, new_exercise_name="Пресс V-складка".
+- "добавь три упражнения на спину" без конкретных названий = unknown или add_exercise_to_planned_workout с exercise_name=null. Не выдумывай "спина упражнение 1".
 
 5. reorder_exercise:
 - "сделай жим вторым"

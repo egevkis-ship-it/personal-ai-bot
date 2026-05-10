@@ -304,11 +304,16 @@ async def _replace_exercise(
 
         return result.get("message") or "Не смог заменить упражнение."
 
-    return (
+    prefix = (
         f"Заменил упражнение в тренировке на {target_date}.\n\n"
         f"Было: {result.get('old_exercise_name')}\n"
         f"Стало: {result.get('new_exercise_name')}\n"
         "Подходы, повторы, вес и заметки сохранил."
+    )
+
+    return await _format_updated_workout_after_edit(
+        planned_workout_id=result.get("planned_workout_id"),
+        prefix=prefix,
     )
 
 
@@ -395,6 +400,83 @@ def _format_available_exercises_for_edit(message: str, exercises: list[str] | No
 def _target_date_or_today(action: dict) -> str:
     return action.get("target_date") or _today_iso()
 
+
+
+def _is_vague_or_placeholder_exercise(name: str | None) -> bool:
+    t = (name or "").strip().lower().replace("ё", "е")
+
+    if not t:
+        return True
+
+    vague_exact = {
+        "упражнение",
+        "упражнение 1",
+        "упражнение 2",
+        "упражнение 3",
+        "кастомное упражнение",
+        "спина упражнение",
+        "спина упражнение 1",
+        "спина упражнение 2",
+        "спина упражнение 3",
+        "грудь упражнение 1",
+        "ноги упражнение 1",
+        "плечи упражнение 1",
+    }
+
+    if t in vague_exact:
+        return True
+
+    if "упражнение" in t and any(x in t for x in ["спина", "грудь", "ноги", "плечи"]):
+        return True
+
+    return False
+
+
+def _looks_like_vague_multi_add(action: dict, source_text: str | None) -> bool:
+    t = (source_text or "").strip().lower().replace("ё", "е")
+
+    if action.get("action") != "add_exercise_to_planned_workout":
+        return False
+
+    if any(x in t for x in ["добавь три", "добавь 3", "три упражнения", "3 упражнения", "несколько упражнений"]):
+        return True
+
+    return False
+
+
+async def _format_updated_workout_after_edit(
+    planned_workout_id: int | None,
+    prefix: str,
+) -> str:
+    from app.db import get_planned_workout_by_id
+
+    if not planned_workout_id:
+        return prefix
+
+    item = await get_planned_workout_by_id(planned_workout_id)
+    if not item:
+        return prefix
+
+    return prefix + "\n\nАктуальная тренировка:\n\n" + format_planned_workout(item)
+
+
+async def _show_selected_workout_if_available(
+    telegram_user_id: str | None,
+) -> str | None:
+    selected_context = await _get_selected_planned_workout_context(telegram_user_id)
+    planned_workout_id = selected_context.get("planned_workout_id")
+
+    if not planned_workout_id:
+        return None
+
+    from app.db import get_planned_workout_by_id
+
+    item = await get_planned_workout_by_id(planned_workout_id)
+    if not item:
+        return None
+
+    return "Текущая выбранная тренировка:\n\n" + format_planned_workout(item)
+
 async def execute_planned_workout_action(
     telegram_user_id: str | None,
     action: dict,
@@ -466,6 +548,11 @@ async def execute_planned_workout_action(
         return _format_next_workouts(items, include_weights=False)
 
     if action_name == "show_workout_on_date":
+        if not action.get("target_date"):
+            selected_reply = await _show_selected_workout_if_available(telegram_user_id)
+            if selected_reply is not None:
+                return selected_reply
+
         target_date = action.get("target_date") or _today_iso()
 
         if action.get("include_weights"):
@@ -614,6 +701,12 @@ async def execute_planned_workout_action(
     if action_name == "add_exercise_to_planned_workout":
         from app.db import add_exercise_to_planned_workout
 
+        if _looks_like_vague_multi_add(action, source_text):
+            return "Какие именно упражнения добавить? Перечисли их названиями, и я добавлю в выбранную тренировку."
+
+        if _is_vague_or_placeholder_exercise(action.get("exercise_name")):
+            return "Не понял, какое конкретно упражнение добавить. Напиши название упражнения."
+
         result = await add_exercise_to_planned_workout(
             telegram_user_id=telegram_user_id,
             planned_workout_id=action.get("planned_workout_id"),
@@ -636,9 +729,14 @@ async def execute_planned_workout_action(
                 result.get("available_exercises"),
             )
 
-        return (
+        prefix = (
             f"Добавил упражнение в плановую тренировку.\n\n"
             f"{result.get('exercise_order')}. {result.get('exercise_name')}"
+        )
+
+        return await _format_updated_workout_after_edit(
+            planned_workout_id=result.get("planned_workout_id"),
+            prefix=prefix,
         )
 
     if action_name == "remove_exercise_from_planned_workout":
@@ -660,7 +758,12 @@ async def execute_planned_workout_action(
                 result.get("available_exercises"),
             )
 
-        return f"Удалил упражнение из плановой тренировки: {result.get('removed_exercise_name')}"
+        prefix = f"Удалил упражнение из плановой тренировки: {result.get('removed_exercise_name')}"
+
+        return await _format_updated_workout_after_edit(
+            planned_workout_id=result.get("planned_workout_id"),
+            prefix=prefix,
+        )
 
     if action_name == "reorder_exercise":
         from app.db import reorder_exercise_in_planned_workout
@@ -683,9 +786,14 @@ async def execute_planned_workout_action(
                 result.get("available_exercises"),
             )
 
-        return (
+        prefix = (
             f"Изменил порядок упражнения.\n\n"
             f"{result.get('exercise_name')} теперь на позиции {result.get('new_position')}."
+        )
+
+        return await _format_updated_workout_after_edit(
+            planned_workout_id=result.get("planned_workout_id"),
+            prefix=prefix,
         )
 
     if action_name == "update_exercise_params":
@@ -729,9 +837,14 @@ async def execute_planned_workout_action(
 
         details = ", ".join(parts) if parts else "параметры обновлены"
 
-        return (
+        prefix = (
             f"Изменил параметры упражнения: {result.get('exercise_name')}.\n"
             f"{details}"
+        )
+
+        return await _format_updated_workout_after_edit(
+            planned_workout_id=result.get("planned_workout_id"),
+            prefix=prefix,
         )
 
     return None
