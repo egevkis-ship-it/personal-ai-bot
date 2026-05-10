@@ -18,9 +18,23 @@ def get_version() -> str:
 
 
 def get_build_hash() -> str:
-    env_build = os.getenv("APP_BUILD")
-    if env_build:
-        return env_build.strip()
+    # Prefer runtime/build env vars when available.
+    # APP_BUILD can be set manually.
+    # Other names cover common CI/CD and platform-provided commit vars.
+    for key in [
+        "APP_BUILD",
+        "SOURCE_COMMIT",
+        "GIT_COMMIT",
+        "COMMIT_SHA",
+        "GITHUB_SHA",
+        "COOLIFY_COMMIT",
+        "COOLIFY_GIT_COMMIT",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+    ]:
+        value = os.getenv(key)
+        if value:
+            return value.strip()[:12]
 
     build_file = Path(__file__).resolve().parent.parent / "BUILD"
     if build_file.exists():
