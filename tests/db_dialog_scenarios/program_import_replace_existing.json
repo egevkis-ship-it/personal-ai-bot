@@ -1,0 +1,26 @@
+{
+  "name": "db program import replaces existing planned workouts",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем старую тренировку"
+  },
+  "steps": [
+    {
+      "send": "День 1\n1. Жим штанги лёжа 4*10\n\nДень 2\n1. Вертикальная тяга 4*10\n\nДень 3\n1. Жим ногами 5*20",
+      "expect_contains": "Я распознал программу",
+      "todo": true,
+      "todo_reason": "Program import pending preview needs support."
+    },
+    {
+      "send": "пн ср пт на 1 неделю, заменить старые",
+      "expect_contains_all": [
+        "Импорт программы завершён",
+        "Заменено",
+        "Создано тренировок"
+      ],
+      "todo": true,
+      "todo_reason": "Program import replace_existing must be implemented."
+    }
+  ]
+}

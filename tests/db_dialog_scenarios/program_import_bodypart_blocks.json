@@ -1,0 +1,25 @@
+{
+  "name": "db program import bodypart blocks without title",
+  "steps": [
+    {
+      "send": "Грудь\n1. Жим штанги лёжа 4*10\n2. Жим гантелей под углом 3*12\n\nСпина\n1. Подтягивания широким хватом 4*8\n2. Вертикальная тяга 4*10\n\nНоги\n1. Жим ногами 5*20\n2. Разгибание ног сидя 4*12",
+      "expect_contains_all": [
+        "Я распознал программу",
+        "Грудь",
+        "Спина",
+        "Ноги"
+      ],
+      "todo": true,
+      "todo_reason": "Program detector must recognize bodypart blocks."
+    },
+    {
+      "send": "пн ср пт на 1 неделю",
+      "expect_contains_all": [
+        "Импорт программы завершён",
+        "Создано тренировок: 3"
+      ],
+      "todo": true,
+      "todo_reason": "Program import apply pending needs DB runner support."
+    }
+  ]
+}

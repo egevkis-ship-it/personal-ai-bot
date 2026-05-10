@@ -1,0 +1,28 @@
+{
+  "name": "db program import replaces previous pending program",
+  "steps": [
+    {
+      "send": "День 1\n1. Старое упражнение 4*10\n\nДень 2\n1. Старое упражнение 2 4*10",
+      "expect_contains": "Я распознал программу",
+      "todo": true,
+      "todo_reason": "Program import pending preview needs support."
+    },
+    {
+      "send": "День 1\n1. Жим штанги лёжа 4*10\n\nДень 2\n1. Вертикальная тяга 4*10",
+      "expect_contains_all": [
+        "Я распознал программу",
+        "Жим штанги",
+        "Вертикальная тяга"
+      ],
+      "todo": true,
+      "todo_reason": "New program text should replace previous pending import."
+    },
+    {
+      "send": "пн ср на 1 неделю",
+      "expect_contains": "Импорт программы завершён",
+      "expect_not_contains": "Старое упражнение",
+      "todo": true,
+      "todo_reason": "Pending replacement must be implemented."
+    }
+  ]
+}
