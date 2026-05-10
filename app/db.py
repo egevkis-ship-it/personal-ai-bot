@@ -1981,7 +1981,7 @@ async def has_active_planned_workout_on_date(
     if not telegram_user_id or not target_date:
         return False
 
-    async with async_session() as session:
+    async with async_sessionmaker() as session:
         result = await session.execute(
             text(
                 """
@@ -2000,6 +2000,7 @@ async def has_active_planned_workout_on_date(
         )
 
         return result.first() is not None
+
 
 async def move_planned_workouts_between_dates(
     telegram_user_id: str | None,
