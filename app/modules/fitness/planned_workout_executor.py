@@ -314,6 +314,69 @@ async def _replace_exercise(
 
 
 
+
+
+async def _set_selected_planned_workout_context(
+    telegram_user_id: str | None,
+    item: dict | None,
+    source_text: str | None = None,
+) -> None:
+    if not item:
+        return
+
+    workout = item.get("workout") or {}
+    workout_id = workout.get("id")
+    planned_date = workout.get("planned_date")
+
+    if not workout_id:
+        return
+
+    from app.db import create_fitness_pending_decision
+
+    await create_fitness_pending_decision(
+        telegram_user_id=telegram_user_id,
+        decision_type="selected_planned_workout_context",
+        context={
+            "planned_workout_id": workout_id,
+            "target_date": planned_date,
+            "title": workout.get("title"),
+            "focus": workout.get("focus"),
+            "focus_label": workout.get("focus_label"),
+        },
+        source_text=source_text,
+    )
+
+
+async def _get_selected_planned_workout_context(
+    telegram_user_id: str | None,
+) -> dict:
+    from app.db import get_latest_fitness_pending_decision
+
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    if not pending:
+        return {}
+
+    if pending.get("decision_type") != "selected_planned_workout_context":
+        return {}
+
+    return pending.get("context_json") or {}
+
+
+def _apply_selected_context_to_action(action: dict, selected_context: dict) -> dict:
+    if not selected_context:
+        return action
+
+    action = dict(action)
+
+    if not action.get("planned_workout_id") and selected_context.get("planned_workout_id"):
+        action["planned_workout_id"] = selected_context.get("planned_workout_id")
+
+    if not action.get("target_date") and selected_context.get("target_date"):
+        action["target_date"] = selected_context.get("target_date")
+
+    return action
+
+
 def _format_available_exercises_for_edit(message: str, exercises: list[str] | None = None) -> str:
     lines = [message]
 
@@ -353,6 +416,20 @@ async def execute_planned_workout_action(
     if action_name == "unknown" or confidence < 0.55:
         return None
 
+    selected_context = await _get_selected_planned_workout_context(telegram_user_id)
+
+    edit_action_names = {
+        "enter_edit_mode",
+        "add_exercise_to_planned_workout",
+        "remove_exercise_from_planned_workout",
+        "replace_exercise",
+        "reorder_exercise",
+        "update_exercise_params",
+    }
+
+    if action_name in edit_action_names:
+        action = _apply_selected_context_to_action(action, selected_context)
+
     if action_name == "cleanup_empty_planned":
         count = await cleanup_empty_planned_workouts(telegram_user_id=telegram_user_id)
         return (
@@ -363,17 +440,26 @@ async def execute_planned_workout_action(
 
     if action_name == "show_next_workout":
         items = await get_next_planned_workouts(telegram_user_id=telegram_user_id, limit=5)
+        first_date = (items[0].get("workout") or {}).get("planned_date") if items else None
+        same_day = [
+            item for item in items
+            if (item.get("workout") or {}).get("planned_date") == first_date
+        ]
+
+        if len(same_day) == 1:
+            await _set_selected_planned_workout_context(
+                telegram_user_id=telegram_user_id,
+                item=same_day[0],
+                source_text=source_text,
+            )
+
         if action.get("include_weights"):
-            first_date = (items[0].get("workout") or {}).get("planned_date") if items else None
-            same_day = [
-                item for item in items
-                if (item.get("workout") or {}).get("planned_date") == first_date
-            ]
             return await _format_workouts_with_weights(
                 telegram_user_id=telegram_user_id,
                 items=same_day,
                 title="Следующая тренировка с весами:",
             )
+
         return _format_next_workouts(items, include_weights=False)
 
     if action_name == "show_workout_on_date":
@@ -383,6 +469,13 @@ async def execute_planned_workout_action(
             data = await get_today_planned_workout(telegram_user_id, target_date)
             if not data:
                 return f"На {target_date} активная плановая тренировка не найдена."
+
+            await _set_selected_planned_workout_context(
+                telegram_user_id=telegram_user_id,
+                item=data,
+                source_text=source_text,
+            )
+
             return await _format_workouts_with_weights(
                 telegram_user_id=telegram_user_id,
                 items=[data],
@@ -395,6 +488,19 @@ async def execute_planned_workout_action(
             end_date=target_date,
             include_cancelled=False,
         )
+
+        active_items = [
+            item for item in items
+            if (item.get("workout") or {}).get("status") == "planned"
+        ]
+
+        if len(active_items) == 1:
+            await _set_selected_planned_workout_context(
+                telegram_user_id=telegram_user_id,
+                item=active_items[0],
+                source_text=source_text,
+            )
+
         return _format_workouts_on_date(items, target_date=target_date)
 
     if action_name == "show_period_plan":
@@ -410,6 +516,31 @@ async def execute_planned_workout_action(
             include_cancelled=False,
         )
         return format_period_plan(items, title=f"План {start_date} — {end_date}")
+
+    if action_name == "enter_edit_mode":
+        from app.db import get_best_planned_workout_for_edit
+
+        selected = await get_best_planned_workout_for_edit(
+            telegram_user_id=telegram_user_id,
+            target_date=action.get("target_date"),
+            planned_workout_id=action.get("planned_workout_id"),
+        )
+
+        if not selected.get("ok"):
+            return selected.get("message") or "Не нашёл активную плановую тренировку для редактирования."
+
+        item = selected.get("workout")
+        await _set_selected_planned_workout_context(
+            telegram_user_id=telegram_user_id,
+            item=item,
+            source_text=source_text,
+        )
+
+        return (
+            "Ок, редактируем эту тренировку:\n\n"
+            + format_planned_workout(item)
+            + "\n\nЧто изменить?"
+        )
 
     if action_name == "cancel_planned_workouts":
         return await _preview_cancel_planned(

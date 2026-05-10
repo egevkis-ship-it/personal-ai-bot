@@ -168,6 +168,7 @@ def _looks_like_edit_request(text: str | None) -> bool:
 
     edit_markers = [
         "редакт",
+        "отредакт",
         "измени",
         "изменить",
         "поменяй",
@@ -224,6 +225,14 @@ def fast_parse_workout_edit(text: str | None) -> dict | None:
         return None
 
     target_date = _parse_target_date(t)
+
+    if any(x in t for x in ["редакт", "отредакт", "измени", "изменить"]) and "трениров" in t:
+        return {
+            "action": "enter_edit_mode",
+            "confidence": 0.84,
+            "target_date": target_date,
+            "summary": "Войти в режим редактирования плановой тренировки",
+        }
 
     # add exercise: "добавь восьмым упражнением велосипед", "добавь сюда кардио"
     if any(x in t for x in ["добавь", "добавим", "поставь"]) and any(
