@@ -147,6 +147,43 @@ def parse_action(text: str) -> dict[str, Any] | None:
     return None
 
 
+async def set_selected_context_for_date(user_id: str, target_date: str, source_text: str = "db dialog scenario") -> None:
+    from app.db import get_pool, create_fitness_pending_decision
+
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, planned_date, title, focus, focus_label
+            FROM planned_workouts
+            WHERE telegram_user_id = $1
+              AND planned_date = $2::date
+              AND status = 'planned'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            str(user_id),
+            target_date,
+        )
+
+    if not row:
+        return
+
+    await create_fitness_pending_decision(
+        telegram_user_id=user_id,
+        decision_type="selected_planned_workout_context",
+        context={
+            "planned_workout_id": int(row["id"]),
+            "target_date": row["planned_date"].isoformat(),
+            "title": row["title"] or "Кастомная тренировка",
+            "focus": row["focus"] or "custom",
+            "focus_label": row["focus_label"] or row["focus"] or "custom",
+        },
+        source_text=source_text,
+    )
+
+
 async def seed_scenario(user_id: str, seed: dict[str, Any]) -> str:
     seed_type = seed.get("type")
 
@@ -202,6 +239,12 @@ async def seed_scenario(user_id: str, seed: dict[str, Any]) -> str:
             ],
         )
 
+        await set_selected_context_for_date(
+            user_id=user_id,
+            target_date=target_date,
+            source_text="db dialog scenario seed",
+        )
+
         return f"Создал seed тренировку на {target_date}. ID плана: {plan_id}"
 
     raise RuntimeError(f"Unsupported seed type: {seed_type!r}")
@@ -223,6 +266,17 @@ async def run_step(user_id: str, step: dict[str, Any]) -> tuple[bool, str]:
     )
 
     reply = reply or ""
+
+    if (
+        action.get("action") == "show_period_plan"
+        and action.get("scope") == "date"
+        and action.get("start_date")
+    ):
+        await set_selected_context_for_date(
+            user_id=user_id,
+            target_date=action["start_date"],
+            source_text=text,
+        )
 
     if "expect_contains" in step:
         expected = step["expect_contains"]
