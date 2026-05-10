@@ -424,7 +424,7 @@ async def amain() -> None:
     if failed:
         raise SystemExit(f"DB dialog scenarios failed: {failed}/{total}")
 
-    print(f"DB dialog scenarios: OK ({total}/{total}; TODO failures ignored)")
+    print(f"DB dialog scenarios: OK ({total}/{total})")
 
 
 def main() -> None:
