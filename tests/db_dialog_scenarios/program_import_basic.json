@@ -9,18 +9,14 @@
         "День 2",
         "День 3",
         "День 4"
-      ],
-      "todo": true,
-      "todo_reason": "DB runner needs pending program import support."
+      ]
     },
     {
       "send": "пн вт чт пт на 1 неделю",
       "expect_contains_all": [
         "Импорт программы завершён",
         "Создано тренировок"
-      ],
-      "todo": true,
-      "todo_reason": "DB runner needs pending program import support."
+      ]
     }
   ]
 }

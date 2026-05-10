@@ -8,18 +8,14 @@
         "День 1",
         "День 2",
         "День 3"
-      ],
-      "todo": true,
-      "todo_reason": "Program import from plain day blocks needs DB runner support."
+      ]
     },
     {
       "send": "пн ср пт на 1 неделю",
       "expect_contains_all": [
         "Импорт программы завершён",
         "Создано тренировок: 3"
-      ],
-      "todo": true,
-      "todo_reason": "Program import apply pending needs DB runner support."
+      ]
     }
   ]
 }

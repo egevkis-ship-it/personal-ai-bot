@@ -8,18 +8,14 @@
         "Грудь",
         "Спина",
         "Ноги"
-      ],
-      "todo": true,
-      "todo_reason": "Program detector must recognize bodypart blocks."
+      ]
     },
     {
       "send": "пн ср пт на 1 неделю",
       "expect_contains_all": [
         "Импорт программы завершён",
         "Создано тренировок: 3"
-      ],
-      "todo": true,
-      "todo_reason": "Program import apply pending needs DB runner support."
+      ]
     }
   ]
 }

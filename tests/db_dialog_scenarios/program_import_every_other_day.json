@@ -3,18 +3,14 @@
   "steps": [
     {
       "send": "День 1\n1. Жим штанги лёжа 4*10\n\nДень 2\n1. Вертикальная тяга 4*10\n\nДень 3\n1. Жим ногами 5*20",
-      "expect_contains": "Я распознал программу",
-      "todo": true,
-      "todo_reason": "Program import pending preview needs support."
+      "expect_contains": "Я распознал программу"
     },
     {
       "send": "через день",
       "expect_contains_all": [
         "Импорт программы завершён",
         "Создано тренировок: 3"
-      ],
-      "todo": true,
-      "todo_reason": "Every-other-day program import must be implemented."
+      ]
     }
   ]
 }
