@@ -106,6 +106,16 @@
       "expect_scope": "period",
       "expect_start_date": "2026-05-01",
       "expect_end_date": "2026-05-31"
+    },
+    {
+      "name": "compound replace and add edit",
+      "input": "замени жим штанги лежа на жим гантелей под углом и добавь в конце велосипед",
+      "expect_action": "compound_edit_workout"
+    },
+    {
+      "name": "compound replace and add edit variant",
+      "input": "заменим присед на жим ногами и добавим пресс",
+      "expect_action": "compound_edit_workout"
     }
   ]
 }

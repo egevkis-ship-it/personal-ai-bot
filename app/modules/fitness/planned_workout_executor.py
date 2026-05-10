@@ -813,6 +813,89 @@ async def execute_planned_workout_action(
         )
         return f"Перенёс плановые тренировки с {source_date} на {target_date}.\nПеренесено: {moved}"
 
+    if action_name == "compound_edit_workout":
+        operations = action.get("operations") or []
+        applied = []
+        failed = []
+
+        for op in operations:
+            op_type = op.get("type")
+
+            if op_type == "replace_exercise":
+                sub_action = {
+                    "action": "replace_exercise",
+                    "old_name": op.get("old_name"),
+                    "new_name": op.get("new_name"),
+                    "source": "selected_context",
+                }
+
+                result = await execute_planned_workout_action(
+                    telegram_user_id=telegram_user_id,
+                    action=sub_action,
+                    source_text=source_text,
+                )
+
+                if result and ("Заменил упражнение" in result or "Актуальная тренировка:" in result):
+                    applied.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
+                else:
+                    failed.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
+
+            elif op_type == "add_exercise":
+                sub_action = {
+                    "action": "add_exercise",
+                    "exercise_name": op.get("exercise_name"),
+                    "position": op.get("position") or "end",
+                    "source": "selected_context",
+                }
+
+                result = await execute_planned_workout_action(
+                    telegram_user_id=telegram_user_id,
+                    action=sub_action,
+                    source_text=source_text,
+                )
+
+                if result and ("Добавил упражнение" in result or "Актуальная тренировка:" in result):
+                    applied.append(f"добавление: {op.get('exercise_name')}")
+                else:
+                    failed.append(f"добавление: {op.get('exercise_name')}")
+
+        selected_context = await _get_selected_planned_workout_context(telegram_user_id)
+        target_date = selected_context.get("target_date")
+
+        final_view = None
+        if target_date:
+            show_action = {
+                "action": "show_period_plan",
+                "scope": "date",
+                "start_date": target_date,
+                "end_date": target_date,
+            }
+            final_view = await execute_planned_workout_action(
+                telegram_user_id=telegram_user_id,
+                action=show_action,
+                source_text=source_text,
+            )
+
+        lines = ["Применил групповое редактирование."]
+
+        if applied:
+            lines.append("")
+            lines.append("Сделано:")
+            for item in applied:
+                lines.append(f"- {item}")
+
+        if failed:
+            lines.append("")
+            lines.append("Не получилось:")
+            for item in failed:
+                lines.append(f"- {item}")
+
+        if final_view:
+            lines.append("")
+            lines.append(final_view)
+
+        return "\n".join(lines)
+
     if action_name == "copy_workout":
         from app.db import move_planned_workouts_between_dates, has_active_planned_workout_on_date
 

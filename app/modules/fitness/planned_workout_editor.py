@@ -501,3 +501,86 @@ anchor_exercise_name для before/after.
 
     parsed["confidence"] = float(parsed.get("confidence") or 0)
     return parsed
+
+
+# ---------------------------------------------------------------------
+# Compound edit override
+# Must stay near the end of the file so it wraps the original parser.
+# Handles phrases like:
+# "замени жим штанги лежа на жим гантелей под углом и добавь в конце велосипед"
+# ---------------------------------------------------------------------
+
+def _parse_compound_replace_add_edit_override(text: str | None) -> dict | None:
+    import re
+
+    t = (text or "").strip().lower().replace("ё", "е")
+    if not t:
+        return None
+
+    if "замен" not in t or " на " not in t or "добав" not in t:
+        return None
+
+    m = re.search(r"(замен(?:и|им|ить)?.+?)\s+и\s+(добав(?:ь|им|ить)?.+)$", t)
+    if not m:
+        return None
+
+    replace_part = m.group(1).strip()
+    add_part = m.group(2).strip()
+
+    m_replace = re.search(r"замен(?:и|им|ить)?\s+(.+?)\s+на\s+(.+)$", replace_part)
+    if not m_replace:
+        return None
+
+    old_name = m_replace.group(1).strip()
+    new_name = m_replace.group(2).strip()
+
+    exercise_to_add = add_part
+    exercise_to_add = re.sub(r"^добав(?:ь|им|ить)?\s+", "", exercise_to_add).strip()
+
+    # "добавь в конце велосипед" / "добавь велосипед в конце"
+    exercise_to_add = re.sub(
+        r"^(в\s+конце|в\s+конец|в\s+начале|в\s+начало)\s+",
+        "",
+        exercise_to_add,
+    ).strip()
+    exercise_to_add = re.sub(
+        r"\s+(в\s+конце|в\s+конец|в\s+начале|в\s+начало|последним|первым)$",
+        "",
+        exercise_to_add,
+    ).strip()
+
+    position = "end"
+    if any(x in add_part for x in ["в начале", "в начало", "первым"]):
+        position = "start"
+
+    if not old_name or not new_name or not exercise_to_add:
+        return None
+
+    return {
+        "action": "compound_edit_workout",
+        "confidence": 0.95,
+        "operations": [
+            {
+                "type": "replace_exercise",
+                "old_name": old_name,
+                "new_name": new_name,
+            },
+            {
+                "type": "add_exercise",
+                "exercise_name": exercise_to_add,
+                "position": position,
+            },
+        ],
+        "summary": "Заменить упражнение и добавить новое упражнение",
+    }
+
+
+_base_fast_parse_workout_edit = fast_parse_workout_edit
+
+
+def fast_parse_workout_edit(text: str) -> dict | None:
+    compound = _parse_compound_replace_add_edit_override(text)
+    if compound:
+        return compound
+
+    return _base_fast_parse_workout_edit(text)
