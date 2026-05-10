@@ -244,6 +244,34 @@ def _infer_focus(exercises: list[ProgramExercise]) -> str | None:
     return " / ".join(matched[:3])
 
 
+
+
+BODY_PART_HEADER_MAP = {
+    "грудь": "Грудь",
+    "грудные": "Грудь",
+    "спина": "Спина",
+    "ноги": "Ноги",
+    "плечи": "Плечи",
+    "дельты": "Плечи",
+    "руки": "Руки",
+    "бицепс": "Бицепс",
+    "трицепс": "Трицепс",
+    "пресс": "Пресс",
+    "push": "Push",
+    "pull": "Pull",
+    "legs": "Legs",
+    "upper": "Upper",
+    "lower": "Lower",
+}
+
+
+def _body_part_header(line: str | None) -> str | None:
+    value = (line or "").strip().lower().replace("ё", "е")
+    value = value.strip(":：-–— ")
+
+    return BODY_PART_HEADER_MAP.get(value)
+
+
 def parse_training_program_text(text: str, title: str | None = None, source_type: str = "text") -> TrainingProgram:
     raw_lines = (text or "").splitlines()
 
@@ -258,6 +286,7 @@ def parse_training_program_text(text: str, title: str | None = None, source_type
         lines.append(line)
 
     days_raw: dict[int, list[str]] = {}
+    day_titles: dict[int, str] = {}
     current_day: int | None = None
 
     for line in lines:
@@ -270,7 +299,36 @@ def parse_training_program_text(text: str, title: str | None = None, source_type
         if current_day is not None:
             days_raw.setdefault(current_day, []).append(line)
 
-    # Fallback: no explicit days, treat as Day 1.
+    # Fallback 1: no explicit "День N", but there are body-part / split headers.
+    # Example:
+    # Грудь
+    # 1. Жим...
+    #
+    # Спина
+    # 1. Подтягивания...
+    if not days_raw and lines:
+        current_day = None
+        next_day_index = 1
+
+        for line in lines:
+            header = _body_part_header(line)
+            if header:
+                current_day = next_day_index
+                next_day_index += 1
+                days_raw.setdefault(current_day, [])
+                day_titles[current_day] = header
+                continue
+
+            if current_day is not None:
+                days_raw.setdefault(current_day, []).append(line)
+
+        # If we detected only one header, it is probably not a multi-day program.
+        # Keep the old fallback behavior.
+        if len(days_raw) < 2:
+            days_raw = {}
+            day_titles = {}
+
+    # Fallback 2: no explicit days/blocks, treat as Day 1.
     if not days_raw and lines:
         days_raw[1] = lines
 
@@ -309,9 +367,14 @@ def parse_training_program_text(text: str, title: str | None = None, source_type
             normalized.append(ex)
 
         focus = _infer_focus(normalized)
-        day_title = f"День {day_index}"
-        if focus:
-            day_title += f" — {focus}"
+        if day_index in day_titles:
+            day_title = day_titles[day_index]
+            if focus and focus.lower() not in day_title.lower():
+                day_title += f" — {focus}"
+        else:
+            day_title = f"День {day_index}"
+            if focus:
+                day_title += f" — {focus}"
 
         days.append(
             ProgramDay(
