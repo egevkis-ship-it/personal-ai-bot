@@ -694,6 +694,20 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     if edit_reply is not None:
         return edit_reply
 
+    # Selected-workout copy commands may omit the word "тренировка":
+    # "скопируй на следующую неделю", "продублируй на весь месяц".
+    # Route them to the fitness planned-workout parser before generic task logging.
+    if any(x in _clean(text) for x in ["скоп", "копир", "дублир", "продублир", "повтори"]):
+        planned_action = await parse_planned_workout_action(telegram_user_id, text)
+        if planned_action:
+            planned_reply = await execute_planned_workout_action(
+                telegram_user_id=telegram_user_id,
+                action=planned_action,
+                source_text=text,
+            )
+            if planned_reply:
+                return planned_reply
+
     # Parser-first layer for planned workout operations.
     # Hard commands are only shortcuts; free speech goes through parser -> structured action -> executor.
     planned_action = await parse_planned_workout_action(
