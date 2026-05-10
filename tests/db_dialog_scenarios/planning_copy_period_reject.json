@@ -18,9 +18,7 @@
       "expect_contains_all": [
         "Будут скопированы тренировки",
         "Подтверди"
-      ],
-      "todo": true,
-      "todo_reason": "Custom period copy should require confirmation."
+      ]
     },
     {
       "send": "не надо",
@@ -28,15 +26,11 @@
         "Ок, не копирую",
         "Отменил",
         "Не копирую"
-      ],
-      "todo": true,
-      "todo_reason": "Pending period copy rejection is next."
+      ]
     },
     {
       "send": "покажи тренировки на месяц",
-      "expect_not_contains": "18 мая",
-      "todo": true,
-      "todo_reason": "Rejected copy should not create workouts."
+      "expect_not_contains": "18 мая"
     }
   ]
 }

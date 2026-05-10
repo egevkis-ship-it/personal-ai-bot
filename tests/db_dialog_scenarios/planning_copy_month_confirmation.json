@@ -25,18 +25,14 @@
         "2026-05-01 — 2026-05-31",
         "2026-06-01 — 2026-06-30",
         "Подтверди"
-      ],
-      "todo": true,
-      "todo_reason": "Month period copy should require confirmation."
+      ]
     },
     {
       "send": "да",
       "expect_contains_all": [
         "Скопировал период",
         "Создано тренировок: 3"
-      ],
-      "todo": true,
-      "todo_reason": "Pending month copy confirmation is next."
+      ]
     }
   ]
 }

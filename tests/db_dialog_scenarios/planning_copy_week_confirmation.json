@@ -24,18 +24,14 @@
         "Будут скопированы тренировки",
         "Создать тренировок: 12",
         "Подтверди"
-      ],
-      "todo": true,
-      "todo_reason": "Mass period copy should require confirmation."
+      ]
     },
     {
       "send": "копируй",
       "expect_contains_all": [
         "Скопировал период",
         "Создано тренировок: 12"
-      ],
-      "todo": true,
-      "todo_reason": "Pending period copy confirmation is next."
+      ]
     }
   ]
 }
