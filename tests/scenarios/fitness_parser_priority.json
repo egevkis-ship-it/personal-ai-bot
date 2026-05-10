@@ -71,6 +71,21 @@
       "expect_scope": "period",
       "expect_start_date": "2026-06-01",
       "expect_end_date": "2026-06-30"
+    },
+    {
+      "name": "implicit copy selected workout next week",
+      "input": "скопируй на следующую неделю",
+      "expect_action": "copy_workout"
+    },
+    {
+      "name": "implicit duplicate selected workout next week",
+      "input": "продублируй на следующую неделю",
+      "expect_action": "copy_workout"
+    },
+    {
+      "name": "implicit copy selected workout full month",
+      "input": "скопируй на весь месяц",
+      "expect_action": "copy_workout"
     }
   ]
 }
