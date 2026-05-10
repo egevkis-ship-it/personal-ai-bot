@@ -620,6 +620,139 @@ def _format_active_plan_or_empty(items: list[dict], title: str) -> str:
         return f"{title}:\n\nАктивных плановых тренировок нет."
     return format_period_plan(active_items, title=title)
 
+
+
+def _compound_norm_name(value: str | None) -> str:
+    return (value or "").strip().lower().replace("ё", "е")
+
+
+def _compound_canonical_exercise_name(value: str | None) -> str:
+    raw = (value or "").strip()
+    norm = _compound_norm_name(raw)
+
+    mapping = {
+        "жим": "Жим штанги лёжа",
+        "жим штанги": "Жим штанги лёжа",
+        "жим штанги лежа": "Жим штанги лёжа",
+        "жим лежа": "Жим штанги лёжа",
+        "жим гантелей под углом": "Жим гантелей под углом",
+        "жим ногами": "Жим ногами",
+        "присед": "Приседания со штангой",
+        "приседания": "Приседания со штангой",
+        "становая": "Становая тяга",
+        "становая тяга": "Становая тяга",
+        "отжимания": "Отжимания",
+        "пресс": "Пресс подъёмы корпуса, ноги согнуты",
+        "велосипед": "Велосипед",
+    }
+
+    return mapping.get(norm, raw[:1].upper() + raw[1:])
+
+
+async def _compound_replace_exercise_direct(
+    telegram_user_id: str | None,
+    selected_context: dict,
+    old_name: str | None,
+    new_name: str | None,
+) -> bool:
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal
+
+    if not telegram_user_id or not old_name or not new_name:
+        return False
+
+    planned_workout_id = selected_context.get("planned_workout_id")
+    target_date = selected_context.get("target_date")
+
+    old_norm = _compound_norm_name(old_name)
+    new_canonical = _compound_canonical_exercise_name(new_name)
+
+    async with AsyncSessionLocal() as session:
+        if planned_workout_id:
+            workout_result = await session.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM planned_workouts
+                    WHERE telegram_user_id = :telegram_user_id
+                      AND id = :planned_workout_id
+                      AND status = 'planned'
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "telegram_user_id": str(telegram_user_id),
+                    "planned_workout_id": int(planned_workout_id),
+                },
+            )
+        else:
+            workout_result = await session.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM planned_workouts
+                    WHERE telegram_user_id = :telegram_user_id
+                      AND planned_date = :target_date
+                      AND status = 'planned'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "telegram_user_id": str(telegram_user_id),
+                    "target_date": target_date,
+                },
+            )
+
+        workout_row = workout_result.mappings().first()
+        if not workout_row:
+            return False
+
+        workout_id = int(workout_row["id"])
+
+        exercises_result = await session.execute(
+            text(
+                """
+                SELECT id, exercise_name
+                FROM planned_exercises
+                WHERE planned_workout_id = :planned_workout_id
+                ORDER BY exercise_order, id
+                """
+            ),
+            {"planned_workout_id": workout_id},
+        )
+
+        rows = list(exercises_result.mappings())
+        match = None
+
+        for row in rows:
+            existing = _compound_norm_name(row["exercise_name"])
+            if existing == old_norm or old_norm in existing or existing in old_norm:
+                match = row
+                break
+
+        if not match:
+            return False
+
+        await session.execute(
+            text(
+                """
+                UPDATE planned_exercises
+                SET exercise_name = :new_name
+                WHERE id = :exercise_id
+                """
+            ),
+            {
+                "new_name": new_canonical,
+                "exercise_id": int(match["id"]),
+            },
+        )
+        await session.commit()
+
+    return True
+
+
 async def execute_planned_workout_action(
     telegram_user_id: str | None,
     action: dict,
@@ -824,24 +957,16 @@ async def execute_planned_workout_action(
             op_type = op.get("type")
 
             if op_type == "replace_exercise":
-                sub_text = f"замени {op.get('old_name')} на {op.get('new_name')}"
-                sub_action = fast_parse_workout_edit(sub_text)
+                selected_context = await _get_selected_planned_workout_context(telegram_user_id)
 
-                if not sub_action:
-                    failed.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
-                    continue
-
-                result = await execute_planned_workout_action(
+                replaced = await _compound_replace_exercise_direct(
                     telegram_user_id=telegram_user_id,
-                    action=sub_action,
-                    source_text=sub_text,
+                    selected_context=selected_context,
+                    old_name=op.get("old_name"),
+                    new_name=op.get("new_name"),
                 )
 
-                if result and (
-                    "Заменил упражнение" in result
-                    or "Актуальная тренировка:" in result
-                    or str(op.get("new_name") or "").lower() in result.lower()
-                ):
+                if replaced:
                     applied.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
                 else:
                     failed.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
