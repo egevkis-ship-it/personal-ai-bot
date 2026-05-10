@@ -624,6 +624,79 @@ async def _handle_add_exercises_to_selected_workout(telegram_user_id: str | None
 
     return "Добавил упражнения: " + ", ".join(added)
 
+
+
+def _looks_like_delete_selected_workout(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return (
+        any(x in t for x in ["удали", "удалить", "отмени", "отменить", "снеси", "сноси"])
+        and any(x in t for x in ["эту тренировку", "эту треньку", "эту треню", "это занятие"])
+    )
+
+
+def _parse_delete_from_date(text: str | None) -> str | None:
+    import re
+    from datetime import date
+
+    t = _clean(text).replace("ё", "е")
+
+    if not any(x in t for x in ["удали", "удалить", "отмени", "отменить", "снеси", "сноси"]):
+        return None
+
+    if not any(x in t for x in ["все тренировки", "все плановые", "тренировки"]):
+        return None
+
+    if not any(x in t for x in [" с ", "начиная с", "после "]):
+        return None
+
+    months = {
+        "января": 1,
+        "январь": 1,
+        "февраля": 2,
+        "февраль": 2,
+        "марта": 3,
+        "март": 3,
+        "апреля": 4,
+        "апрель": 4,
+        "мая": 5,
+        "май": 5,
+        "июня": 6,
+        "июнь": 6,
+        "июля": 7,
+        "июль": 7,
+        "августа": 8,
+        "август": 8,
+        "сентября": 9,
+        "сентябрь": 9,
+        "октября": 10,
+        "октябрь": 10,
+        "ноября": 11,
+        "ноябрь": 11,
+        "декабря": 12,
+        "декабрь": 12,
+    }
+
+    m = re.search(
+        r"(?:начиная\s+с|после|с)\s+(\d{1,2})\s+([а-яa-z]+)(?:\s+(\d{4}))?",
+        t,
+    )
+    if not m:
+        return None
+
+    day = int(m.group(1))
+    month_name = m.group(2)
+    year = int(m.group(3)) if m.group(3) else date.today().year
+    month = months.get(month_name)
+
+    if not month:
+        return None
+
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -665,6 +738,53 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # Delete currently selected workout only:
+    # “удали эту тренировку”, “отмени эту тренировку”.
+    if _looks_like_delete_selected_workout(text):
+        selected_context = pending.get("context") if pending and pending.get("decision_type") == "selected_planned_workout_context" else None
+        target_date = selected_context.get("target_date") if selected_context else None
+
+        if target_date:
+            planned_action = {
+                "action": "cancel_planned_workouts",
+                "confidence": 0.99,
+                "scope": "period",
+                "start_date": target_date,
+                "end_date": target_date,
+                "affects": "planned_only",
+                "requires_confirmation": True,
+                "summary": "Отменить выбранную плановую тренировку",
+            }
+            planned_reply = await execute_planned_workout_action(
+                telegram_user_id=telegram_user_id,
+                action=planned_action,
+                source_text=text,
+            )
+            if planned_reply:
+                return planned_reply
+
+    # Delete all workouts from a specific date onward:
+    # “удали все тренировки с 18 мая”.
+    delete_from_date = _parse_delete_from_date(text)
+    if delete_from_date:
+        planned_action = {
+            "action": "cancel_planned_workouts",
+            "confidence": 0.99,
+            "scope": "period",
+            "start_date": delete_from_date,
+            "end_date": "2100-12-31",
+            "affects": "planned_only",
+            "requires_confirmation": True,
+            "summary": "Отменить активные плановые тренировки с даты",
+        }
+        planned_reply = await execute_planned_workout_action(
+            telegram_user_id=telegram_user_id,
+            action=planned_action,
+            source_text=text,
+        )
+        if planned_reply:
+            return planned_reply
 
     # Training program import from long text.
     # Preview only: nothing is written to calendar until user provides schedule.
