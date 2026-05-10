@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CMD="${1:-help}"
+
+function usage() {
+  cat <<'EOF'
+Usage:
+  ./botctl check
+  ./botctl ship "commit message"
+  ./botctl release patch "commit message"
+  ./botctl status
+  ./botctl log
+
+Commands:
+  check              Run local syntax + smoke + parser scenarios
+  ship "message"     Run dev_ship.sh with checks, commit, push
+  release bump msg   Run release.sh, e.g. ./botctl release patch "Stable release"
+  status             Show git status, VERSION, current HEAD
+  log                Show last commits
+EOF
+}
+
+function check() {
+  echo "== 1. Python syntax check =="
+  python3 -m py_compile \
+    app/db.py \
+    app/version.py \
+    app/telegram_bot.py \
+    app/main.py \
+    app/modules/ops/status.py \
+    app/modules/fitness/*.py \
+    scripts/*.py
+
+  echo
+  echo "== 2. Fitness smoke =="
+  python3 scripts/smoke_fitness.py
+
+  echo
+  echo "== 3. Internal parser scenarios =="
+  python3 scripts/run_internal_scenarios.py
+
+  echo
+  echo "== 4. Git status =="
+  git status --short
+
+  echo
+  echo "CHECK OK"
+}
+
+function status_cmd() {
+  echo "== Git =="
+  git status --short
+  echo
+  echo "== VERSION =="
+  cat VERSION 2>/dev/null || echo "VERSION missing"
+  echo
+  echo "== HEAD =="
+  git log --oneline -5
+}
+
+case "$CMD" in
+  check)
+    check
+    ;;
+
+  ship)
+    MSG="${2:-Dev ship}"
+    ./dev_ship.sh "$MSG"
+    echo
+    echo "Expected Build:"
+    git rev-parse --short HEAD
+    ;;
+
+  release)
+    BUMP="${2:-patch}"
+    MSG="${3:-Release}"
+    ./release.sh "$BUMP" "$MSG"
+    echo
+    echo "Expected Build:"
+    git rev-parse --short HEAD
+    ;;
+
+  status)
+    status_cmd
+    ;;
+
+  log)
+    git log --oneline -10
+    ;;
+
+  help|-h|--help)
+    usage
+    ;;
+
+  *)
+    echo "Unknown command: $CMD"
+    usage
+    exit 1
+    ;;
+esac
