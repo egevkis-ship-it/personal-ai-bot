@@ -974,6 +974,41 @@ async def _clear_period_copy_pending(telegram_user_id: str) -> None:
         await session.commit()
 
 
+
+
+def _extract_period_copy_action_from_pending_context(context):
+    import json
+
+    if not context:
+        return None
+
+    if isinstance(context, str):
+        try:
+            context = json.loads(context)
+        except Exception:
+            return None
+
+    if not isinstance(context, dict):
+        return None
+
+    action = context.get("action")
+
+    if isinstance(action, str):
+        try:
+            action = json.loads(action)
+        except Exception:
+            return None
+
+    if isinstance(action, dict) and action.get("action") == "copy_period_workouts":
+        return action
+
+    # Fallback: in case the action itself was stored directly as context.
+    if context.get("action") == "copy_period_workouts":
+        return context
+
+    return None
+
+
 async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pending: dict | None) -> str | None:
     if not pending or pending.get("decision_type") != "pending_period_copy_confirmation":
         return None
@@ -995,12 +1030,27 @@ async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pen
 
     await _clear_period_copy_pending(telegram_user_id)
 
-    action = context.get("action") or {}
-    return await execute_planned_workout_action(
+    action = _extract_period_copy_action_from_pending_context(context)
+
+    if not action:
+        return (
+            "Не смог восстановить действие копирования периода из pending-контекста. "
+            "Повтори команду копирования ещё раз."
+        )
+
+    result = await execute_planned_workout_action(
         telegram_user_id=telegram_user_id,
         action=action,
         source_text=text,
     )
+
+    if result is None:
+        return (
+            "Не смог выполнить копирование периода. "
+            "Повтори команду копирования ещё раз."
+        )
+
+    return result
 
 
 async def _build_period_copy_preview(telegram_user_id: str, action: dict, source_text: str | None = None) -> str:
