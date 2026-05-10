@@ -1,0 +1,38 @@
+{
+  "name": "db workout log record one weight with many reps",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "присед 100 на 5 5 5",
+      "expect_contains_all": [
+        "Записал",
+        "Приседания",
+        "100",
+        "5"
+      ],
+      "todo": true,
+      "todo_reason": "weight once + many reps parser is next."
+    },
+    {
+      "send": "закончил тренировку",
+      "expect_contains_all": [
+        "Завершил тренировку",
+        "Приседания"
+      ],
+      "todo": true,
+      "todo_reason": "logged squat sets should be summarized."
+    }
+  ]
+}

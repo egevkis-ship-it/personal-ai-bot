@@ -1,0 +1,39 @@
+{
+  "name": "db workout log record x-format sets in active session",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 80х10 80х8 75х10",
+      "expect_contains_all": [
+        "Записал",
+        "Жим",
+        "80",
+        "10",
+        "75"
+      ],
+      "todo": true,
+      "todo_reason": "x-format set parser is next."
+    },
+    {
+      "send": "закончил тренировку",
+      "expect_contains_all": [
+        "Завершил тренировку",
+        "Жим"
+      ],
+      "todo": true,
+      "todo_reason": "x-format logged sets should be summarized."
+    }
+  ]
+}

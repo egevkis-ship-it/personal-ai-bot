@@ -1,0 +1,39 @@
+{
+  "name": "db workout log record bodyweight reps only",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем подтягивания отжимания пресс"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "подтягивания 10 8 7",
+      "expect_contains_all": [
+        "Записал",
+        "Подтягивания",
+        "10",
+        "8",
+        "7"
+      ],
+      "todo": true,
+      "todo_reason": "bodyweight reps-only parser is next."
+    },
+    {
+      "send": "закончил тренировку",
+      "expect_contains_all": [
+        "Завершил тренировку",
+        "Подтягивания"
+      ],
+      "todo": true,
+      "todo_reason": "logged pull-up sets should be summarized."
+    }
+  ]
+}
