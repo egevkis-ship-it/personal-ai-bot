@@ -328,6 +328,9 @@ async def _set_selected_planned_workout_context(
     workout_id = workout.get("id")
     planned_date = workout.get("planned_date")
 
+    if hasattr(planned_date, "isoformat"):
+        planned_date = planned_date.isoformat()
+
     if not workout_id:
         return
 
@@ -337,7 +340,7 @@ async def _set_selected_planned_workout_context(
         telegram_user_id=telegram_user_id,
         decision_type="selected_planned_workout_context",
         context={
-            "planned_workout_id": workout_id,
+            "planned_workout_id": int(workout_id),
             "target_date": planned_date,
             "title": workout.get("title"),
             "focus": workout.get("focus"),
