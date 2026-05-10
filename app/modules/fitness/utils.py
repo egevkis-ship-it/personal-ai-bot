@@ -164,6 +164,40 @@ def is_likely_fitness_text(text: str | None) -> bool:
         "какая",
     ]
 
+    # Selected planned workout copy/duplicate commands.
+    # These often omit the word "тренировка" after a workout was shown:
+    # “скопируй на следующую неделю”, “продублируй на весь месяц”.
+    copy_markers = ["скоп", "копир", "дублир", "продублир", "повтори"]
+    copy_targets = [
+        "следующую неделю",
+        "следующей неделе",
+        "следующую нед",
+        "на неделю",
+        "следующий месяц",
+        "следующем месяце",
+        "весь месяц",
+        "на месяц",
+        "понедельник",
+        "понедельники",
+        "вторник",
+        "вторники",
+        "сред",
+        "четверг",
+        "пятниц",
+        "суббот",
+        "воскрес",
+        "пн",
+        "вт",
+        "ср",
+        "чт",
+        "пт",
+        "сб",
+        "вс",
+    ]
+
+    if any(x in t for x in copy_markers) and any(x in t for x in copy_targets):
+        return True
+
     has_fitness_anchor = any(w in t for w in fitness_anchors)
     has_action = any(w in t for w in action_words)
 
