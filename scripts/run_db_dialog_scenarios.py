@@ -12,6 +12,32 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+def load_dbcheck_env() -> None:
+    """
+    Load optional .env.dbcheck without adding another dependency.
+    Format:
+      DATABASE_URL='...'
+      REDIS_URL='...'
+    """
+    env_file = PROJECT_ROOT / ".env.dbcheck"
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+load_dbcheck_env()
+
 # DB scenarios do not call Telegram or OpenAI directly.
 # These dummy values only allow app.config.Settings() to load locally.
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dbcheck_dummy_telegram_token")
