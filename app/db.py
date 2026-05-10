@@ -3060,7 +3060,6 @@ async def create_planned_workout_from_program_day(
                 focus,
                 focus_label,
                 status,
-                source,
                 notes
             )
             VALUES
@@ -3071,7 +3070,6 @@ async def create_planned_workout_from_program_day(
                 :focus,
                 :focus_label,
                 'planned',
-                'program_import',
                 :notes
             )
             RETURNING id

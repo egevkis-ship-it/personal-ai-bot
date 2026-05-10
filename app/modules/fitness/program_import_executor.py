@@ -314,14 +314,20 @@ async def handle_training_program_import_pending(
             "Укажи расклад, например: `пн вт чт пт`, `пн ср пт сб` или `через день`."
         )
 
-    result = await import_training_program_to_calendar(
-        telegram_user_id=telegram_user_id,
-        program=program,
-        target_dates=target_dates,
-        title_prefix=None,
-        skip_existing=True,
-        source_text=source_text,
-    )
+    try:
+        result = await import_training_program_to_calendar(
+            telegram_user_id=telegram_user_id,
+            program=program,
+            target_dates=target_dates,
+            title_prefix=None,
+            skip_existing=True,
+            source_text=source_text,
+        )
+    except Exception as exc:
+        return (
+            "Не смог импортировать программу в календарь. "
+            f"Ошибка: {type(exc).__name__}: {exc}"
+        )
 
     await resolve_fitness_pending_decision(pending["id"], status="resolved")
 
