@@ -17,7 +17,11 @@ else
 fi
 
 echo
-echo "== 2. Python syntax check =="
+echo "== 2. Stage version bump =="
+git add VERSION
+
+echo
+echo "== 3. Python syntax check =="
 python3 -m py_compile \
   app/db.py \
   app/version.py \
@@ -29,15 +33,15 @@ python3 -m py_compile \
   scripts/smoke_fitness.py
 
 echo
-echo "== 3. Fitness regression smoke =="
+echo "== 4. Fitness regression smoke =="
 python3 scripts/smoke_fitness.py
 
 echo
-echo "== 4. Existing ship =="
+echo "== 5. Existing ship =="
 ./ship.sh "$MSG"
 
 echo
-echo "== 5. Coolify deploy webhook =="
+echo "== 6. Coolify deploy webhook =="
 if [[ -f ".env" ]]; then
   set -a
   source .env
@@ -61,5 +65,5 @@ else
 fi
 
 echo
-echo "== 6. Last commits =="
+echo "== 7. Last commits =="
 git log --oneline -3
