@@ -120,16 +120,60 @@ def _wants_weights(text: str) -> bool:
 
 def _is_empty_custom_workout_request(text: str) -> bool:
     t = _clean(text)
-    if not any(x in t for x in ["добав", "создай", "поставь"]):
+
+    if not t:
         return False
-    if "трениров" not in t:
+
+    create_markers = [
+        "создай",
+        "создадим",
+        "добавь",
+        "добавим",
+        "сделай",
+        "сделаем",
+        "давай тренировку",
+        "давай создадим",
+        "давай добавим",
+    ]
+
+    workout_markers = [
+        "тренировку",
+        "тренировка",
+        "треньку",
+        "треню",
+        "занятие",
+    ]
+
+    if not any(x in t for x in create_markers):
         return False
-    # If after colon user gave exercises, it is not empty.
-    if ":" in t:
+
+    if not any(x in t for x in workout_markers):
         return False
-    # If obvious exercise words are present, it is not empty.
-    if any(x in t for x in ["жим", "тяга", "махи", "присед", "развод", "сгиб", "разгиб", "подтяг"]):
+
+    # If exercises are already present, it is not an empty request.
+    exercise_markers = [
+        "жим",
+        "присед",
+        "станов",
+        "тяга",
+        "подтяг",
+        "отжим",
+        "бицепс",
+        "трицепс",
+        "пресс",
+        "велосипед",
+        "кардио",
+        "гантел",
+        "штанг",
+        "разгиб",
+        "сгиб",
+        "кроссовер",
+        "брусь",
+    ]
+
+    if any(x in t for x in exercise_markers):
         return False
+
     return True
 
 
@@ -365,16 +409,26 @@ async def _handle_custom_workout_details(telegram_user_id: str | None, text: str
     if not pending or pending.get("decision_type") != "awaiting_custom_workout_details":
         return None
 
-    from app.db import resolve_fitness_pending_decision
+    import re
+
+    from app.db import resolve_fitness_pending_decision, create_fitness_pending_decision
+    from app.modules.fitness.custom_workout_builder import create_custom_workout_from_details
 
     context = pending.get("context_json") or {}
-    target_date = context.get("target_date") or _iso(_today())
 
-    t = _clean(text)
+    target_date = (
+        context.get("target_date")
+        or context.get("planned_date")
+        or context.get("date")
+        or context.get("start_date")
+    )
 
-    if t in {"отмена", "отмени", "не надо", "не добавляй", "cancel"}:
-        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
-        return "Ок, тренировку не создаю."
+    if not target_date:
+        await resolve_fitness_pending_decision(pending["id"], status="failed")
+        return (
+            "Я потерял дату для создания тренировки, поэтому ничего не создал. "
+            "Повтори: “создай тренировку на понедельник”."
+        )
 
     reply = await create_custom_workout_from_details(
         telegram_user_id=telegram_user_id,
@@ -383,10 +437,24 @@ async def _handle_custom_workout_details(telegram_user_id: str | None, text: str
     )
 
     await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+    m = re.search(r"ID плана:\s*(\d+)", reply or "")
+    if m:
+        plan_id = int(m.group(1))
+        await create_fitness_pending_decision(
+            telegram_user_id=telegram_user_id,
+            decision_type="selected_planned_workout_context",
+            context={
+                "planned_workout_id": plan_id,
+                "target_date": target_date,
+                "title": "Кастомная тренировка",
+                "focus": "full_body",
+                "focus_label": "full body",
+            },
+            source_text=text,
+        )
+
     return reply
-
-
-
 
 
 def _parse_pending_cancel_confirmation(text: str | None) -> str:
