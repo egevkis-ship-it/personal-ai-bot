@@ -11,6 +11,7 @@ Usage:
   ./botctl release patch "commit message"
   ./botctl status
   ./botctl log
+  ./botctl dbcheck
 
 Commands:
   check              Run local syntax + smoke + parser scenarios
@@ -18,6 +19,7 @@ Commands:
   release bump msg   Run release.sh, e.g. ./botctl release patch "Stable release"
   status             Show git status, VERSION, current HEAD
   log                Show last commits
+  dbcheck            Run DB-backed dialog scenarios on synthetic test user
 EOF
 }
 
@@ -91,6 +93,11 @@ case "$CMD" in
 
   log)
     git log --oneline -10
+    ;;
+
+  dbcheck)
+    echo "== DB-backed dialog scenarios =="
+    python3 scripts/run_db_dialog_scenarios.py
     ;;
 
   help|-h|--help)
