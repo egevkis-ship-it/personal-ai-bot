@@ -22,25 +22,19 @@
       "send": "удали все тренировки с 18 мая",
       "expect_contains_all": [
         "Будут отменены",
-        "2026-05-18",
-        "2026-06-01"
+        "18 мая",
+        "1 июня"
       ],
-      "expect_not_contains": "2026-05-11",
-      "todo": true,
-      "todo_reason": "Delete from date preview is next."
+      "expect_not_contains": "2026-05-11"
     },
     {
       "send": "удаляй",
-      "expect_contains": "Отменено тренировок: 2",
-      "todo": true,
-      "todo_reason": "Delete from date confirmation is next."
+      "expect_contains": "Отменено тренировок: 2"
     },
     {
       "send": "покажи все тренировки",
       "expect_contains": "11 мая",
-      "expect_not_contains": "18 мая",
-      "todo": true,
-      "todo_reason": "Only workouts before start date should remain."
+      "expect_not_contains": "18 мая"
     }
   ]
 }

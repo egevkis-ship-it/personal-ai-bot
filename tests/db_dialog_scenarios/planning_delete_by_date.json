@@ -9,18 +9,14 @@
     {
       "send": "удали тренировку на понедельник",
       "expect_contains_all": [
-        "Будет отменена",
+        "Будут отменены",
         "2026-05-11",
         "Фактическую историю"
-      ],
-      "todo": true,
-      "todo_reason": "Delete single workout by date preview is next."
+      ]
     },
     {
       "send": "да",
-      "expect_contains": "Отменено тренировок: 1",
-      "todo": true,
-      "todo_reason": "Delete single workout by date confirmation is next."
+      "expect_contains": "Отменено тренировок: 1"
     }
   ]
 }

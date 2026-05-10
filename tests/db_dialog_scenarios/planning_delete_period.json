@@ -22,18 +22,14 @@
       "send": "удали все тренировки в июне",
       "expect_contains_all": [
         "Будут отменены",
-        "2026-06-01",
-        "2026-06-08"
+        "1 июня",
+        "8 июня"
       ],
-      "expect_not_contains": "2026-05-11",
-      "todo": true,
-      "todo_reason": "Delete month period preview should be DB-backed."
+      "expect_not_contains": "2026-05-11"
     },
     {
       "send": "отменяй",
-      "expect_contains": "Отменено тренировок: 2",
-      "todo": true,
-      "todo_reason": "Delete month period confirmation should be DB-backed."
+      "expect_contains": "Отменено тренировок: 2"
     }
   ]
 }

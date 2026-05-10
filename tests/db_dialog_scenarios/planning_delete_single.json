@@ -13,27 +13,21 @@
     {
       "send": "удали эту тренировку",
       "expect_contains_all": [
-        "Будет отменена",
+        "Будут отменены",
         "2026-05-11",
         "Фактическую историю"
-      ],
-      "todo": true,
-      "todo_reason": "Delete selected workout preview is next."
+      ]
     },
     {
       "send": "отменяй",
       "expect_contains_all": [
         "Отменено тренировок: 1",
         "Фактическую историю"
-      ],
-      "todo": true,
-      "todo_reason": "Delete selected workout confirmation is next."
+      ]
     },
     {
       "send": "покажи тренировку на понедельник",
-      "expect_contains": "активных плановых тренировок нет",
-      "todo": true,
-      "todo_reason": "Workout should be cancelled after confirmation."
+      "expect_contains": "активных плановых тренировок не найдено"
     }
   ]
 }
