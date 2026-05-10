@@ -842,9 +842,12 @@ async def execute_planned_workout_action(
 
             elif op_type == "add_exercise":
                 sub_action = {
-                    "action": "add_exercise",
+                    "action": "add_exercise_to_planned_workout",
                     "exercise_name": op.get("exercise_name"),
-                    "position": op.get("position") or "end",
+                    "exercise_position": None,
+                    "position_mode": op.get("position") or "end",
+                    "anchor_exercise_name": None,
+                    "target_date": None,
                     "source": "selected_context",
                 }
 
@@ -854,7 +857,7 @@ async def execute_planned_workout_action(
                     source_text=source_text,
                 )
 
-                if result and ("Добавил упражнение" in result or "Актуальная тренировка:" in result):
+                if result and ("Добавил упражнение" in result or "Добавил упражнение в плановую тренировку" in result or "Актуальная тренировка:" in result):
                     applied.append(f"добавление: {op.get('exercise_name')}")
                 else:
                     failed.append(f"добавление: {op.get('exercise_name')}")
