@@ -312,6 +312,23 @@ async def _replace_exercise(
     )
 
 
+
+
+def _format_available_exercises_for_edit(message: str, exercises: list[str] | None = None) -> str:
+    lines = [message]
+
+    if exercises:
+        lines.append("")
+        lines.append("Сейчас в тренировке:")
+        for i, name in enumerate(exercises, start=1):
+            lines.append(f"{i}. {name}")
+
+    return "\n".join(lines)
+
+
+def _target_date_or_today(action: dict) -> str:
+    return action.get("target_date") or _today_iso()
+
 async def execute_planned_workout_action(
     telegram_user_id: str | None,
     action: dict,
@@ -459,5 +476,128 @@ async def execute_planned_workout_action(
         )
 
         return f"Ок, добавим тренировку на {target_date}. Какие упражнения будем делать?"
+
+    if action_name == "add_exercise_to_planned_workout":
+        from app.db import add_exercise_to_planned_workout
+
+        result = await add_exercise_to_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=action.get("planned_workout_id"),
+            target_date=action.get("target_date"),
+            exercise_name=action.get("exercise_name"),
+            exercise_position=action.get("exercise_position"),
+            position_mode=action.get("position_mode"),
+            anchor_exercise_name=action.get("anchor_exercise_name"),
+            target_sets=action.get("target_sets"),
+            target_reps_min=action.get("target_reps_min"),
+            target_reps_max=action.get("target_reps_max"),
+            target_reps_text=action.get("target_reps_text"),
+            target_weight_kg=action.get("target_weight_kg"),
+            source_text=source_text,
+        )
+
+        if not result.get("ok"):
+            return _format_available_exercises_for_edit(
+                result.get("message") or "Не смог добавить упражнение.",
+                result.get("available_exercises"),
+            )
+
+        return (
+            f"Добавил упражнение в плановую тренировку.\n\n"
+            f"{result.get('exercise_order')}. {result.get('exercise_name')}"
+        )
+
+    if action_name == "remove_exercise_from_planned_workout":
+        from app.db import remove_exercise_from_planned_workout
+
+        result = await remove_exercise_from_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=action.get("planned_workout_id"),
+            target_date=action.get("target_date"),
+            exercise_name=action.get("exercise_name"),
+            exercise_position=action.get("exercise_position"),
+            position_mode=action.get("position_mode"),
+            source_text=source_text,
+        )
+
+        if not result.get("ok"):
+            return _format_available_exercises_for_edit(
+                result.get("message") or "Не смог удалить упражнение.",
+                result.get("available_exercises"),
+            )
+
+        return f"Удалил упражнение из плановой тренировки: {result.get('removed_exercise_name')}"
+
+    if action_name == "reorder_exercise":
+        from app.db import reorder_exercise_in_planned_workout
+
+        result = await reorder_exercise_in_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=action.get("planned_workout_id"),
+            target_date=action.get("target_date"),
+            exercise_name=action.get("exercise_name"),
+            exercise_position=action.get("exercise_position"),
+            new_position=action.get("new_position"),
+            position_mode=action.get("position_mode"),
+            anchor_exercise_name=action.get("anchor_exercise_name"),
+            source_text=source_text,
+        )
+
+        if not result.get("ok"):
+            return _format_available_exercises_for_edit(
+                result.get("message") or "Не смог изменить порядок упражнения.",
+                result.get("available_exercises"),
+            )
+
+        return (
+            f"Изменил порядок упражнения.\n\n"
+            f"{result.get('exercise_name')} теперь на позиции {result.get('new_position')}."
+        )
+
+    if action_name == "update_exercise_params":
+        from app.db import update_exercise_params_in_planned_workout
+
+        result = await update_exercise_params_in_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=action.get("planned_workout_id"),
+            target_date=action.get("target_date"),
+            exercise_name=action.get("exercise_name"),
+            exercise_position=action.get("exercise_position"),
+            target_sets=action.get("target_sets"),
+            target_reps_min=action.get("target_reps_min"),
+            target_reps_max=action.get("target_reps_max"),
+            target_reps_text=action.get("target_reps_text"),
+            target_weight_kg=action.get("target_weight_kg"),
+            source_text=source_text,
+        )
+
+        if not result.get("ok"):
+            return _format_available_exercises_for_edit(
+                result.get("message") or "Не смог изменить параметры упражнения.",
+                result.get("available_exercises"),
+            )
+
+        updates = result.get("updates") or {}
+        parts = []
+        if updates.get("target_sets") is not None:
+            parts.append(f"подходы: {updates.get('target_sets')}")
+        if updates.get("target_reps_min") is not None and updates.get("target_reps_max") is not None:
+            if updates.get("target_reps_min") == updates.get("target_reps_max"):
+                parts.append(f"повторы: {updates.get('target_reps_min')}")
+            else:
+                parts.append(f"повторы: {updates.get('target_reps_min')}-{updates.get('target_reps_max')}")
+        elif updates.get("target_reps_min") is not None:
+            parts.append(f"повторы: {updates.get('target_reps_min')}")
+        if updates.get("target_reps_text") is not None:
+            parts.append(f"повторы: {updates.get('target_reps_text')}")
+        if updates.get("target_weight_kg") is not None:
+            parts.append(f"вес: {updates.get('target_weight_kg'):g} кг")
+
+        details = ", ".join(parts) if parts else "параметры обновлены"
+
+        return (
+            f"Изменил параметры упражнения: {result.get('exercise_name')}.\n"
+            f"{details}"
+        )
 
     return None

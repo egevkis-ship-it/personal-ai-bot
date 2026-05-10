@@ -2302,3 +2302,652 @@ async def replace_exercise_in_planned_workout(
             "message": f"Не нашёл “{old_exercise_name}” в тренировке на {target_date}.",
             "available_exercises": available_exercises,
         }
+
+
+async def get_best_planned_workout_for_edit(
+    telegram_user_id: str | None,
+    target_date: str | None = None,
+    planned_workout_id: int | None = None,
+) -> dict:
+    """
+    Return best active planned workout for editing.
+
+    Priority:
+    1. explicit planned_workout_id
+    2. target_date with active non-empty workout, newest first
+    """
+    from datetime import date
+
+    async with AsyncSessionLocal() as session:
+        if planned_workout_id:
+            result = await session.execute(
+                text("""
+                SELECT pw.id
+                FROM planned_workouts pw
+                WHERE pw.id = :planned_workout_id
+                  AND pw.telegram_user_id = :telegram_user_id
+                  AND pw.status = 'planned'
+                LIMIT 1
+                """),
+                {
+                    "planned_workout_id": planned_workout_id,
+                    "telegram_user_id": telegram_user_id,
+                },
+            )
+        else:
+            date_value = to_date(target_date) if target_date else date.today()
+
+            result = await session.execute(
+                text("""
+                SELECT pw.id
+                FROM planned_workouts pw
+                WHERE pw.telegram_user_id = :telegram_user_id
+                  AND pw.planned_date = :target_date
+                  AND pw.status = 'planned'
+                ORDER BY
+                  CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM planned_exercises ex
+                    WHERE ex.planned_workout_id = pw.id
+                  ) THEN 0 ELSE 1 END,
+                  pw.id DESC
+                LIMIT 1
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "target_date": date_value,
+                },
+            )
+
+        row = result.mappings().first()
+
+    if not row:
+        return {
+            "ok": False,
+            "message": "Активная плановая тренировка для редактирования не найдена.",
+        }
+
+    workout = await get_planned_workout_by_id(row["id"])
+    if not workout:
+        return {
+            "ok": False,
+            "message": "Не смог загрузить плановую тренировку для редактирования.",
+        }
+
+    return {
+        "ok": True,
+        "planned_workout_id": row["id"],
+        "workout": workout,
+    }
+
+
+async def _renumber_planned_exercises(
+    session,
+    planned_workout_id: int,
+) -> None:
+    result = await session.execute(
+        text("""
+        SELECT id
+        FROM planned_exercises
+        WHERE planned_workout_id = :planned_workout_id
+        ORDER BY exercise_order ASC NULLS LAST, id ASC
+        """),
+        {"planned_workout_id": planned_workout_id},
+    )
+
+    ids = [row["id"] for row in result.mappings().all()]
+
+    for index, exercise_id in enumerate(ids, start=1):
+        await session.execute(
+            text("""
+            UPDATE planned_exercises
+            SET exercise_order = :exercise_order
+            WHERE id = :exercise_id
+            """),
+            {
+                "exercise_order": index,
+                "exercise_id": exercise_id,
+            },
+        )
+
+
+async def add_exercise_to_planned_workout(
+    telegram_user_id: str | None,
+    planned_workout_id: int | None = None,
+    target_date: str | None = None,
+    exercise_name: str | None = None,
+    exercise_position: int | None = None,
+    position_mode: str | None = None,
+    anchor_exercise_name: str | None = None,
+    target_sets: int | None = None,
+    target_reps_min: int | None = None,
+    target_reps_max: int | None = None,
+    target_reps_text: str | None = None,
+    target_weight_kg: float | None = None,
+    notes: str | None = None,
+    source_text: str | None = None,
+) -> dict:
+    from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+
+    if not exercise_name:
+        return {"ok": False, "message": "Не понял, какое упражнение добавить."}
+
+    selected = await get_best_planned_workout_for_edit(
+        telegram_user_id=telegram_user_id,
+        target_date=target_date,
+        planned_workout_id=planned_workout_id,
+    )
+
+    if not selected.get("ok"):
+        return selected
+
+    workout_id = selected["planned_workout_id"]
+    normalized = normalize_exercise_name(exercise_name)
+    final_name = normalized.get("canonical_ru") or exercise_name
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, exercise_name, exercise_order
+            FROM planned_exercises
+            WHERE planned_workout_id = :planned_workout_id
+            ORDER BY exercise_order ASC NULLS LAST, id ASC
+            """),
+            {"planned_workout_id": workout_id},
+        )
+
+        exercises = [dict(row) for row in result.mappings().all()]
+        count = len(exercises)
+
+        insert_position = exercise_position
+
+        if position_mode == "beginning":
+            insert_position = 1
+        elif position_mode == "end" or insert_position is None:
+            insert_position = count + 1
+        elif position_mode in {"before", "after"} and anchor_exercise_name:
+            anchor_norm = normalize_exercise_name(anchor_exercise_name)
+            anchor_key = anchor_norm.get("exercise_key")
+            found_position = None
+
+            for ex in exercises:
+                candidate = normalize_exercise_name(ex.get("exercise_name"))
+                if anchor_key and candidate.get("exercise_key") == anchor_key:
+                    found_position = int(ex.get("exercise_order") or 0)
+                    break
+                if anchor_exercise_name.lower().replace("ё", "е") in (ex.get("exercise_name") or "").lower().replace("ё", "е"):
+                    found_position = int(ex.get("exercise_order") or 0)
+                    break
+
+            if found_position:
+                insert_position = found_position if position_mode == "before" else found_position + 1
+            else:
+                insert_position = count + 1
+
+        insert_position = max(1, min(int(insert_position), count + 1))
+
+        await session.execute(
+            text("""
+            UPDATE planned_exercises
+            SET exercise_order = exercise_order + 1
+            WHERE planned_workout_id = :planned_workout_id
+              AND exercise_order >= :insert_position
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "insert_position": insert_position,
+            },
+        )
+
+        insert_result = await session.execute(
+            text("""
+            INSERT INTO planned_exercises
+            (
+                planned_workout_id,
+                exercise_order,
+                exercise_name,
+                target_sets,
+                target_reps_min,
+                target_reps_max,
+                target_reps_text,
+                target_weight_kg,
+                notes
+            )
+            VALUES
+            (
+                :planned_workout_id,
+                :exercise_order,
+                :exercise_name,
+                :target_sets,
+                :target_reps_min,
+                :target_reps_max,
+                :target_reps_text,
+                :target_weight_kg,
+                :notes
+            )
+            RETURNING id
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "exercise_order": insert_position,
+                "exercise_name": final_name,
+                "target_sets": target_sets,
+                "target_reps_min": target_reps_min,
+                "target_reps_max": target_reps_max,
+                "target_reps_text": target_reps_text,
+                "target_weight_kg": target_weight_kg,
+                "notes": notes,
+            },
+        )
+
+        exercise_id = insert_result.mappings().first()["id"]
+
+        await _renumber_planned_exercises(session, workout_id)
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:planned_workout_id, 'exercise_added', NULL, CAST(:new_value_json AS JSONB), :source_text, :notes)
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "new_value_json": json.dumps(
+                    {
+                        "exercise_id": exercise_id,
+                        "exercise_name": final_name,
+                        "exercise_order": insert_position,
+                    },
+                    ensure_ascii=False,
+                ),
+                "source_text": source_text,
+                "notes": "Added exercise to planned workout",
+            },
+        )
+
+        await session.commit()
+
+    return {
+        "ok": True,
+        "planned_workout_id": workout_id,
+        "exercise_id": exercise_id,
+        "exercise_name": final_name,
+        "exercise_order": insert_position,
+    }
+
+
+async def remove_exercise_from_planned_workout(
+    telegram_user_id: str | None,
+    planned_workout_id: int | None = None,
+    target_date: str | None = None,
+    exercise_name: str | None = None,
+    exercise_position: int | None = None,
+    position_mode: str | None = None,
+    source_text: str | None = None,
+) -> dict:
+    from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+
+    selected = await get_best_planned_workout_for_edit(
+        telegram_user_id=telegram_user_id,
+        target_date=target_date,
+        planned_workout_id=planned_workout_id,
+    )
+
+    if not selected.get("ok"):
+        return selected
+
+    workout_id = selected["planned_workout_id"]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, exercise_name, exercise_order
+            FROM planned_exercises
+            WHERE planned_workout_id = :planned_workout_id
+            ORDER BY exercise_order ASC NULLS LAST, id ASC
+            """),
+            {"planned_workout_id": workout_id},
+        )
+
+        exercises = [dict(row) for row in result.mappings().all()]
+
+        if not exercises:
+            return {
+                "ok": False,
+                "message": "В выбранной тренировке нет упражнений.",
+                "available_exercises": [],
+            }
+
+        target = None
+
+        if position_mode == "last":
+            target = exercises[-1]
+        elif exercise_position:
+            for ex in exercises:
+                if int(ex.get("exercise_order") or 0) == int(exercise_position):
+                    target = ex
+                    break
+        elif exercise_name:
+            norm = normalize_exercise_name(exercise_name)
+            key = norm.get("exercise_key")
+            for ex in exercises:
+                candidate = normalize_exercise_name(ex.get("exercise_name"))
+                direct = exercise_name.lower().replace("ё", "е") in (ex.get("exercise_name") or "").lower().replace("ё", "е")
+                if (key and candidate.get("exercise_key") == key) or direct:
+                    target = ex
+                    break
+
+        if not target:
+            return {
+                "ok": False,
+                "message": "Не нашёл упражнение для удаления.",
+                "available_exercises": [ex.get("exercise_name") for ex in exercises],
+            }
+
+        await session.execute(
+            text("""
+            DELETE FROM planned_exercises
+            WHERE id = :exercise_id
+            """),
+            {"exercise_id": target["id"]},
+        )
+
+        await _renumber_planned_exercises(session, workout_id)
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:planned_workout_id, 'exercise_removed', CAST(:old_value_json AS JSONB), NULL, :source_text, :notes)
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "old_value_json": json.dumps(dict(target), ensure_ascii=False),
+                "source_text": source_text,
+                "notes": "Removed exercise from planned workout",
+            },
+        )
+
+        await session.commit()
+
+    return {
+        "ok": True,
+        "planned_workout_id": workout_id,
+        "removed_exercise_name": target.get("exercise_name"),
+    }
+
+
+async def reorder_exercise_in_planned_workout(
+    telegram_user_id: str | None,
+    planned_workout_id: int | None = None,
+    target_date: str | None = None,
+    exercise_name: str | None = None,
+    exercise_position: int | None = None,
+    new_position: int | None = None,
+    position_mode: str | None = None,
+    anchor_exercise_name: str | None = None,
+    source_text: str | None = None,
+) -> dict:
+    from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+
+    selected = await get_best_planned_workout_for_edit(
+        telegram_user_id=telegram_user_id,
+        target_date=target_date,
+        planned_workout_id=planned_workout_id,
+    )
+
+    if not selected.get("ok"):
+        return selected
+
+    workout_id = selected["planned_workout_id"]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, exercise_name, exercise_order
+            FROM planned_exercises
+            WHERE planned_workout_id = :planned_workout_id
+            ORDER BY exercise_order ASC NULLS LAST, id ASC
+            """),
+            {"planned_workout_id": workout_id},
+        )
+
+        exercises = [dict(row) for row in result.mappings().all()]
+
+        if not exercises:
+            return {
+                "ok": False,
+                "message": "В выбранной тренировке нет упражнений.",
+                "available_exercises": [],
+            }
+
+        target = None
+
+        if exercise_position:
+            for ex in exercises:
+                if int(ex.get("exercise_order") or 0) == int(exercise_position):
+                    target = ex
+                    break
+        elif exercise_name:
+            norm = normalize_exercise_name(exercise_name)
+            key = norm.get("exercise_key")
+            for ex in exercises:
+                candidate = normalize_exercise_name(ex.get("exercise_name"))
+                direct = exercise_name.lower().replace("ё", "е") in (ex.get("exercise_name") or "").lower().replace("ё", "е")
+                if (key and candidate.get("exercise_key") == key) or direct:
+                    target = ex
+                    break
+
+        if not target:
+            return {
+                "ok": False,
+                "message": "Не нашёл упражнение для перемещения.",
+                "available_exercises": [ex.get("exercise_name") for ex in exercises],
+            }
+
+        remaining = [ex for ex in exercises if ex["id"] != target["id"]]
+
+        insert_index = None
+
+        if position_mode == "beginning":
+            insert_index = 0
+        elif position_mode == "end":
+            insert_index = len(remaining)
+        elif position_mode in {"before", "after"} and anchor_exercise_name:
+            anchor_norm = normalize_exercise_name(anchor_exercise_name)
+            anchor_key = anchor_norm.get("exercise_key")
+            for idx, ex in enumerate(remaining):
+                candidate = normalize_exercise_name(ex.get("exercise_name"))
+                direct = anchor_exercise_name.lower().replace("ё", "е") in (ex.get("exercise_name") or "").lower().replace("ё", "е")
+                if (anchor_key and candidate.get("exercise_key") == anchor_key) or direct:
+                    insert_index = idx if position_mode == "before" else idx + 1
+                    break
+
+        if insert_index is None:
+            if new_position:
+                insert_index = max(0, min(int(new_position) - 1, len(remaining)))
+            else:
+                return {
+                    "ok": False,
+                    "message": "Не понял, куда переместить упражнение.",
+                    "available_exercises": [ex.get("exercise_name") for ex in exercises],
+                }
+
+        new_order = remaining[:insert_index] + [target] + remaining[insert_index:]
+
+        for index, ex in enumerate(new_order, start=1):
+            await session.execute(
+                text("""
+                UPDATE planned_exercises
+                SET exercise_order = :exercise_order
+                WHERE id = :exercise_id
+                """),
+                {
+                    "exercise_order": index,
+                    "exercise_id": ex["id"],
+                },
+            )
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:planned_workout_id, 'exercise_reordered', CAST(:old_value_json AS JSONB), CAST(:new_value_json AS JSONB), :source_text, :notes)
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "old_value_json": json.dumps(
+                    {
+                        "exercise_id": target["id"],
+                        "old_order": target.get("exercise_order"),
+                    },
+                    ensure_ascii=False,
+                ),
+                "new_value_json": json.dumps(
+                    {
+                        "exercise_id": target["id"],
+                        "new_order": insert_index + 1,
+                    },
+                    ensure_ascii=False,
+                ),
+                "source_text": source_text,
+                "notes": "Reordered exercise in planned workout",
+            },
+        )
+
+        await session.commit()
+
+    return {
+        "ok": True,
+        "planned_workout_id": workout_id,
+        "exercise_name": target.get("exercise_name"),
+        "new_position": insert_index + 1,
+    }
+
+
+async def update_exercise_params_in_planned_workout(
+    telegram_user_id: str | None,
+    planned_workout_id: int | None = None,
+    target_date: str | None = None,
+    exercise_name: str | None = None,
+    exercise_position: int | None = None,
+    target_sets: int | None = None,
+    target_reps_min: int | None = None,
+    target_reps_max: int | None = None,
+    target_reps_text: str | None = None,
+    target_weight_kg: float | None = None,
+    source_text: str | None = None,
+) -> dict:
+    from app.modules.fitness.exercise_normalizer import normalize_exercise_name
+
+    selected = await get_best_planned_workout_for_edit(
+        telegram_user_id=telegram_user_id,
+        target_date=target_date,
+        planned_workout_id=planned_workout_id,
+    )
+
+    if not selected.get("ok"):
+        return selected
+
+    workout_id = selected["planned_workout_id"]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, exercise_name, exercise_order
+            FROM planned_exercises
+            WHERE planned_workout_id = :planned_workout_id
+            ORDER BY exercise_order ASC NULLS LAST, id ASC
+            """),
+            {"planned_workout_id": workout_id},
+        )
+
+        exercises = [dict(row) for row in result.mappings().all()]
+        target = None
+
+        if exercise_position:
+            for ex in exercises:
+                if int(ex.get("exercise_order") or 0) == int(exercise_position):
+                    target = ex
+                    break
+        elif exercise_name:
+            norm = normalize_exercise_name(exercise_name)
+            key = norm.get("exercise_key")
+            for ex in exercises:
+                candidate = normalize_exercise_name(ex.get("exercise_name"))
+                direct = exercise_name.lower().replace("ё", "е") in (ex.get("exercise_name") or "").lower().replace("ё", "е")
+                if (key and candidate.get("exercise_key") == key) or direct:
+                    target = ex
+                    break
+
+        if not target:
+            return {
+                "ok": False,
+                "message": "Не нашёл упражнение для изменения параметров.",
+                "available_exercises": [ex.get("exercise_name") for ex in exercises],
+            }
+
+        updates = {
+            "target_sets": target_sets,
+            "target_reps_min": target_reps_min,
+            "target_reps_max": target_reps_max,
+            "target_reps_text": target_reps_text,
+            "target_weight_kg": target_weight_kg,
+        }
+
+        set_clauses = []
+        params = {"exercise_id": target["id"]}
+
+        for key, value in updates.items():
+            if value is not None:
+                set_clauses.append(f"{key} = :{key}")
+                params[key] = value
+
+        if not set_clauses:
+            return {
+                "ok": False,
+                "message": "Не понял, какие параметры упражнения изменить.",
+                "available_exercises": [ex.get("exercise_name") for ex in exercises],
+            }
+
+        await session.execute(
+            text(f"""
+            UPDATE planned_exercises
+            SET {", ".join(set_clauses)}
+            WHERE id = :exercise_id
+            """),
+            params,
+        )
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:planned_workout_id, 'exercise_params_updated', NULL, CAST(:new_value_json AS JSONB), :source_text, :notes)
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "new_value_json": json.dumps(
+                    {
+                        "exercise_id": target["id"],
+                        "updates": {k: v for k, v in updates.items() if v is not None},
+                    },
+                    ensure_ascii=False,
+                ),
+                "source_text": source_text,
+                "notes": "Updated planned exercise parameters",
+            },
+        )
+
+        await session.commit()
+
+    return {
+        "ok": True,
+        "planned_workout_id": workout_id,
+        "exercise_name": target.get("exercise_name"),
+        "updates": {k: v for k, v in updates.items() if v is not None},
+    }

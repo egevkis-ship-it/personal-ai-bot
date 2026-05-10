@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from app.modules.fitness.exercise_history import handle_exercise_history_request
 from app.modules.fitness.custom_workout_builder import create_custom_workout_from_details
 from app.modules.fitness.planned_workout_parser import parse_planned_workout_action
+from app.modules.fitness.planned_workout_editor import parse_workout_edit_action
 from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
 from app.modules.fitness.exercise_normalizer import (
     normalize_exercise_name,
@@ -432,6 +433,24 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # Parser-first layer for editing existing planned workouts.
+    # This must run before generic planning parser, otherwise phrases like
+    # "добавь восьмым упражнением велосипед" may be misread as creating a new workout.
+    edit_action = await parse_workout_edit_action(
+        text=text,
+        context={
+            "has_pending": bool(pending),
+            "pending_type": pending.get("decision_type") if pending else None,
+        },
+    )
+    edit_reply = await execute_planned_workout_action(
+        telegram_user_id=telegram_user_id,
+        action=edit_action,
+        source_text=text,
+    )
+    if edit_reply is not None:
+        return edit_reply
 
     # Parser-first layer for planned workout operations.
     # Hard commands are only shortcuts; free speech goes through parser -> structured action -> executor.
