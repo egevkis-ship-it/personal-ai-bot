@@ -1,0 +1,42 @@
+{
+  "name": "db planning copy period can be rejected",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-13",
+      "text": "сделаем тягу"
+    }
+  ],
+  "steps": [
+    {
+      "send": "скопируй период с 11 мая по 13 мая начиная с 18 мая",
+      "expect_contains_all": [
+        "Будут скопированы тренировки",
+        "Подтверди"
+      ],
+      "todo": true,
+      "todo_reason": "Custom period copy should require confirmation."
+    },
+    {
+      "send": "не надо",
+      "expect_contains_any": [
+        "Ок, не копирую",
+        "Отменил",
+        "Не копирую"
+      ],
+      "todo": true,
+      "todo_reason": "Pending period copy rejection is next."
+    },
+    {
+      "send": "покажи тренировки на месяц",
+      "expect_not_contains": "18 мая",
+      "todo": true,
+      "todo_reason": "Rejected copy should not create workouts."
+    }
+  ]
+}

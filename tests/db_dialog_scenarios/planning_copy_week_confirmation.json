@@ -1,0 +1,41 @@
+{
+  "name": "db planning copy week requires confirmation",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-13",
+      "text": "сделаем тягу"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-15",
+      "text": "сделаем ноги"
+    }
+  ],
+  "steps": [
+    {
+      "send": "скопируй эту неделю на следующие 4 недели",
+      "expect_contains_all": [
+        "Будут скопированы тренировки",
+        "Создать тренировок: 12",
+        "Подтверди"
+      ],
+      "todo": true,
+      "todo_reason": "Mass period copy should require confirmation."
+    },
+    {
+      "send": "копируй",
+      "expect_contains_all": [
+        "Скопировал период",
+        "Создано тренировок: 12"
+      ],
+      "todo": true,
+      "todo_reason": "Pending period copy confirmation is next."
+    }
+  ]
+}
