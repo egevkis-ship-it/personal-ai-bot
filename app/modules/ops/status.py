@@ -1,5 +1,6 @@
 from app.db import db_healthcheck
 from app.redis_client import redis_healthcheck
+from app.version import VERSION, BUILD_HASH
 
 
 async def build_status_text() -> str:
@@ -11,5 +12,5 @@ async def build_status_text() -> str:
         f"Bot: running\n"
         f"PostgreSQL: {'healthy' if db_ok else 'error'}\n"
         f"Redis: {'healthy' if redis_ok else 'error'}\n"
-        "Version: v0.9.6-fitness"
+        f"Version: {VERSION}\nBuild: {BUILD_HASH}"
     )
