@@ -1240,7 +1240,7 @@ async def _create_completed_workout_from_selected_plan(
                 "workout_date": planned_date,
                 "workout_type": workout.get("workout_type") or "planned",
                 "focus": workout.get("focus"),
-                "focus_label": workout.get("focus_label") or title,
+                "focus_label": title,
                 "source_text": source_text or "",
                 "notes": f"Completed from planned workout: {title}",
             },
@@ -1334,7 +1334,7 @@ async def _start_selected_planned_workout_session(
                 "workout_date": planned_date,
                 "workout_type": workout.get("workout_type") or "planned",
                 "focus": workout.get("focus"),
-                "focus_label": workout.get("focus_label") or title,
+                "focus_label": title,
                 "source_text": source_text or "",
                 "notes": f"Started from planned workout: {title}",
             },
@@ -1438,6 +1438,155 @@ async def _finish_active_workout_session(
     return "\n".join(lines)
 
 
+
+
+def _looks_like_exercise_sets_log(text: str | None) -> bool:
+    import re
+
+    t = _clean(text).replace("ё", "е")
+    if not t:
+        return False
+
+    # Example: "жим лежа 80 на 10, 80 на 8, 75 на 10"
+    return bool(re.search(r"[а-яa-z].*\d+(?:[.,]\d+)?\s*(?:на|x|×|\*)\s*\d+", t))
+
+
+def _normalize_logged_exercise_name(name: str) -> str:
+    name = " ".join((name or "").strip().split())
+    aliases = {
+        "жим лежа": "Жим штанги лёжа",
+        "жим штанги лежа": "Жим штанги лёжа",
+        "присед": "Приседания со штангой",
+        "становая": "Становая тяга",
+    }
+    key = name.lower().replace("ё", "е")
+    return aliases.get(key, name[:1].upper() + name[1:] if name else "Упражнение")
+
+
+async def _get_active_fitness_workout_id(telegram_user_id: str | None) -> int | None:
+    from sqlalchemy import text
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT id
+                FROM fitness_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND completion_type = 'active_session'
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+        )
+        row = result.mappings().first()
+        return int(row["id"]) if row else None
+
+
+async def _log_exercise_sets_to_active_session(
+    telegram_user_id: str | None,
+    text_value: str | None,
+) -> str | None:
+    import re
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal
+
+    if not _looks_like_exercise_sets_log(text_value):
+        return None
+
+    workout_id = await _get_active_fitness_workout_id(telegram_user_id)
+    if not workout_id:
+        return None
+
+    raw = _clean(text_value)
+    match = re.match(r"^(.+?)\s+(\d+(?:[.,]\d+)?\s*(?:на|x|×|\*)\s*\d+.*)$", raw, re.IGNORECASE)
+    if not match:
+        return None
+
+    exercise_name = _normalize_logged_exercise_name(match.group(1))
+    sets_text = match.group(2)
+
+    parsed_sets = []
+    for part in re.split(r"[,;]+", sets_text):
+        part = part.strip()
+        m = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|×|\*)\s*(\d+)", part, re.IGNORECASE)
+        if not m:
+            continue
+
+        weight = float(m.group(1).replace(",", "."))
+        reps = int(m.group(2))
+        parsed_sets.append((weight, reps))
+
+    if not parsed_sets:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        max_result = await session.execute(
+            text(
+                """
+                SELECT COALESCE(MAX(set_number), 0)
+                FROM fitness_exercise_sets
+                WHERE workout_id = :workout_id
+                  AND exercise_name = :exercise_name
+                """
+            ),
+            {
+                "workout_id": workout_id,
+                "exercise_name": exercise_name,
+            },
+        )
+        start_number = int(max_result.scalar_one() or 0)
+
+        for idx, (weight, reps) in enumerate(parsed_sets, start=1):
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO fitness_exercise_sets (
+                        workout_id,
+                        exercise_name,
+                        set_number,
+                        weight_kg,
+                        reps,
+                        notes
+                    )
+                    VALUES (
+                        :workout_id,
+                        :exercise_name,
+                        :set_number,
+                        :weight_kg,
+                        :reps,
+                        :notes
+                    )
+                    """
+                ),
+                {
+                    "workout_id": workout_id,
+                    "exercise_name": exercise_name,
+                    "set_number": start_number + idx,
+                    "weight_kg": weight,
+                    "reps": reps,
+                    "notes": raw,
+                },
+            )
+
+        await session.commit()
+
+    lines = [
+        "Записал подходы.",
+        "",
+        f"{exercise_name}:",
+    ]
+
+    for idx, (weight, reps) in enumerate(parsed_sets, start=start_number + 1):
+        weight_text = int(weight) if float(weight).is_integer() else weight
+        lines.append(f"{idx}) {weight_text} кг × {reps}")
+
+    return "\n".join(lines)
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -1483,6 +1632,15 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # If a workout session is active, exercise set messages must be logged
+    # into the active factual workout, not converted into planned workouts.
+    active_sets_reply = await _log_exercise_sets_to_active_session(
+        telegram_user_id=telegram_user_id,
+        text_value=text,
+    )
+    if active_sets_reply is not None:
+        return active_sets_reply
 
     # Actual workout log bridge before planned-workout parser.
     if _looks_like_mark_selected_workout_done(text):
