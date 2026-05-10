@@ -1,0 +1,39 @@
+{
+  "name": "db planning delete workouts in month period",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-06-01",
+      "text": "сделаем присед"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-06-08",
+      "text": "сделаем становую"
+    }
+  ],
+  "steps": [
+    {
+      "send": "удали все тренировки в июне",
+      "expect_contains_all": [
+        "Будут отменены",
+        "2026-06-01",
+        "2026-06-08"
+      ],
+      "expect_not_contains": "2026-05-11",
+      "todo": true,
+      "todo_reason": "Delete month period preview should be DB-backed."
+    },
+    {
+      "send": "отменяй",
+      "expect_contains": "Отменено тренировок: 2",
+      "todo": true,
+      "todo_reason": "Delete month period confirmation should be DB-backed."
+    }
+  ]
+}

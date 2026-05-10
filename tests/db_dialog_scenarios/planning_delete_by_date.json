@@ -1,0 +1,26 @@
+{
+  "name": "db planning delete workout by date",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "удали тренировку на понедельник",
+      "expect_contains_all": [
+        "Будет отменена",
+        "2026-05-11",
+        "Фактическую историю"
+      ],
+      "todo": true,
+      "todo_reason": "Delete single workout by date preview is next."
+    },
+    {
+      "send": "да",
+      "expect_contains": "Отменено тренировок: 1",
+      "todo": true,
+      "todo_reason": "Delete single workout by date confirmation is next."
+    }
+  ]
+}

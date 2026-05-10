@@ -1,0 +1,46 @@
+{
+  "name": "db planning delete workouts from date",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-18",
+      "text": "сделаем присед"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-06-01",
+      "text": "сделаем становую"
+    }
+  ],
+  "steps": [
+    {
+      "send": "удали все тренировки с 18 мая",
+      "expect_contains_all": [
+        "Будут отменены",
+        "2026-05-18",
+        "2026-06-01"
+      ],
+      "expect_not_contains": "2026-05-11",
+      "todo": true,
+      "todo_reason": "Delete from date preview is next."
+    },
+    {
+      "send": "удаляй",
+      "expect_contains": "Отменено тренировок: 2",
+      "todo": true,
+      "todo_reason": "Delete from date confirmation is next."
+    },
+    {
+      "send": "покажи все тренировки",
+      "expect_contains": "11 мая",
+      "expect_not_contains": "18 мая",
+      "todo": true,
+      "todo_reason": "Only workouts before start date should remain."
+    }
+  ]
+}
