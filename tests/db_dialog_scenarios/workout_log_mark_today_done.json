@@ -1,0 +1,34 @@
+{
+  "name": "db workout log mark today planned workout done",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "отметь тренировку выполненной",
+      "expect_contains_all": [
+        "Отметил тренировку выполненной",
+        "2026-05-11",
+        "Кастомная тренировка"
+      ],
+      "todo": true,
+      "todo_reason": "Workout completion from selected planned workout is next."
+    },
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains_any": [
+        "выполнено",
+        "completed",
+        "тренировка уже выполнена"
+      ],
+      "todo": true,
+      "todo_reason": "Completed planned workout should no longer appear as active planned."
+    }
+  ]
+}

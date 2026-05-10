@@ -1,0 +1,29 @@
+{
+  "name": "db workout log show last completed workout",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "отметь тренировку выполненной",
+      "expect_contains": "Отметил тренировку выполненной",
+      "todo": true,
+      "todo_reason": "Workout completion is next."
+    },
+    {
+      "send": "покажи последнюю тренировку",
+      "expect_contains_all": [
+        "Последняя тренировка",
+        "Кастомная тренировка"
+      ],
+      "todo": true,
+      "todo_reason": "Show last completed workout is next."
+    }
+  ]
+}

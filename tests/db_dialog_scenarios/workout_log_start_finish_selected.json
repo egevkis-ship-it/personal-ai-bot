@@ -1,0 +1,32 @@
+{
+  "name": "db workout log start and finish selected planned workout",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains_all": [
+        "Начал тренировку",
+        "Кастомная тренировка"
+      ],
+      "todo": true,
+      "todo_reason": "Workout session start is next."
+    },
+    {
+      "send": "закончил тренировку",
+      "expect_contains_all": [
+        "Завершил тренировку",
+        "Кастомная тренировка"
+      ],
+      "todo": true,
+      "todo_reason": "Workout session finish is next."
+    }
+  ]
+}

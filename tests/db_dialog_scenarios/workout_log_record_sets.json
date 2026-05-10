@@ -1,0 +1,41 @@
+{
+  "name": "db workout log record exercise sets in active session",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку",
+      "todo": true,
+      "todo_reason": "Workout session start is next."
+    },
+    {
+      "send": "жим лежа 80 на 10, 80 на 8, 75 на 10",
+      "expect_contains_all": [
+        "Записал",
+        "Жим",
+        "80",
+        "10",
+        "75"
+      ],
+      "todo": true,
+      "todo_reason": "Exercise set logging is next."
+    },
+    {
+      "send": "закончил тренировку",
+      "expect_contains_all": [
+        "Завершил тренировку",
+        "Жим"
+      ],
+      "todo": true,
+      "todo_reason": "Finished workout should include logged sets summary."
+    }
+  ]
+}
