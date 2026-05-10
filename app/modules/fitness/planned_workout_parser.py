@@ -194,6 +194,84 @@ def _contains_any(text: str, terms: list[str]) -> bool:
 def _has_workout_object(text: str) -> bool:
     return _contains_any(text, WORKOUT_TERMS) or _contains_any(text, PLAN_TERMS)
 
+
+
+def _next_weekday_from_text(text: str, weekday_index: int) -> str:
+    today = date.today()
+    delta = weekday_index - today.weekday()
+    if delta < 0:
+        delta += 7
+    return (today + timedelta(days=delta)).isoformat()
+
+
+def _extract_ru_dates_from_text(text: str) -> list[str]:
+    t = (text or "").lower().replace("ё", "е")
+    dates: list[str] = []
+
+    import re
+
+    matches = re.findall(
+        r"\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b",
+        t,
+    )
+    for day_s, month_s in matches:
+        month = RU_MONTHS.get(month_s)
+        if month:
+            dates.append(date(date.today().year, month, int(day_s)).isoformat())
+
+    weekday_map = {
+        "понедельник": 0,
+        "понедельника": 0,
+        "вторник": 1,
+        "вторника": 1,
+        "среда": 2,
+        "среду": 2,
+        "среды": 2,
+        "четверг": 3,
+        "четверга": 3,
+        "пятница": 4,
+        "пятницу": 4,
+        "пятницы": 4,
+        "суббота": 5,
+        "субботу": 5,
+        "воскресенье": 6,
+    }
+
+    for word, idx in weekday_map.items():
+        if word in t:
+            dates.append(_next_weekday_from_text(t, idx))
+
+    result = []
+    for d in dates:
+        if d not in result:
+            result.append(d)
+    return result
+
+
+def _extract_target_date_for_move(text: str) -> str | None:
+    t = (text or "").lower().replace("ё", "е")
+
+    if "на пятниц" in t or "в пятниц" in t:
+        return _next_weekday_from_text(t, 4)
+    if "на сред" in t or "в сред" in t:
+        return _next_weekday_from_text(t, 2)
+    if "на понедельник" in t or "в понедельник" in t:
+        return _next_weekday_from_text(t, 0)
+    if "на вторник" in t or "во вторник" in t:
+        return _next_weekday_from_text(t, 1)
+    if "на четверг" in t or "в четверг" in t:
+        return _next_weekday_from_text(t, 3)
+    if "на суббот" in t or "в суббот" in t:
+        return _next_weekday_from_text(t, 5)
+    if "на воскрес" in t or "в воскрес" in t:
+        return _next_weekday_from_text(t, 6)
+
+    dates = _extract_ru_dates_from_text(t)
+    if dates:
+        return dates[-1]
+
+    return None
+
 def fast_parse_planning_action(text: str) -> dict | None:
     """
     Deterministic shortcut layer.
@@ -204,6 +282,63 @@ def fast_parse_planning_action(text: str) -> dict | None:
 
     if not t:
         return None
+
+    # Date-only follow-up: “на 10 мая”
+    if t.startswith("на "):
+        dates = _extract_ru_dates_from_text(t)
+        if len(dates) == 1:
+            return {
+                "action": "show_workout_on_date",
+                "confidence": 0.88,
+                "target_date": dates[0],
+                "include_weights": False,
+                "summary": "Показать тренировку на указанную дату",
+            }
+
+    # Move planned workout. This must win over edit/reorder logic.
+    if "перенеси" in t and ("трениров" in t or " ее" in t or " её" in t or " эту" in t):
+        dates = _extract_ru_dates_from_text(t)
+        target_date = _extract_target_date_for_move(t)
+
+        source_date = None
+        if len(dates) >= 2:
+            source_date = dates[0]
+            target_date = dates[1]
+        elif "со сред" in t or "с сред" in t:
+            source_date = _next_weekday_from_text(t, 2)
+        elif "с понедельник" in t:
+            source_date = _next_weekday_from_text(t, 0)
+
+        if target_date:
+            return {
+                "action": "move_workout",
+                "confidence": 0.96,
+                "source_date": source_date,
+                "target_date": target_date,
+                "summary": "Перенести плановую тренировку",
+            }
+
+    # Show all upcoming workouts.
+    if ("следующ" in t or "будущ" in t) and "трениров" in t and ("все" in t or "следующие" in t):
+        return {
+            "action": "show_period_plan",
+            "confidence": 0.94,
+            "scope": "future",
+            "summary": "Показать все будущие плановые тренировки",
+        }
+
+    # Multi-date / period show.
+    if any(x in t for x in ["покажи", "дай", "выведи"]) and "трениров" in t:
+        dates = _extract_ru_dates_from_text(t)
+        if len(dates) >= 2:
+            return {
+                "action": "show_period_plan",
+                "confidence": 0.93,
+                "scope": "period",
+                "start_date": min(dates),
+                "end_date": max(dates),
+                "summary": "Показать тренировки за период",
+            }
 
     # Exact-ish cleanup request.
     if "пуст" in t and "трениров" in t and any(x in t for x in ["удали", "очист", "убери"]):
@@ -228,8 +363,19 @@ def fast_parse_planning_action(text: str) -> dict | None:
 
     if has_delete_word and has_workout_object:
         scope = "all"
+        start_date = None
+        end_date = None
 
-        if "следующ" in t and "недел" in t:
+        dates = _extract_ru_dates_from_text(t)
+        if len(dates) >= 2:
+            scope = "period"
+            start_date = min(dates)
+            end_date = max(dates)
+        elif len(dates) == 1:
+            scope = "period"
+            start_date = dates[0]
+            end_date = dates[0]
+        elif "следующ" in t and "недел" in t:
             scope = "next_week"
         elif "текущ" in t and "недел" in t:
             scope = "current_week"
@@ -240,6 +386,8 @@ def fast_parse_planning_action(text: str) -> dict | None:
             "action": "cancel_planned_workouts",
             "confidence": 0.97,
             "scope": scope,
+            "start_date": start_date,
+            "end_date": end_date,
             "affects": "planned_only",
             "requires_confirmation": True,
             "summary": "Отменить активные плановые тренировки",

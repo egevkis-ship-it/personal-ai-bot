@@ -2951,3 +2951,45 @@ async def update_exercise_params_in_planned_workout(
         "exercise_name": target.get("exercise_name"),
         "updates": {k: v for k, v in updates.items() if v is not None},
     }
+
+
+async def remove_multiple_exercises_from_planned_workout(
+    telegram_user_id: str | None,
+    planned_workout_id: int | None = None,
+    target_date: str | None = None,
+    exercise_positions: list[int] | None = None,
+    source_text: str | None = None,
+) -> dict:
+    if not exercise_positions:
+        return {
+            "ok": False,
+            "message": "Не понял, какие номера упражнений удалить.",
+        }
+
+    selected = await get_best_planned_workout_for_edit(
+        telegram_user_id=telegram_user_id,
+        target_date=target_date,
+        planned_workout_id=planned_workout_id,
+    )
+
+    if not selected.get("ok"):
+        return selected
+
+    workout_id = selected["planned_workout_id"]
+    removed = []
+
+    for position in sorted(set(int(x) for x in exercise_positions), reverse=True):
+        result = await remove_exercise_from_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=workout_id,
+            exercise_position=position,
+            source_text=source_text,
+        )
+        if result.get("ok"):
+            removed.append(result.get("removed_exercise_name"))
+
+    return {
+        "ok": True,
+        "planned_workout_id": workout_id,
+        "removed_exercise_names": removed,
+    }

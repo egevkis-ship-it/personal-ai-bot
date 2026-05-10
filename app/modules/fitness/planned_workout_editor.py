@@ -224,6 +224,10 @@ def fast_parse_workout_edit(text: str | None) -> dict | None:
     if not _looks_like_edit_request(t):
         return None
 
+    # Moving a whole workout is planning, not exercise editing.
+    if "перенеси" in t and ("трениров" in t or " ее" in t or " её" in t or " эту" in t):
+        return {"action": "unknown", "confidence": 0.0}
+
     target_date = _parse_target_date(t)
 
     if any(x in t for x in ["редакт", "отредакт", "измени", "изменить"]) and "трениров" in t:

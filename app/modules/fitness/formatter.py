@@ -92,6 +92,44 @@ def format_number(value) -> str:
         return str(value)
 
 
+def _format_sets_word(value) -> str:
+    try:
+        n = int(value)
+    except Exception:
+        return "подходов"
+
+    if n % 10 == 1 and n % 100 != 11:
+        return "подход"
+    if n % 10 in {2, 3, 4} and n % 100 not in {12, 13, 14}:
+        return "подхода"
+    return "подходов"
+
+
+def _split_planned_sets_notes(notes: str | None) -> tuple[str | None, list[str]]:
+    if not notes:
+        return None, []
+
+    text = str(notes).strip()
+    if not text:
+        return None, []
+
+    marker = "planned_sets:"
+    if marker not in text:
+        return text, []
+
+    before, after = text.split(marker, 1)
+    before = before.strip() or None
+
+    planned_lines = []
+    for raw in after.strip().splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        planned_lines.append(line)
+
+    return before, planned_lines
+
+
 def _format_planned_exercises(exercises: list[dict]) -> list[str]:
     lines = []
 
@@ -110,8 +148,12 @@ def _format_planned_exercises(exercises: list[dict]) -> list[str]:
                 target = f"{sets}×{reps_min}" if sets else str(reps_min)
             else:
                 target = f"{sets}×{reps_min}-{reps_max}" if sets else f"{reps_min}-{reps_max}"
+        elif reps_min is not None:
+            target = f"{sets}×{reps_min}" if sets else str(reps_min)
+        elif reps_max is not None:
+            target = f"{sets}×{reps_max}" if sets else str(reps_max)
         elif sets:
-            target = f"{sets} подходов"
+            target = f"{sets} {_format_sets_word(sets)}"
         else:
             target = ""
 
@@ -128,10 +170,15 @@ def _format_planned_exercises(exercises: list[dict]) -> list[str]:
         if target:
             line += f" — {target}"
 
-        if ex.get("notes"):
-            line += f" ({ex.get('notes')})"
+        note_text, planned_set_lines = _split_planned_sets_notes(ex.get("notes"))
+
+        if note_text:
+            line += f" ({note_text})"
 
         lines.append(line)
+
+        for planned_line in planned_set_lines:
+            lines.append(f"   {planned_line}")
 
     return lines
 

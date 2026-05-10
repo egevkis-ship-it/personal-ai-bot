@@ -410,6 +410,93 @@ async def _handle_custom_workout_details(telegram_user_id: str | None, text: str
     await resolve_fitness_pending_decision(pending["id"], status="resolved")
     return reply
 
+
+
+async def _handle_add_exercises_to_selected_workout(telegram_user_id: str | None, text: str, pending: dict) -> str | None:
+    if not pending or pending.get("decision_type") != "awaiting_add_exercises_to_selected_workout":
+        return None
+
+    from app.db import (
+        resolve_fitness_pending_decision,
+        add_exercise_to_planned_workout,
+        get_planned_workout_by_id,
+    )
+    from app.modules.fitness.custom_workout_builder import parse_custom_workout_details
+    from app.modules.fitness.formatter import format_planned_workout
+
+    t = _clean(text)
+    if t in {"отмена", "отмени", "не надо", "стоп"}:
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return "Ок, упражнения не добавляю."
+
+    context = pending.get("context_json") or {}
+    planned_workout_id = context.get("planned_workout_id")
+    target_date = context.get("target_date") or _iso(_today())
+
+    payload = await parse_custom_workout_details(
+        text="Добавить упражнения в тренировку: " + text,
+        target_date=target_date,
+    )
+
+    workout = payload.get("workout") or {}
+    exercises = workout.get("exercises") or []
+
+    clean_exercises = []
+    for raw in exercises:
+        name = raw.get("exercise_name") or raw.get("name") or raw.get("exercise")
+        if not name:
+            continue
+
+        n = str(name).strip().lower().replace("ё", "е")
+        if not n:
+            continue
+
+        # Safety: do not create placeholders like "спина упражнение 1".
+        if "упражнение" in n:
+            continue
+
+        clean_exercises.append(raw)
+
+    if not clean_exercises:
+        return (
+            "Не понял конкретные упражнения. "
+            "Перечисли названиями, например: тяга вертикальная, тяга горизонтальная, становая."
+        )
+
+    added = []
+    for raw in clean_exercises:
+        name = raw.get("exercise_name") or raw.get("name") or raw.get("exercise")
+
+        result = await add_exercise_to_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=planned_workout_id,
+            target_date=target_date,
+            exercise_name=name,
+            position_mode="end",
+            target_sets=raw.get("target_sets"),
+            target_reps_min=raw.get("target_reps_min"),
+            target_reps_max=raw.get("target_reps_max"),
+            target_reps_text=raw.get("target_reps_text"),
+            target_weight_kg=raw.get("target_weight_kg"),
+            source_text=text,
+        )
+
+        if result.get("ok"):
+            added.append(result.get("exercise_name"))
+
+    await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+    item = await get_planned_workout_by_id(planned_workout_id) if planned_workout_id else None
+    if item:
+        return (
+            "Добавил упражнения:\n"
+            + "\n".join(f"- {name}" for name in added)
+            + "\n\nАктуальная тренировка:\n\n"
+            + format_planned_workout(item)
+        )
+
+    return "Добавил упражнения: " + ", ".join(added)
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -423,6 +510,11 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     )
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
+
+    # Pending details for adding multiple exercises to selected workout.
+    reply = await _handle_add_exercises_to_selected_workout(telegram_user_id, text, pending)
+    if reply is not None:
+        return reply
 
     # Dangerous/safety pending confirmations must have priority over parser.
     reply = await _handle_cancel_planned_confirmation(telegram_user_id, text, pending)

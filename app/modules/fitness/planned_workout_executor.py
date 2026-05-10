@@ -175,6 +175,9 @@ def _period_from_scope(action: dict) -> tuple[str | None, str | None]:
         today = date.today()
         return date(today.year, today.month, 1).isoformat(), _month_end_iso()
 
+    if scope == "period" and action.get("start_date") and action.get("end_date"):
+        return action.get("start_date"), action.get("end_date")
+
     if action.get("start_date") and action.get("end_date"):
         return action.get("start_date"), action.get("end_date")
 
@@ -595,7 +598,7 @@ async def execute_planned_workout_action(
 
     if action_name == "show_period_plan":
         scope = action.get("scope") or "current_week"
-        start_date, end_date = _period_from_scope({"scope": scope})
+        start_date, end_date = _period_from_scope(action)
         if not start_date or not end_date:
             return None
 
@@ -605,7 +608,12 @@ async def execute_planned_workout_action(
             end_date=end_date,
             include_cancelled=False,
         )
-        return format_period_plan(items, title=f"План {start_date} — {end_date}")
+
+        title = f"План {start_date} — {end_date}"
+        if scope == "future":
+            title = "Все будущие плановые тренировки"
+
+        return format_period_plan(items, title=title)
 
     if action_name == "enter_edit_mode":
         from app.db import get_best_planned_workout_for_edit
@@ -649,6 +657,10 @@ async def execute_planned_workout_action(
     if action_name == "move_workout":
         source_date = action.get("source_date")
         target_date = action.get("target_date")
+
+        if not source_date and selected_context.get("target_date"):
+            source_date = selected_context.get("target_date")
+
         if not source_date or not target_date:
             return "Понял, что нужно перенести тренировку, но не понял дату-источник или дату-назначение."
 
@@ -702,6 +714,19 @@ async def execute_planned_workout_action(
         from app.db import add_exercise_to_planned_workout
 
         if _looks_like_vague_multi_add(action, source_text):
+            from app.db import create_fitness_pending_decision
+
+            await create_fitness_pending_decision(
+                telegram_user_id=telegram_user_id,
+                decision_type="awaiting_add_exercises_to_selected_workout",
+                context={
+                    "planned_workout_id": action.get("planned_workout_id"),
+                    "target_date": action.get("target_date"),
+                    "source_text": source_text,
+                },
+                source_text=source_text,
+            )
+
             return "Какие именно упражнения добавить? Перечисли их названиями, и я добавлю в выбранную тренировку."
 
         if _is_vague_or_placeholder_exercise(action.get("exercise_name")):
