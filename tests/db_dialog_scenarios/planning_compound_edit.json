@@ -15,9 +15,7 @@
       "expect_contains_all": [
         "Жим гантелей под углом",
         "Велосипед"
-      ],
-      "todo": true,
-      "todo_reason": "Compound replace+add edit is the next product fix."
+      ]
     }
   ]
 }
