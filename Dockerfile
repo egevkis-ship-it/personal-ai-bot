@@ -14,6 +14,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY VERSION BUILD ./
+COPY botctl ./botctl
+COPY scripts ./scripts
+COPY tests ./tests
 COPY app ./app
 
 CMD ["python", "-m", "app.main"]
