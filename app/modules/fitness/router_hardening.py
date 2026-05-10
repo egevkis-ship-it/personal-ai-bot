@@ -976,37 +976,60 @@ async def _clear_period_copy_pending(telegram_user_id: str) -> None:
 
 
 
-def _extract_period_copy_action_from_pending_context(context):
+def _extract_period_copy_action_from_pending_context(value):
     import json
 
-    if not context:
-        return None
+    def decode_if_json_string(v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return v
+        return v
 
-    if isinstance(context, str):
-        try:
-            context = json.loads(context)
-        except Exception:
+    def looks_like_copy_action(v):
+        return (
+            isinstance(v, dict)
+            and v.get("action") == "copy_period_workouts"
+            and v.get("source_start_date")
+            and v.get("source_end_date")
+            and v.get("target_start_date")
+            and v.get("target_end_date")
+        )
+
+    def walk(v, depth=0):
+        if depth > 8:
             return None
 
-    if not isinstance(context, dict):
+        v = decode_if_json_string(v)
+
+        if looks_like_copy_action(v):
+            return v
+
+        if isinstance(v, dict):
+            # Common wrappers first.
+            for key in ("action", "context", "payload", "data", "value", "decision", "json"):
+                if key in v:
+                    found = walk(v.get(key), depth + 1)
+                    if found:
+                        return found
+
+            # Then scan everything.
+            for child in v.values():
+                found = walk(child, depth + 1)
+                if found:
+                    return found
+
+        if isinstance(v, list):
+            for child in v:
+                found = walk(child, depth + 1)
+                if found:
+                    return found
+
         return None
 
-    action = context.get("action")
+    return walk(value)
 
-    if isinstance(action, str):
-        try:
-            action = json.loads(action)
-        except Exception:
-            return None
-
-    if isinstance(action, dict) and action.get("action") == "copy_period_workouts":
-        return action
-
-    # Fallback: in case the action itself was stored directly as context.
-    if context.get("action") == "copy_period_workouts":
-        return context
-
-    return None
 
 
 async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pending: dict | None) -> str | None:
@@ -1015,7 +1038,7 @@ async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pen
 
     from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
 
-    context = pending.get("context") or {}
+    context = pending or {}
 
     if _is_period_copy_reject(text):
         await _clear_period_copy_pending(telegram_user_id)
