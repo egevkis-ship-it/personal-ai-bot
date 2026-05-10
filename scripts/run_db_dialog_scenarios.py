@@ -5,12 +5,14 @@ import json
 import os
 import sys
 import uuid
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
 
 def load_dbcheck_env() -> None:
     """
@@ -44,8 +46,82 @@ os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dbcheck_dummy_telegram_token")
 os.environ.setdefault("OPENAI_API_KEY", "dbcheck_dummy_openai_key")
 
 
+def ensure_db_dependencies() -> None:
+    missing = []
+
+    for module_name in ["sqlalchemy", "asyncpg", "greenlet"]:
+        try:
+            __import__(module_name)
+        except ModuleNotFoundError:
+            missing.append(module_name)
+
+    if missing:
+        missing_list = ", ".join(missing)
+        raise SystemExit(
+            "DB dialog scenarios require local DB dependencies.\n"
+            f"Missing: {missing_list}\n\n"
+            "Install project dependencies first, for example:\n"
+            "  uv venv --python 3.12 .venv\n"
+            "  source .venv/bin/activate\n"
+            "  uv pip install -r requirements.txt\n"
+            "  uv pip install greenlet\n\n"
+            "Then run:\n"
+            "  ./botctl dbcheck"
+        )
+
+
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
+
+
+def _next_weekday_date(weekday: int) -> str:
+    d = date.today()
+    while d.weekday() != weekday:
+        d += timedelta(days=1)
+    return d.isoformat()
+
+
+def _fallback_db_dialog_action(text: str) -> dict[str, Any] | None:
+    """
+    Fallback for phrases production router handles, but fast parser may not.
+    Used only by DB scenario runner.
+    """
+    t = (text or "").strip().lower().replace("ё", "е")
+
+    if (
+        any(x in t for x in ["покажи", "показать", "дай", "выведи", "посмотри"])
+        and any(x in t for x in ["тренировку", "тренировка", "треньку", "треню"])
+    ):
+        weekday_map = {
+            "понедельник": 0,
+            "пн": 0,
+            "вторник": 1,
+            "вт": 1,
+            "сред": 2,
+            "ср": 2,
+            "четверг": 3,
+            "чт": 3,
+            "пятниц": 4,
+            "пт": 4,
+            "суббот": 5,
+            "сб": 5,
+            "воскрес": 6,
+            "вс": 6,
+        }
+
+        for key, weekday in weekday_map.items():
+            if key in t:
+                target_date = _next_weekday_date(weekday)
+                return {
+                    "action": "show_period_plan",
+                    "confidence": 0.95,
+                    "scope": "date",
+                    "start_date": target_date,
+                    "end_date": target_date,
+                    "summary": f"Показать тренировку на {target_date}",
+                }
+
+    return None
 
 
 def parse_action(text: str) -> dict[str, Any] | None:
@@ -63,6 +139,10 @@ def parse_action(text: str) -> dict[str, Any] | None:
             return action
     except Exception:
         pass
+
+    fallback = _fallback_db_dialog_action(text)
+    if fallback:
+        return fallback
 
     return None
 
@@ -200,6 +280,8 @@ async def run_scenario(path: Path) -> tuple[int, int]:
 
 
 async def amain() -> None:
+    ensure_db_dependencies()
+
     scenario_paths = [Path(p) for p in sys.argv[1:]]
     if not scenario_paths:
         scenario_paths = sorted(Path("tests/db_dialog_scenarios").glob("*.json"))
