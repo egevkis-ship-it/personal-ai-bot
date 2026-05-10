@@ -282,26 +282,16 @@ async def seed_scenario(user_id: str, seed: dict[str, Any]) -> str:
 
 async def run_step(user_id: str, step: dict[str, Any]) -> tuple[bool, str]:
     from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
-    from app.modules.fitness.program_import_executor import (
-        handle_training_program_import_pending,
-        looks_like_training_program_text,
-        preview_training_program_import,
-    )
+    from app.modules.fitness.router_hardening import handle_router_hardening
 
     text = step.get("send") or ""
 
-    # Program import flow must run before generic parser/action handling:
-    # 1. If a program import is pending, the text may be a schedule answer.
-    # 2. If the text itself looks like a program, create/replace pending preview.
-    reply = await handle_training_program_import_pending(user_id, text)
-
-    if reply is None and looks_like_training_program_text(text):
-        reply = await preview_training_program_import(
-            telegram_user_id=user_id,
-            program_text=text,
-            source_type="text",
-            title="Импортированная программа тренировок",
-        )
+    # Prefer the real production fitness router. This is important for pending flows:
+    # - cancel/delete confirmations: "да", "удаляй", "отменяй"
+    # - program import pending
+    # - selected workout context
+    # - parser priority
+    reply = await handle_router_hardening(user_id, text)
 
     if reply is None:
         action = parse_action(text)
@@ -315,7 +305,7 @@ async def run_step(user_id: str, step: dict[str, Any]) -> tuple[bool, str]:
             source_text=text,
         )
     else:
-        action = {"action": "program_import_flow"}
+        action = {"action": "router_hardening"}
 
     reply = reply or ""
 
