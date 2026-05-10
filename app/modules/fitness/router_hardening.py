@@ -301,76 +301,26 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
     if not pending or pending.get("decision_type") != "confirm_cancel_planned_period":
         return None
 
-    t = _clean(text)
+    decision = _parse_pending_cancel_confirmation(text)
 
-    # Confirmation must be explicit.
-    # Do NOT treat generic words like "давай" as confirmation:
-    # "давай добавим тренировку" is a new command, not approval to delete plans.
-    confirm_phrases = [
-        "да отмени",
-        "да, отмени",
-        "да отменяй",
-        "да, отменяй",
-        "да удали",
-        "да, удали",
-        "да удаляй",
-        "да, удаляй",
-        "да очисти",
-        "да, очисти",
-        "подтверждаю",
-        "подтверджаю",
-        "подтверждаю отмену",
-        "подтверждаю удаление",
-        "отменяй",
-        "удаляй",
-    ]
-
-    cancel_words = [
-        "нет",
-        "отмена",
-        "отменяем",
-        "отмени",
-        "не надо",
-        "оставь",
-        "не трогай",
-        "стоп",
-    ]
-
-    new_command_markers = [
-        "добав",
-        "создай",
-        "поставь",
-        "покажи",
-        "дай",
-        "какая",
-        "какой",
-        "что у меня",
-        "запиши",
-        "перенеси",
-        "хочу",
-    ]
-
-    if any(x in t for x in cancel_words):
+    if decision == "reject":
         await resolve_fitness_pending_decision(pending["id"], status="cancelled")
         return "Ок, план не трогаю."
 
-    if any(x in t for x in new_command_markers):
+    if decision == "unknown":
         return (
-            "Сейчас ожидается подтверждение отмены плановых тренировок. "
-            "Чтобы не удалить план случайно, сначала ответь: “да, отмени” или “отмена”."
-        )
-
-    if not any(x in t for x in confirm_phrases):
-        return (
-            "Я жду явное подтверждение отмены плановых тренировок. "
-            "Напиши: “да, отмени” или “отмена”."
+            "Жду подтверждение отмены плановых тренировок.\n"
+            "Чтобы подтвердить, напиши: “да”, “отмени”, “отмена”, “отменяй” или “удали”.\n"
+            "Чтобы отказаться, напиши: “не надо”, “стоп” или “не трогай”."
         )
 
     context = pending.get("context_json") or {}
     start_date = context.get("start_date")
     end_date = context.get("end_date")
+    scope = (context.get("scope") or "").strip()
 
     if not start_date or not end_date:
+        await resolve_fitness_pending_decision(pending["id"], status="failed")
         return "Не нашёл период для отмены. План не трогаю."
 
     cancelled_count = await cancel_active_planned_workouts_in_period(
@@ -382,35 +332,32 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
 
     await resolve_fitness_pending_decision(pending["id"], status="resolved")
 
-    scope = (context.get("scope") or "").strip()
-
     if scope == "all":
         return (
             "Отменил все активные плановые тренировки.\n"
-            f"Отменено тренировок: {cancelled}\n"
+            f"Отменено тренировок: {cancelled_count}\n"
             "Фактическую историю тренировок не трогал."
         )
 
     if scope == "future":
         return (
             "Отменил все будущие активные плановые тренировки.\n"
-            f"Отменено тренировок: {cancelled}\n"
+            f"Отменено тренировок: {cancelled_count}\n"
             "Фактическую историю тренировок не трогал."
         )
 
     if end_date == "2999-12-31":
         return (
             f"Отменил активные плановые тренировки начиная с {start_date}.\n"
-            f"Отменено тренировок: {cancelled}\n"
+            f"Отменено тренировок: {cancelled_count}\n"
             "Фактическую историю тренировок не трогал."
         )
 
     return (
         f"Отменил плановые тренировки за период {start_date} — {end_date}.\n"
-        f"Отменено тренировок: {cancelled}\n"
+        f"Отменено тренировок: {cancelled_count}\n"
         "Фактическую историю тренировок не трогал."
     )
-
 
 
 
