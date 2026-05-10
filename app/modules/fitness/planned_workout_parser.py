@@ -305,6 +305,97 @@ def _clean(text: str | None) -> str:
 
 
 
+
+
+def _parse_ru_number_word(text: str | None) -> int | None:
+    t = _clean(text)
+
+    words = {
+        "один": 1,
+        "одного": 1,
+        "одну": 1,
+        "два": 2,
+        "две": 2,
+        "двух": 2,
+        "три": 3,
+        "трех": 3,
+        "трёх": 3,
+        "четыре": 4,
+        "четырех": 4,
+        "четырёх": 4,
+        "пять": 5,
+        "пяти": 5,
+        "шесть": 6,
+        "шести": 6,
+    }
+
+    for key, value in words.items():
+        if key in t:
+            return value
+
+    import re
+    m = re.search(r"(\d+)\s*(?:месяц|мес)", t)
+    if m:
+        return int(m.group(1))
+
+    return None
+
+
+def _month_range_from_offset(offset_months: int) -> tuple[date, date]:
+    today = date.today()
+    year = today.year
+    month = today.month + offset_months
+
+    while month > 12:
+        month -= 12
+        year += 1
+
+    while month < 1:
+        month += 12
+        year -= 1
+
+    start = date(year, month, 1)
+
+    if month == 12:
+        next_start = date(year + 1, 1, 1)
+    else:
+        next_start = date(year, month + 1, 1)
+
+    return start, next_start - timedelta(days=1)
+
+
+def _multi_month_period(month_count: int, start_offset: int = 0) -> tuple[str, str]:
+    month_count = max(1, int(month_count))
+    start, _ = _month_range_from_offset(start_offset)
+    _, end = _month_range_from_offset(start_offset + month_count - 1)
+    return start.isoformat(), end.isoformat()
+
+
+def _parse_show_plan_month_period(text: str | None) -> tuple[str, str] | None:
+    t = _clean(text)
+
+    if not any(x in t for x in ["покажи", "показать", "дай", "выведи", "посмотри"]):
+        return None
+
+    if not any(x in t for x in ["трениров", "трени", "треньк", "план"]):
+        return None
+
+    # Explicit month: “в июне”, “за июнь”.
+    explicit_month = _parse_ru_month_period(t)
+    if explicit_month:
+        return explicit_month
+
+    # “следующий месяц” = next calendar month.
+    if "следующий месяц" in t or "следующем месяце" in t:
+        return _multi_month_period(1, start_offset=1)
+
+    # “на два месяца”, “на 2 месяца”, “на месяц”.
+    if "месяц" in t or "мес" in t:
+        count = _parse_ru_number_word(t) or 1
+        return _multi_month_period(count, start_offset=0)
+
+    return None
+
 def _parse_ru_month_period(text: str | None) -> tuple[str, str] | None:
     t = _clean(text)
 
@@ -483,6 +574,36 @@ def fast_parse_planning_action(text: str) -> dict | None:
 
     if not t:
         return None
+
+    show_month_period = _parse_show_plan_month_period(t)
+    if show_month_period:
+        start_date, end_date = show_month_period
+        return {
+            "action": "show_period_plan",
+            "confidence": 0.96,
+            "scope": "period",
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": f"Показать план тренировок за период {start_date} — {end_date}",
+        }
+
+    # "Покажи все тренировки" should mean all active future planned workouts,
+    # not only current month. Archive/completed must be explicit.
+    if (
+        any(x in t for x in ["покажи", "показать", "дай", "выведи", "посмотри"])
+        and "все" in t
+        and any(x in t for x in ["трениров", "трени", "треньк", "план"])
+        and not any(x in t for x in ["архив", "удален", "удалён", "отменен", "отменён", "заменен", "заменён", "выполн", "сделан", "фактичес"])
+        and not any(x in t for x in ["месяц", "недел", "июн", "июл", "май", "август", "сентябр", "октябр", "ноябр", "декабр", "январ", "феврал", "март", "апрел"])
+    ):
+        return {
+            "action": "show_period_plan",
+            "confidence": 0.97,
+            "scope": "future",
+            "start_date": None,
+            "end_date": None,
+            "summary": "Показать все будущие активные плановые тренировки",
+        }
 
     copy_action = _parse_copy_selected_workout_action(text)
     if copy_action:

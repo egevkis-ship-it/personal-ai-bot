@@ -617,7 +617,7 @@ def _only_active_planned_items(items: list[dict]) -> list[dict]:
 def _format_active_plan_or_empty(items: list[dict], title: str) -> str:
     active_items = _only_active_planned_items(items)
     if not active_items:
-        return f"{title}:\\n\\nАктивных плановых тренировок нет."
+        return f"{title}:\n\nАктивных плановых тренировок нет."
     return format_period_plan(active_items, title=title)
 
 async def execute_planned_workout_action(
