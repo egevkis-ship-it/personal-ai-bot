@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -10,6 +11,11 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# DB scenarios do not call Telegram or OpenAI directly.
+# These dummy values only allow app.config.Settings() to load locally.
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dbcheck_dummy_telegram_token")
+os.environ.setdefault("OPENAI_API_KEY", "dbcheck_dummy_openai_key")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -39,18 +45,58 @@ async def seed_scenario(user_id: str, seed: dict[str, Any]) -> str:
     seed_type = seed.get("type")
 
     if seed_type == "custom_workout":
-        from app.modules.fitness.custom_workout_builder import create_custom_workout_from_details
+        from app.db import save_training_plan
 
-        target_date = seed.get("target_date")
-        text = seed.get("text") or ""
+        target_date = seed.get("target_date") or "2026-05-11"
+        source_text = seed.get("text") or "dbcheck seed workout"
 
-        reply = await create_custom_workout_from_details(
+        exercises = [
+            "Жим штанги лёжа",
+            "Приседания со штангой",
+            "Становая тяга",
+            "Отжимания",
+            "Пресс подъёмы корпуса, ноги согнуты",
+            "Велосипед",
+        ]
+
+        plan_id = await save_training_plan(
             telegram_user_id=user_id,
-            text=text,
-            target_date=target_date,
+            plan_name="DB Check Seed Plan",
+            period_type="single_day",
+            start_date=target_date,
+            end_date=target_date,
+            source_text=source_text,
+            notes="Created by db dialog scenario seed",
+            planned_workouts=[
+                {
+                    "planned_date": target_date,
+                    "weekday": "понедельник",
+                    "sequence_number": 1,
+                    "is_floating": False,
+                    "title": "Кастомная тренировка",
+                    "focus": "full_body",
+                    "focus_label": "full body",
+                    "workout_type": "planned",
+                    "status": "planned",
+                    "notes": "DB dialog scenario seed workout",
+                    "exercises": [
+                        {
+                            "exercise_order": i,
+                            "exercise_name": name,
+                            "target_sets": None,
+                            "target_reps_min": None,
+                            "target_reps_max": None,
+                            "target_reps_text": None,
+                            "target_weight_kg": None,
+                            "notes": None,
+                        }
+                        for i, name in enumerate(exercises, start=1)
+                    ],
+                }
+            ],
         )
 
-        return reply or ""
+        return f"Создал seed тренировку на {target_date}. ID плана: {plan_id}"
 
     raise RuntimeError(f"Unsupported seed type: {seed_type!r}")
 
