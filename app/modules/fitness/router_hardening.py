@@ -1122,6 +1122,322 @@ async def _build_period_copy_preview(telegram_user_id: str, action: dict, source
     return "\n".join(lines)
 
 
+
+
+def _looks_like_mark_selected_workout_done(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return (
+        any(x in t for x in ["отметь", "пометь", "засчитай"])
+        and any(x in t for x in ["выполненной", "выполнена", "сделанной", "сделана"])
+        and "трен" in t
+    ) or t in {
+        "выполнил тренировку",
+        "сделал тренировку",
+        "тренировка выполнена",
+        "тренировка сделана",
+    }
+
+
+def _looks_like_start_selected_workout(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return t in {
+        "начал тренировку",
+        "начинаю тренировку",
+        "старт тренировки",
+        "начал треньку",
+        "начинаю треньку",
+    }
+
+
+def _looks_like_finish_active_workout(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return t in {
+        "закончил тренировку",
+        "завершил тренировку",
+        "тренировка закончена",
+        "тренировка завершена",
+        "закончил треньку",
+        "завершил треньку",
+    }
+
+
+def _looks_like_show_last_actual_workout(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return (
+        "последн" in t
+        and "трен" in t
+        and not any(x in t for x in ["следующ", "план", "заплан"])
+    )
+
+
+async def _get_selected_planned_for_workout_log(telegram_user_id: str | None) -> dict | None:
+    from app.modules.fitness.planned_workout_executor import _get_selected_planned_workout_context
+    from app.db import get_planned_workout_by_id
+
+    selected = await _get_selected_planned_workout_context(telegram_user_id)
+    if not selected:
+        return None
+
+    planned_workout_id = selected.get("planned_workout_id") or selected.get("id")
+    if not planned_workout_id:
+        return None
+
+    data = await get_planned_workout_by_id(int(planned_workout_id))
+    return data
+
+
+async def _create_completed_workout_from_selected_plan(
+    telegram_user_id: str | None,
+    source_text: str | None = None,
+) -> str:
+    from datetime import date
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal
+    from app.modules.fitness.formatter import format_human_date
+
+    data = await _get_selected_planned_for_workout_log(telegram_user_id)
+    if not data:
+        return "Не понял, какую тренировку отметить выполненной. Сначала покажи нужную тренировку."
+
+    workout = data.get("workout") or {}
+    planned_id = workout.get("id")
+    planned_date = workout.get("planned_date") or date.today().isoformat()
+    title = workout.get("title") or workout.get("focus_label") or "Плановая тренировка"
+
+    async with AsyncSessionLocal() as session:
+        insert_result = await session.execute(
+            text(
+                """
+                INSERT INTO fitness_workouts (
+                    telegram_user_id,
+                    planned_workout_id,
+                    workout_date,
+                    workout_type,
+                    focus,
+                    focus_label,
+                    completion_type,
+                    source_text,
+                    notes
+                )
+                VALUES (
+                    :telegram_user_id,
+                    :planned_workout_id,
+                    CAST(:workout_date AS DATE),
+                    :workout_type,
+                    :focus,
+                    :focus_label,
+                    'planned_completed',
+                    :source_text,
+                    :notes
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "telegram_user_id": str(telegram_user_id) if telegram_user_id else None,
+                "planned_workout_id": int(planned_id),
+                "workout_date": planned_date,
+                "workout_type": workout.get("workout_type") or "planned",
+                "focus": workout.get("focus"),
+                "focus_label": workout.get("focus_label") or title,
+                "source_text": source_text or "",
+                "notes": f"Completed from planned workout: {title}",
+            },
+        )
+        workout_id = insert_result.scalar_one()
+
+        await session.execute(
+            text(
+                """
+                UPDATE planned_workouts
+                SET status = 'completed'
+                WHERE id = :planned_workout_id
+                """
+            ),
+            {"planned_workout_id": int(planned_id)},
+        )
+        await session.commit()
+
+    return (
+        "Отметил тренировку выполненной.\n\n"
+        f"Дата: {planned_date}\n"
+        f"Тренировка: {title}\n"
+        f"ID факта: {workout_id}\n\n"
+        "Плановая тренировка переведена в статус completed."
+    )
+
+
+async def _start_selected_planned_workout_session(
+    telegram_user_id: str | None,
+    source_text: str | None = None,
+) -> str:
+    from datetime import date
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal
+
+    data = await _get_selected_planned_for_workout_log(telegram_user_id)
+    if not data:
+        return "Не понял, какую тренировку начать. Сначала покажи нужную тренировку."
+
+    workout = data.get("workout") or {}
+    planned_id = workout.get("id")
+    planned_date = workout.get("planned_date") or date.today().isoformat()
+    title = workout.get("title") or workout.get("focus_label") or "Плановая тренировка"
+
+    async with AsyncSessionLocal() as session:
+        # Close stale active sessions for this user before opening a new one.
+        await session.execute(
+            text(
+                """
+                UPDATE fitness_workouts
+                SET completion_type = 'completed'
+                WHERE telegram_user_id = :telegram_user_id
+                  AND completion_type = 'active_session'
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+        )
+
+        insert_result = await session.execute(
+            text(
+                """
+                INSERT INTO fitness_workouts (
+                    telegram_user_id,
+                    planned_workout_id,
+                    workout_date,
+                    workout_type,
+                    focus,
+                    focus_label,
+                    completion_type,
+                    source_text,
+                    notes
+                )
+                VALUES (
+                    :telegram_user_id,
+                    :planned_workout_id,
+                    CAST(:workout_date AS DATE),
+                    :workout_type,
+                    :focus,
+                    :focus_label,
+                    'active_session',
+                    :source_text,
+                    :notes
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "telegram_user_id": str(telegram_user_id) if telegram_user_id else None,
+                "planned_workout_id": int(planned_id),
+                "workout_date": planned_date,
+                "workout_type": workout.get("workout_type") or "planned",
+                "focus": workout.get("focus"),
+                "focus_label": workout.get("focus_label") or title,
+                "source_text": source_text or "",
+                "notes": f"Started from planned workout: {title}",
+            },
+        )
+        session_id = insert_result.scalar_one()
+        await session.commit()
+
+    return (
+        "Начал тренировку.\n\n"
+        f"Тренировка: {title}\n"
+        f"Дата: {planned_date}\n"
+        f"ID сессии: {session_id}\n\n"
+        "Теперь можно присылать подходы."
+    )
+
+
+async def _finish_active_workout_session(
+    telegram_user_id: str | None,
+    source_text: str | None = None,
+) -> str:
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        active_result = await session.execute(
+            text(
+                """
+                SELECT id, planned_workout_id, workout_date, focus_label
+                FROM fitness_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND completion_type = 'active_session'
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+        )
+        active = active_result.mappings().first()
+
+        if not active:
+            return "Нет активной тренировки. Сначала напиши “начал тренировку”."
+
+        await session.execute(
+            text(
+                """
+                UPDATE fitness_workouts
+                SET completion_type = 'planned_completed',
+                    source_text = COALESCE(source_text, '') || E'\n' || :source_text
+                WHERE id = :workout_id
+                """
+            ),
+            {
+                "workout_id": int(active["id"]),
+                "source_text": source_text or "",
+            },
+        )
+
+        if active.get("planned_workout_id"):
+            await session.execute(
+                text(
+                    """
+                    UPDATE planned_workouts
+                    SET status = 'completed'
+                    WHERE id = :planned_workout_id
+                    """
+                ),
+                {"planned_workout_id": int(active["planned_workout_id"])},
+            )
+
+        sets_result = await session.execute(
+            text(
+                """
+                SELECT exercise_name, COUNT(*) AS set_count
+                FROM fitness_exercise_sets
+                WHERE workout_id = :workout_id
+                GROUP BY exercise_name
+                ORDER BY exercise_name
+                """
+            ),
+            {"workout_id": int(active["id"])},
+        )
+        set_rows = list(sets_result.mappings())
+
+        await session.commit()
+
+    title = active.get("focus_label") or "Кастомная тренировка"
+    lines = [
+        "Завершил тренировку.",
+        "",
+        f"Тренировка: {title}",
+        f"Дата: {active.get('workout_date')}",
+    ]
+
+    if set_rows:
+        lines.append("")
+        lines.append("Записанные подходы:")
+        for row in set_rows:
+            lines.append(f"- {row['exercise_name']}: {row['set_count']} подходов")
+
+    return "\n".join(lines)
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -1167,6 +1483,30 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # Actual workout log bridge before planned-workout parser.
+    if _looks_like_mark_selected_workout_done(text):
+        return await _create_completed_workout_from_selected_plan(
+            telegram_user_id=telegram_user_id,
+            source_text=text,
+        )
+
+    if _looks_like_start_selected_workout(text):
+        return await _start_selected_planned_workout_session(
+            telegram_user_id=telegram_user_id,
+            source_text=text,
+        )
+
+    if _looks_like_finish_active_workout(text):
+        return await _finish_active_workout_session(
+            telegram_user_id=telegram_user_id,
+            source_text=text,
+        )
+
+    if _looks_like_show_last_actual_workout(text):
+        from app.modules.fitness.handler import command_last_workout
+
+        return await command_last_workout(telegram_user_id)
 
     # Copy month/custom period before week/single workout copy.
     copy_period_action = _parse_copy_month_or_custom_period_action(text)
