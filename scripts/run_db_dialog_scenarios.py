@@ -151,21 +151,64 @@ async def set_selected_context_for_date(user_id: str, target_date: str, source_t
     """
     Store selected workout context for DB dialog scenarios.
 
-    The production copy flow only needs target_date to resolve
-    “скопируй на следующую неделю” from selected context.
-    Avoid direct DB pool usage here so the runner does not depend on app.db internals.
+    Copy only needs target_date, but edit flows need planned_workout_id.
+    Therefore this runner resolves the real active planned_workout row by date.
     """
-    from app.db import create_fitness_pending_decision
+    from datetime import date as date_type
+
+    from sqlalchemy import text
+
+    from app.db import AsyncSessionLocal, create_fitness_pending_decision
+
+    target_date_value = date_type.fromisoformat(target_date) if isinstance(target_date, str) else target_date
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT id, planned_date, title, focus, focus_label
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date = :target_date
+                  AND status = 'planned'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "telegram_user_id": str(user_id),
+                "target_date": target_date_value,
+            },
+        )
+        row = result.mappings().first()
+
+    if not row:
+        await create_fitness_pending_decision(
+            telegram_user_id=user_id,
+            decision_type="selected_planned_workout_context",
+            context={
+                "planned_workout_id": None,
+                "target_date": target_date,
+                "title": "Кастомная тренировка",
+                "focus": "full_body",
+                "focus_label": "full body",
+            },
+            source_text=source_text,
+        )
+        return
+
+    planned_date = row["planned_date"]
+    planned_date_s = planned_date.isoformat() if hasattr(planned_date, "isoformat") else str(planned_date)
 
     await create_fitness_pending_decision(
         telegram_user_id=user_id,
         decision_type="selected_planned_workout_context",
         context={
-            "planned_workout_id": None,
-            "target_date": target_date,
-            "title": "Кастомная тренировка",
-            "focus": "full_body",
-            "focus_label": "full body",
+            "planned_workout_id": int(row["id"]),
+            "target_date": planned_date_s,
+            "title": row["title"] or "Кастомная тренировка",
+            "focus": row["focus"] or "full_body",
+            "focus_label": row["focus_label"] or "full body",
         },
         source_text=source_text,
     )
