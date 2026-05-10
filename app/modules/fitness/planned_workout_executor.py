@@ -814,6 +814,8 @@ async def execute_planned_workout_action(
         return f"Перенёс плановые тренировки с {source_date} на {target_date}.\nПеренесено: {moved}"
 
     if action_name == "compound_edit_workout":
+        from app.modules.fitness.planned_workout_editor import fast_parse_workout_edit
+
         operations = action.get("operations") or []
         applied = []
         failed = []
@@ -822,45 +824,58 @@ async def execute_planned_workout_action(
             op_type = op.get("type")
 
             if op_type == "replace_exercise":
-                sub_action = {
-                    "action": "replace_exercise",
-                    "old_name": op.get("old_name"),
-                    "new_name": op.get("new_name"),
-                    "source": "selected_context",
-                }
+                sub_text = f"замени {op.get('old_name')} на {op.get('new_name')}"
+                sub_action = fast_parse_workout_edit(sub_text)
+
+                if not sub_action:
+                    failed.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
+                    continue
 
                 result = await execute_planned_workout_action(
                     telegram_user_id=telegram_user_id,
                     action=sub_action,
-                    source_text=source_text,
+                    source_text=sub_text,
                 )
 
-                if result and ("Заменил упражнение" in result or "Актуальная тренировка:" in result):
+                if result and (
+                    "Заменил упражнение" in result
+                    or "Актуальная тренировка:" in result
+                    or str(op.get("new_name") or "").lower() in result.lower()
+                ):
                     applied.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
                 else:
                     failed.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
 
             elif op_type == "add_exercise":
-                sub_action = {
-                    "action": "add_exercise_to_planned_workout",
-                    "exercise_name": op.get("exercise_name"),
-                    "exercise_position": None,
-                    "position_mode": op.get("position") or "end",
-                    "anchor_exercise_name": None,
-                    "target_date": None,
-                    "source": "selected_context",
-                }
+                exercise_name = op.get("exercise_name")
+                position = op.get("position") or "end"
+
+                if position == "start":
+                    sub_text = f"добавь в начало {exercise_name}"
+                else:
+                    sub_text = f"добавь в конце {exercise_name}"
+
+                sub_action = fast_parse_workout_edit(sub_text)
+
+                if not sub_action:
+                    failed.append(f"добавление: {exercise_name}")
+                    continue
 
                 result = await execute_planned_workout_action(
                     telegram_user_id=telegram_user_id,
                     action=sub_action,
-                    source_text=source_text,
+                    source_text=sub_text,
                 )
 
-                if result and ("Добавил упражнение" in result or "Добавил упражнение в плановую тренировку" in result or "Актуальная тренировка:" in result):
-                    applied.append(f"добавление: {op.get('exercise_name')}")
+                if result and (
+                    "Добавил упражнение" in result
+                    or "Добавил упражнение в плановую тренировку" in result
+                    or "Актуальная тренировка:" in result
+                    or str(exercise_name or "").lower() in result.lower()
+                ):
+                    applied.append(f"добавление: {exercise_name}")
                 else:
-                    failed.append(f"добавление: {op.get('exercise_name')}")
+                    failed.append(f"добавление: {exercise_name}")
 
         selected_context = await _get_selected_planned_workout_context(telegram_user_id)
         target_date = selected_context.get("target_date")
