@@ -440,6 +440,90 @@ async def _handle_custom_workout_details(telegram_user_id: str | None, text: str
 
 
 
+
+
+def _parse_pending_cancel_confirmation(text: str | None) -> str:
+    """
+    Parser for confirmation after cancel/delete planned-workouts preview.
+
+    Returns:
+    - "confirm": execute cancellation
+    - "reject": cancel pending, keep plan
+    - "unknown": do nothing, ask again
+
+    Important UX rule:
+    In this specific pending context, "отмена" can mean confirmation of
+    cancelling workouts, because the pending action itself is cancellation.
+    """
+    t = _clean(text)
+    t = t.replace("ё", "е")
+    t = " ".join(t.split())
+
+    if not t:
+        return "unknown"
+
+    reject_exact = {
+        "не надо",
+        "не нужно",
+        "стоп",
+        "стой",
+        "не трогай",
+        "оставь",
+        "оставь как есть",
+        "ничего не делай",
+        "не удаляй",
+        "не отменяй",
+        "отбой",
+    }
+
+    if t in reject_exact:
+        return "reject"
+
+    confirm_exact = {
+        "да",
+        "давай",
+        "ок",
+        "окей",
+        "ага",
+        "подтверждаю",
+        "подтверждаю удаление",
+        "подтверждаю отмену",
+        "отмени",
+        "отмена",
+        "отменяй",
+        "удали",
+        "удаляй",
+        "снеси",
+        "сноси",
+        "да отмени",
+        "да отмена",
+        "да отменяй",
+        "да удали",
+        "да удаляй",
+        "да сноси",
+        "да, отмени",
+        "да, отмена",
+        "да, отменяй",
+        "да, удали",
+        "да, удаляй",
+        "да, сноси",
+    }
+
+    if t in confirm_exact:
+        return "confirm"
+
+    # More flexible parser, but still only inside pending cancellation context.
+    has_positive = any(x in t for x in ["да", "подтверж", "ок", "ага"])
+    has_cancel_delete = any(x in t for x in ["отмен", "удал", "снес", "снос"])
+
+    if has_positive and has_cancel_delete:
+        return "confirm"
+
+    if t.startswith(("отмени ", "отмена ", "отменяй ", "удали ", "удаляй ")):
+        return "confirm"
+
+    return "unknown"
+
 async def _handle_add_exercises_to_selected_workout(telegram_user_id: str | None, text: str, pending: dict) -> str | None:
     if not pending or pending.get("decision_type") != "awaiting_add_exercises_to_selected_workout":
         return None
