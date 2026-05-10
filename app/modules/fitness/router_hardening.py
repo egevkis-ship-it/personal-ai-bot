@@ -382,9 +382,32 @@ async def _handle_cancel_planned_confirmation(telegram_user_id: str | None, text
 
     await resolve_fitness_pending_decision(pending["id"], status="resolved")
 
+    scope = (context.get("scope") or "").strip()
+
+    if scope == "all":
+        return (
+            "Отменил все активные плановые тренировки.\n"
+            f"Отменено тренировок: {cancelled}\n"
+            "Фактическую историю тренировок не трогал."
+        )
+
+    if scope == "future":
+        return (
+            "Отменил все будущие активные плановые тренировки.\n"
+            f"Отменено тренировок: {cancelled}\n"
+            "Фактическую историю тренировок не трогал."
+        )
+
+    if end_date == "2999-12-31":
+        return (
+            f"Отменил активные плановые тренировки начиная с {start_date}.\n"
+            f"Отменено тренировок: {cancelled}\n"
+            "Фактическую историю тренировок не трогал."
+        )
+
     return (
         f"Отменил плановые тренировки за период {start_date} — {end_date}.\n"
-        f"Отменено тренировок: {cancelled_count}\n"
+        f"Отменено тренировок: {cancelled}\n"
         "Фактическую историю тренировок не трогал."
     )
 
