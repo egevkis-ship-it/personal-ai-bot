@@ -1968,6 +1968,39 @@ async def get_next_planned_workouts(
     return result
 
 
+
+
+async def has_active_planned_workout_on_date(
+    telegram_user_id: str | None,
+    target_date: str,
+) -> bool:
+    """
+    Return True if user already has an active planned workout on target_date.
+    Used by copy flow to avoid duplicate planned workouts.
+    """
+    if not telegram_user_id or not target_date:
+        return False
+
+    async with async_session() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT id
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date = CAST(:target_date AS DATE)
+                  AND status = 'planned'
+                LIMIT 1
+                """
+            ),
+            {
+                "telegram_user_id": str(telegram_user_id),
+                "target_date": target_date,
+            },
+        )
+
+        return result.first() is not None
+
 async def move_planned_workouts_between_dates(
     telegram_user_id: str | None,
     source_date: str,

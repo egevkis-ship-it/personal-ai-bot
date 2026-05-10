@@ -814,7 +814,7 @@ async def execute_planned_workout_action(
         return f"Перенёс плановые тренировки с {source_date} на {target_date}.\nПеренесено: {moved}"
 
     if action_name == "copy_workout":
-        from app.db import move_planned_workouts_between_dates
+        from app.db import move_planned_workouts_between_dates, has_active_planned_workout_on_date
 
         selected_context = await _get_selected_planned_workout_context(telegram_user_id)
 
@@ -846,6 +846,18 @@ async def execute_planned_workout_action(
                     "reason": "дата совпадает с исходной",
                 })
                 continue
+
+            if action.get("skip_existing", True):
+                already_exists = await has_active_planned_workout_on_date(
+                    telegram_user_id=telegram_user_id,
+                    target_date=target_date,
+                )
+                if already_exists:
+                    skipped.append({
+                        "target_date": target_date,
+                        "reason": "уже есть активная плановая тренировка",
+                    })
+                    continue
 
             copied_count = await move_planned_workouts_between_dates(
                 telegram_user_id=telegram_user_id,

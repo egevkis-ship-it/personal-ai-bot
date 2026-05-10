@@ -16,9 +16,7 @@
     },
     {
       "send": "скопируй на следующую неделю",
-      "expect_contains": "Пропущено",
-      "todo": true,
-      "todo_reason": "Duplicate-safe copy is planned next. This should pass after duplicate prevention is implemented."
+      "expect_contains": "Пропущено"
     }
   ]
 }
