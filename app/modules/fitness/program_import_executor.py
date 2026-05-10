@@ -253,6 +253,46 @@ async def preview_training_program_import(
     )
 
 
+
+
+def _parse_import_collision_policy(text: str | None) -> str:
+    t = _clean(text)
+
+    replace_markers = [
+        "заменить старые",
+        "замени старые",
+        "заменять старые",
+        "заменить существующие",
+        "замени существующие",
+        "заменять существующие",
+        "заменить занятые",
+        "замени занятые",
+        "заменять занятые",
+        "перезаписать",
+        "перезапиши",
+        "поверх старых",
+        "вместо старых",
+    ]
+
+    skip_markers = [
+        "пропускать занятые",
+        "пропусти занятые",
+        "не трогай старые",
+        "не заменяй старые",
+        "оставь старые",
+        "без замены",
+    ]
+
+    if any(x in t for x in replace_markers):
+        return "replace_existing"
+
+    if any(x in t for x in skip_markers):
+        return "skip_existing"
+
+    # Safe default.
+    return "skip_existing"
+
+
 async def handle_training_program_import_pending(
     telegram_user_id: str | None,
     text: str,
@@ -300,6 +340,7 @@ async def handle_training_program_import_pending(
 
     weeks = _parse_weeks_count(text, default=1)
     layout = _parse_weekday_layout(text, day_count=len(days))
+    collision_policy = _parse_import_collision_policy(text)
 
     if layout == [] and "через день" in t:
         target_dates = _build_dates_every_other_day(count=len(days) * weeks)
@@ -332,7 +373,7 @@ async def handle_training_program_import_pending(
             program=program,
             target_dates=target_dates,
             title_prefix=None,
-            skip_existing=True,
+            skip_existing=(collision_policy != "replace_existing"),
             source_text=source_text,
         )
     except Exception as exc:
