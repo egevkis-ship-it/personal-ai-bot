@@ -308,6 +308,42 @@ def fast_parse_planning_action(text: str) -> dict | None:
     if not t:
         return None
 
+    # Delete/cancel planned workouts has priority over show-planned intents.
+    # Example: “удали запланированные тренировки” must not be parsed as “show planned workouts”.
+    if any(x in t for x in ["удали", "удалить", "удаляй", "отмени", "отменить", "отменяй", "снеси", "сноси"]) and any(
+        x in t for x in ["трениров", "трени", "треньк", "тренечк", "планов", "запланирован"]
+    ):
+        scope = "all"
+        start_date = None
+        end_date = None
+
+        dates = _extract_ru_dates_from_text(t) if "_extract_ru_dates_from_text" in globals() else []
+        if len(dates) >= 2:
+            scope = "period"
+            start_date = min(dates)
+            end_date = max(dates)
+        elif len(dates) == 1:
+            scope = "period"
+            start_date = dates[0]
+            end_date = dates[0]
+        elif "следующ" in t and "недел" in t:
+            scope = "next_week"
+        elif "текущ" in t and "недел" in t:
+            scope = "current_week"
+        elif "будущ" in t or "запланирован" in t:
+            scope = "future"
+
+        return {
+            "action": "cancel_planned_workouts",
+            "confidence": 0.99,
+            "scope": scope,
+            "start_date": start_date,
+            "end_date": end_date,
+            "affects": "planned_only",
+            "requires_confirmation": True,
+            "summary": "Отменить активные плановые тренировки",
+        }
+
     # Next month / current month plan.
     if "план" in t and "месяц" in t:
         if "следующ" in t:

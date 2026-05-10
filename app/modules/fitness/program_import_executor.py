@@ -273,6 +273,18 @@ async def handle_training_program_import_pending(
         await resolve_fitness_pending_decision(pending["id"], status="cancelled")
         return "Ок, импорт программы отменён."
 
+    # If user sends a new full program while an old import is waiting for schedule,
+    # do not treat the new program as a schedule answer.
+    # Replace the pending import and show a fresh preview.
+    if looks_like_training_program_text(text):
+        await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+        return await preview_training_program_import(
+            telegram_user_id=telegram_user_id,
+            program_text=text,
+            source_type="text",
+            title="Импортированная программа тренировок",
+        )
+
     context = pending.get("context_json") or {}
     program = context.get("program")
     source_text = context.get("source_text")
