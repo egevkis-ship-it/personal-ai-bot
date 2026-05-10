@@ -22,13 +22,7 @@
     },
     {
       "send": "покажи тренировку на понедельник",
-      "expect_contains_any": [
-        "выполнено",
-        "completed",
-        "тренировка уже выполнена"
-      ],
-      "todo": true,
-      "todo_reason": "Completed planned workout should no longer appear as active planned."
+      "expect_contains": "активных плановых тренировок не найдено"
     }
   ]
 }
