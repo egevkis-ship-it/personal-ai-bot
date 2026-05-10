@@ -359,7 +359,43 @@ def _parse_copy_selected_workout_action(text: str | None) -> dict | None:
     if not any(x in t for x in ["скоп", "копир", "дублир", "продублир", "повтори", "поставь такую же"]):
         return None
 
-    if not any(x in t for x in ["трениров", "трени", "треньк", "занятие", "эту", "такую же", "ее", "её"]):
+    has_workout_reference = any(
+        x in t for x in ["трениров", "трени", "треньк", "занятие", "эту", "такую же", "ее", "её"]
+    )
+
+    has_target_reference = any(
+        x in t for x in [
+            "следующую неделю",
+            "следующей неделе",
+            "неделю",
+            "следующий месяц",
+            "следующем месяце",
+            "весь месяц",
+            "месяц",
+            "понедельник",
+            "понедельники",
+            "вторник",
+            "вторники",
+            "сред",
+            "четверг",
+            "пятниц",
+            "суббот",
+            "воскрес",
+            "пн",
+            "вт",
+            "ср",
+            "чт",
+            "пт",
+            "сб",
+            "вс",
+        ]
+    )
+
+    # Live UX:
+    # after a workout was shown/created, user can say just
+    # “скопируй на следующую неделю” / “продублируй на весь месяц”.
+    # Source workout will be taken from selected context by executor.
+    if not has_workout_reference and not has_target_reference:
         return None
 
     action = {
@@ -383,6 +419,12 @@ def _parse_copy_selected_workout_action(text: str | None) -> dict | None:
     if "следующий месяц" in t or "следующем месяце" in t:
         action["copy_mode"] = "recurring"
         action["target_rule"] = "next_month_same_weekday"
+        return action
+
+    if "весь месяц" in t:
+        action["copy_mode"] = "recurring"
+        action["target_rule"] = "months_same_weekday"
+        action["months"] = 1
         return action
 
     if "месяц" in t:
