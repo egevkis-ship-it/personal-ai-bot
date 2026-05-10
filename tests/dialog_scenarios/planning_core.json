@@ -1,0 +1,46 @@
+{
+  "name": "planning core dialog smoke",
+  "steps": [
+    {
+      "send": "покажи все тренировки",
+      "expect_action": "show_period_plan",
+      "expect_scope": "future"
+    },
+    {
+      "send": "покажи тренировки на два месяца",
+      "expect_action": "show_period_plan",
+      "expect_scope": "period",
+      "expect_start_date": "2026-05-01",
+      "expect_end_date": "2026-06-30"
+    },
+    {
+      "send": "удали все тренировки в июне",
+      "expect_action": "cancel_planned_workouts",
+      "expect_scope": "period",
+      "expect_start_date": "2026-06-01",
+      "expect_end_date": "2026-06-30"
+    },
+    {
+      "send": "скопируй на следующую неделю",
+      "expect_action": "copy_workout"
+    },
+    {
+      "send": "скопируй на весь месяц",
+      "expect_action": "copy_workout"
+    },
+    {
+      "send": "скопируй эту тренировку на два месяца",
+      "expect_action": "copy_workout"
+    },
+    {
+      "send": "отмена",
+      "parser": "cancel_confirmation",
+      "expect_decision": "confirm"
+    },
+    {
+      "send": "не надо",
+      "parser": "cancel_confirmation",
+      "expect_decision": "reject"
+    }
+  ]
+}

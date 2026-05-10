@@ -41,7 +41,11 @@ function check() {
   python3 scripts/run_internal_scenarios.py
 
   echo
-  echo "== 4. Git status =="
+  echo "== 4. Dialog scenarios =="
+  python3 scripts/run_dialog_scenarios.py
+
+  echo
+  echo "== 5. Git status =="
   git status --short
 
   echo
