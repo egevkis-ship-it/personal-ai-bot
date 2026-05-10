@@ -148,37 +148,24 @@ def parse_action(text: str) -> dict[str, Any] | None:
 
 
 async def set_selected_context_for_date(user_id: str, target_date: str, source_text: str = "db dialog scenario") -> None:
-    from app.db import get_pool, create_fitness_pending_decision
+    """
+    Store selected workout context for DB dialog scenarios.
 
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, planned_date, title, focus, focus_label
-            FROM planned_workouts
-            WHERE telegram_user_id = $1
-              AND planned_date = $2::date
-              AND status = 'planned'
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            str(user_id),
-            target_date,
-        )
-
-    if not row:
-        return
+    The production copy flow only needs target_date to resolve
+    “скопируй на следующую неделю” from selected context.
+    Avoid direct DB pool usage here so the runner does not depend on app.db internals.
+    """
+    from app.db import create_fitness_pending_decision
 
     await create_fitness_pending_decision(
         telegram_user_id=user_id,
         decision_type="selected_planned_workout_context",
         context={
-            "planned_workout_id": int(row["id"]),
-            "target_date": row["planned_date"].isoformat(),
-            "title": row["title"] or "Кастомная тренировка",
-            "focus": row["focus"] or "custom",
-            "focus_label": row["focus_label"] or row["focus"] or "custom",
+            "planned_workout_id": None,
+            "target_date": target_date,
+            "title": "Кастомная тренировка",
+            "focus": "full_body",
+            "focus_label": "full body",
         },
         source_text=source_text,
     )
