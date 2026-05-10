@@ -1,0 +1,45 @@
+{
+  "name": "db planning copy current week to next week",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-13",
+      "text": "сделаем тягу"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-15",
+      "text": "сделаем ноги"
+    }
+  ],
+  "steps": [
+    {
+      "send": "скопируй эту неделю на следующую",
+      "expect_contains_all": [
+        "Скопировал неделю",
+        "2026-05-11 — 2026-05-17",
+        "2026-05-18",
+        "2026-05-20",
+        "2026-05-22",
+        "Создано тренировок: 3"
+      ],
+      "todo": true,
+      "todo_reason": "Period copy is next."
+    },
+    {
+      "send": "покажи тренировки на месяц",
+      "expect_contains_all": [
+        "18 мая",
+        "20 мая",
+        "22 мая"
+      ],
+      "todo": true,
+      "todo_reason": "Copied week should appear in monthly plan."
+    }
+  ]
+}

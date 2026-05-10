@@ -1,0 +1,38 @@
+{
+  "name": "db planning copy current week skips occupied target dates",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-13",
+      "text": "сделаем тягу"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-15",
+      "text": "сделаем ноги"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-18",
+      "text": "уже есть тренировка"
+    }
+  ],
+  "steps": [
+    {
+      "send": "скопируй эту неделю на следующую",
+      "expect_contains_all": [
+        "Скопировал неделю",
+        "Создано тренировок: 2",
+        "Пропущено: 1",
+        "2026-05-18"
+      ],
+      "todo": true,
+      "todo_reason": "Period copy duplicate-skip is next."
+    }
+  ]
+}
