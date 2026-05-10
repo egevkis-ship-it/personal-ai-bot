@@ -1,0 +1,23 @@
+{
+  "name": "db planning compound edit scenario",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим присед становую отжимания пресс"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "замени жим штанги лежа на жим гантелей под углом и добавь в конце велосипед",
+      "expect_contains_all": [
+        "Жим гантелей под углом",
+        "Велосипед"
+      ],
+      "todo": true,
+      "todo_reason": "Compound replace+add edit is the next product fix."
+    }
+  ]
+}
