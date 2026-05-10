@@ -1,0 +1,46 @@
+{
+  "name": "db planning copy current month to next month",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-18",
+      "text": "сделаем тягу"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-25",
+      "text": "сделаем ноги"
+    }
+  ],
+  "steps": [
+    {
+      "send": "скопируй этот месяц на следующий",
+      "expect_contains_all": [
+        "Скопировал период",
+        "2026-05-01 — 2026-05-31",
+        "2026-06-01 — 2026-06-30",
+        "Создано тренировок: 3",
+        "2026-06-11",
+        "2026-06-18",
+        "2026-06-25"
+      ],
+      "todo": true,
+      "todo_reason": "Month period copy is next."
+    },
+    {
+      "send": "покажи тренировки на следующий месяц",
+      "expect_contains_all": [
+        "11 июня",
+        "18 июня",
+        "25 июня"
+      ],
+      "todo": true,
+      "todo_reason": "Copied month should appear in next month plan."
+    }
+  ]
+}

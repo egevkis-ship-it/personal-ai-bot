@@ -1,0 +1,30 @@
+{
+  "name": "db planning copy May to June",
+  "seed_many": [
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-11",
+      "text": "сделаем жим"
+    },
+    {
+      "type": "custom_workout",
+      "target_date": "2026-05-18",
+      "text": "сделаем тягу"
+    }
+  ],
+  "steps": [
+    {
+      "send": "скопируй май на июнь",
+      "expect_contains_all": [
+        "Скопировал период",
+        "2026-05-01 — 2026-05-31",
+        "2026-06-01 — 2026-06-30",
+        "Создано тренировок: 2",
+        "2026-06-11",
+        "2026-06-18"
+      ],
+      "todo": true,
+      "todo_reason": "Named month copy is next."
+    }
+  ]
+}
