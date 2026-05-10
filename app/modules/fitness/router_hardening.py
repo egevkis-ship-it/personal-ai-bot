@@ -8,6 +8,11 @@ from app.modules.fitness.custom_workout_builder import create_custom_workout_fro
 from app.modules.fitness.planned_workout_parser import parse_planned_workout_action
 from app.modules.fitness.planned_workout_editor import parse_workout_edit_action
 from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
+from app.modules.fitness.program_import_executor import (
+    looks_like_training_program_text,
+    preview_training_program_import,
+    handle_training_program_import_pending,
+)
 from app.modules.fitness.exercise_normalizer import (
     normalize_exercise_name,
     get_exercise_title,
@@ -511,6 +516,12 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
 
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
 
+    # Program import pending has priority over generic parser:
+    # user answers with schedule like “пн ср пт сб на 4 недели” or “отмена”.
+    reply = await handle_training_program_import_pending(telegram_user_id, text)
+    if reply is not None:
+        return reply
+
     # Pending details for adding multiple exercises to selected workout.
     reply = await _handle_add_exercises_to_selected_workout(telegram_user_id, text, pending)
     if reply is not None:
@@ -525,6 +536,16 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    # Training program import from long text.
+    # Preview only: nothing is written to calendar until user provides schedule.
+    if looks_like_training_program_text(text):
+        return await preview_training_program_import(
+            telegram_user_id=telegram_user_id,
+            program_text=text,
+            source_type="text",
+            title="Импортированная программа тренировок",
+        )
 
     # Parser-first layer for editing existing planned workouts.
     # This must run before generic planning parser, otherwise phrases like

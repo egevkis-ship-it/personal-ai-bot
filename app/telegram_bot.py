@@ -211,6 +211,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "awaiting_custom_workout_details",
         "awaiting_exercise_disambiguation",
         "awaiting_add_exercises_to_selected_workout",
+        "pending_training_program_import",
     }:
         fitness_reply = await handle_fitness_text(user_id, text)
         if fitness_reply is not None:
@@ -292,6 +293,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "awaiting_custom_workout_details",
             "awaiting_exercise_disambiguation",
             "awaiting_add_exercises_to_selected_workout",
+            "pending_training_program_import",
         }:
             fitness_reply = await handle_fitness_text(user_id, transcript)
             if fitness_reply is not None:

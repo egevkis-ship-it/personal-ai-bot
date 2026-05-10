@@ -2993,3 +2993,267 @@ async def remove_multiple_exercises_from_planned_workout(
         "planned_workout_id": workout_id,
         "removed_exercise_names": removed,
     }
+
+
+async def create_planned_workout_from_program_day(
+    telegram_user_id: str | None,
+    target_date: str,
+    program_day: dict,
+    title_prefix: str | None = None,
+    skip_existing: bool = True,
+    source_text: str | None = None,
+) -> dict:
+    """
+    Create one planned workout from parsed imported program day.
+
+    Safety:
+    - If skip_existing=True and active workout exists on target_date, skip.
+    - Does not touch existing workouts.
+    """
+    if not program_day:
+        return {
+            "ok": False,
+            "message": "Пустой тренировочный день.",
+        }
+
+    target_date_value = to_date(target_date)
+
+    async with AsyncSessionLocal() as session:
+        if skip_existing:
+            existing_result = await session.execute(
+                text("""
+                SELECT id, title
+                FROM planned_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND planned_date = :target_date
+                  AND status = 'planned'
+                ORDER BY id DESC
+                LIMIT 1
+                """),
+                {
+                    "telegram_user_id": telegram_user_id,
+                    "target_date": target_date_value,
+                },
+            )
+            existing = existing_result.mappings().first()
+            if existing:
+                return {
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "already_exists",
+                    "target_date": target_date,
+                    "existing_workout_id": existing["id"],
+                    "existing_title": existing.get("title"),
+                }
+
+        day_title = program_day.get("title") or f"День {program_day.get('day_index') or ''}".strip()
+        title = f"{title_prefix} — {day_title}" if title_prefix else day_title
+        focus = program_day.get("focus") or "custom"
+
+        workout_result = await session.execute(
+            text("""
+            INSERT INTO planned_workouts
+            (
+                telegram_user_id,
+                planned_date,
+                title,
+                focus,
+                focus_label,
+                status,
+                source,
+                notes
+            )
+            VALUES
+            (
+                :telegram_user_id,
+                :planned_date,
+                :title,
+                :focus,
+                :focus_label,
+                'planned',
+                'program_import',
+                :notes
+            )
+            RETURNING id
+            """),
+            {
+                "telegram_user_id": telegram_user_id,
+                "planned_date": target_date_value,
+                "title": title,
+                "focus": focus,
+                "focus_label": focus,
+                "notes": source_text,
+            },
+        )
+
+        workout_id = workout_result.mappings().first()["id"]
+
+        exercises = program_day.get("exercises") or []
+        exercise_order = 1
+
+        for raw in exercises:
+            name = raw.get("exercise_name")
+            if not name:
+                continue
+
+            notes_parts = []
+
+            if raw.get("notes"):
+                notes_parts.append(str(raw.get("notes")))
+
+            planned_reps = raw.get("planned_reps")
+            if planned_reps:
+                notes_parts.append(
+                    "planned_sets:\n"
+                    + "\n".join(
+                        f"{i}) {rep}"
+                        for i, rep in enumerate(planned_reps, start=1)
+                    )
+                )
+
+            if raw.get("superset_group") is not None:
+                notes_parts.append(f"superset_group={raw.get('superset_group')}")
+            if raw.get("superset_item"):
+                notes_parts.append(f"superset_item={raw.get('superset_item')}")
+
+            notes = "\n".join(notes_parts) if notes_parts else None
+
+            await session.execute(
+                text("""
+                INSERT INTO planned_exercises
+                (
+                    planned_workout_id,
+                    exercise_order,
+                    exercise_name,
+                    target_sets,
+                    target_reps_min,
+                    target_reps_max,
+                    target_reps_text,
+                    target_weight_kg,
+                    notes
+                )
+                VALUES
+                (
+                    :planned_workout_id,
+                    :exercise_order,
+                    :exercise_name,
+                    :target_sets,
+                    :target_reps_min,
+                    :target_reps_max,
+                    :target_reps_text,
+                    :target_weight_kg,
+                    :notes
+                )
+                """),
+                {
+                    "planned_workout_id": workout_id,
+                    "exercise_order": exercise_order,
+                    "exercise_name": name,
+                    "target_sets": raw.get("target_sets"),
+                    "target_reps_min": raw.get("target_reps_min"),
+                    "target_reps_max": raw.get("target_reps_max"),
+                    "target_reps_text": raw.get("target_reps_text"),
+                    "target_weight_kg": raw.get("target_weight_kg"),
+                    "notes": notes,
+                },
+            )
+
+            exercise_order += 1
+
+        await session.execute(
+            text("""
+            INSERT INTO planned_workout_events
+            (planned_workout_id, event_type, old_value_json, new_value_json, source_text, notes)
+            VALUES
+            (:planned_workout_id, 'program_imported', NULL, CAST(:new_value_json AS JSONB), :source_text, :notes)
+            """),
+            {
+                "planned_workout_id": workout_id,
+                "new_value_json": json.dumps(
+                    {
+                        "program_day_index": program_day.get("day_index"),
+                        "program_day_title": program_day.get("title"),
+                        "exercise_count": len(exercises),
+                    },
+                    ensure_ascii=False,
+                ),
+                "source_text": source_text,
+                "notes": "Created planned workout from imported training program",
+            },
+        )
+
+        await session.commit()
+
+    return {
+        "ok": True,
+        "skipped": False,
+        "target_date": target_date,
+        "planned_workout_id": workout_id,
+        "title": title,
+        "exercise_count": exercise_order - 1,
+    }
+
+
+async def import_training_program_to_calendar(
+    telegram_user_id: str | None,
+    program: dict,
+    target_dates: list[str],
+    title_prefix: str | None = None,
+    skip_existing: bool = True,
+    source_text: str | None = None,
+) -> dict:
+    """
+    Import parsed training program days into calendar.
+
+    target_dates maps by index:
+    program.days[0] -> target_dates[0]
+    program.days[1] -> target_dates[1]
+    etc.
+
+    If there are more target_dates than days, days are cycled.
+    This supports repeating weekly programs over several weeks.
+    """
+    days = program.get("days") or []
+    if not days:
+        return {
+            "ok": False,
+            "message": "В программе нет тренировочных дней.",
+            "created": [],
+            "skipped": [],
+        }
+
+    if not target_dates:
+        return {
+            "ok": False,
+            "message": "Не указаны даты для импорта.",
+            "created": [],
+            "skipped": [],
+        }
+
+    created = []
+    skipped = []
+
+    for index, target_date in enumerate(target_dates):
+        day = days[index % len(days)]
+
+        result = await create_planned_workout_from_program_day(
+            telegram_user_id=telegram_user_id,
+            target_date=target_date,
+            program_day=day,
+            title_prefix=title_prefix,
+            skip_existing=skip_existing,
+            source_text=source_text,
+        )
+
+        if result.get("skipped"):
+            skipped.append(result)
+        elif result.get("ok"):
+            created.append(result)
+        else:
+            skipped.append(result)
+
+    return {
+        "ok": True,
+        "created": created,
+        "skipped": skipped,
+    }
