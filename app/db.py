@@ -1981,6 +1981,13 @@ async def has_active_planned_workout_on_date(
     if not telegram_user_id or not target_date:
         return False
 
+    from datetime import date as date_type
+
+    if isinstance(target_date, str):
+        target_date_value = date_type.fromisoformat(target_date)
+    else:
+        target_date_value = target_date
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text(
@@ -1988,14 +1995,14 @@ async def has_active_planned_workout_on_date(
                 SELECT id
                 FROM planned_workouts
                 WHERE telegram_user_id = :telegram_user_id
-                  AND planned_date = CAST(:target_date AS DATE)
+                  AND planned_date = :target_date
                   AND status = 'planned'
                 LIMIT 1
                 """
             ),
             {
                 "telegram_user_id": str(telegram_user_id),
-                "target_date": target_date,
+                "target_date": target_date_value,
             },
         )
 
