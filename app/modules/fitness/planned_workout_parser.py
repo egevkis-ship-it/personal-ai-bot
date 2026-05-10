@@ -272,6 +272,31 @@ def _extract_target_date_for_move(text: str) -> str | None:
 
     return None
 
+
+
+def _month_range(offset_months: int = 0) -> tuple[str, str]:
+    today = date.today()
+    year = today.year
+    month = today.month + offset_months
+
+    while month > 12:
+        month -= 12
+        year += 1
+
+    while month < 1:
+        month += 12
+        year -= 1
+
+    start = date(year, month, 1)
+
+    if month == 12:
+        next_start = date(year + 1, 1, 1)
+    else:
+        next_start = date(year, month + 1, 1)
+
+    end = next_start - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
 def fast_parse_planning_action(text: str) -> dict | None:
     """
     Deterministic shortcut layer.
@@ -282,6 +307,33 @@ def fast_parse_planning_action(text: str) -> dict | None:
 
     if not t:
         return None
+
+    # Next month / current month plan.
+    if "план" in t and "месяц" in t:
+        if "следующ" in t:
+            start_date, end_date = _month_range(1)
+        else:
+            start_date, end_date = _month_range(0)
+
+        return {
+            "action": "show_period_plan",
+            "confidence": 0.94,
+            "scope": "period",
+            "start_date": start_date,
+            "end_date": end_date,
+            "include_archive": False,
+            "summary": "Показать активный план на месяц",
+        }
+
+    # Explicit active planned workouts.
+    if any(x in t for x in ["запланирован", "будущ", "что по плану", "что стоит", "впереди"]) and "трениров" in t:
+        return {
+            "action": "show_period_plan",
+            "confidence": 0.94,
+            "scope": "future",
+            "include_archive": False,
+            "summary": "Показать активные запланированные тренировки",
+        }
 
     # Date-only follow-up: “на 10 мая”
     if t.startswith("на "):

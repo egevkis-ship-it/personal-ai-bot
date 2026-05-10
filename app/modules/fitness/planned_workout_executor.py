@@ -480,6 +480,23 @@ async def _show_selected_workout_if_available(
 
     return "Текущая выбранная тренировка:\n\n" + format_planned_workout(item)
 
+
+
+def _only_active_planned_items(items: list[dict]) -> list[dict]:
+    result = []
+    for item in items or []:
+        workout = item.get("workout") or {}
+        if workout.get("status") == "planned":
+            result.append(item)
+    return result
+
+
+def _format_active_plan_or_empty(items: list[dict], title: str) -> str:
+    active_items = _only_active_planned_items(items)
+    if not active_items:
+        return f"{title}:\\n\\nАктивных плановых тренировок нет."
+    return format_period_plan(active_items, title=title)
+
 async def execute_planned_workout_action(
     telegram_user_id: str | None,
     action: dict,
@@ -613,7 +630,7 @@ async def execute_planned_workout_action(
         if scope == "future":
             title = "Все будущие плановые тренировки"
 
-        return format_period_plan(items, title=title)
+        return _format_active_plan_or_empty(items, title=title)
 
     if action_name == "enter_edit_mode":
         from app.db import get_best_planned_workout_for_edit

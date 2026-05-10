@@ -77,59 +77,88 @@ def _parse_weeks_count(text: str | None, default: int = 1) -> int:
 def _parse_weekday_layout(text: str | None, day_count: int) -> list[int] | None:
     t = _clean(text)
 
-    # Common layouts
-    compact = re.sub(r"[,/]+", " ", t)
-    compact = re.sub(r"\s+", " ", compact)
+    if "через день" in t:
+        # Not week-day based. Caller handles this via special mode.
+        return []
 
-    if all(x in compact for x in ["пн", "ср", "пт", "сб"]):
-        return [0, 2, 4, 5]
+    compact = re.sub(r"[,/;]+", " ", t)
+    compact = re.sub(r"\s+", " ", compact).strip()
 
-    if all(x in compact for x in ["пн", "ср", "пт"]):
-        return [0, 2, 4]
-
-    if all(x in compact for x in ["вт", "чт", "сб"]):
-        return [1, 3, 5]
+    # Explicit token parsing for short forms: пн вт чт пт.
+    token_map = {
+        "пн": 0,
+        "понедельник": 0,
+        "понедельникам": 0,
+        "вт": 1,
+        "вторник": 1,
+        "вторникам": 1,
+        "ср": 2,
+        "среда": 2,
+        "среду": 2,
+        "средам": 2,
+        "чт": 3,
+        "четверг": 3,
+        "четвергам": 3,
+        "пт": 4,
+        "пятница": 4,
+        "пятницу": 4,
+        "пятницам": 4,
+        "сб": 5,
+        "суббота": 5,
+        "субботу": 5,
+        "субботам": 5,
+        "вс": 6,
+        "воскресенье": 6,
+        "воскресеньям": 6,
+    }
 
     weekdays = []
-    # Longer names first to reduce false positives.
+    for token in compact.split():
+        token = token.strip().lower()
+        if token in token_map and token_map[token] not in weekdays:
+            weekdays.append(token_map[token])
+
+    if weekdays:
+        return weekdays
+
+    # Fallback by substring for phrases like “по понедельникам, средам и пятницам”.
     for key, value in sorted(WEEKDAY_MAP.items(), key=lambda kv: len(kv[0]), reverse=True):
         if re.search(rf"(?<![а-яa-z]){re.escape(key)}(?![а-яa-z])", compact):
             if value not in weekdays:
                 weekdays.append(value)
 
     if weekdays:
-        return sorted(weekdays)
+        return weekdays
 
-    if "через день" in t:
-        # Not week-day based. Caller handles this via special mode.
-        return []
-
-    # Default for 4-day program.
+    # Default only if user did not give an explicit but unrecognized layout.
     if day_count >= 4:
         return [0, 2, 4, 5]
-
     if day_count == 3:
         return [0, 2, 4]
-
     if day_count == 2:
         return [0, 3]
-
     return [0]
 
 
 def _build_dates_by_weekdays(weekdays: list[int], weeks: int, start: date | None = None) -> list[str]:
+    """
+    Build nearest future dates for a weekday layout.
+
+    Important:
+    If today is Sunday and user says “пн вт чт пт”,
+    target dates must be next Mon/Tue/Thu/Fri, not past days of current week.
+    """
     base = start or _today()
-    first_monday = base - timedelta(days=base.weekday())
 
     dates = []
     for week_index in range(weeks):
-        week_start = first_monday + timedelta(days=7 * week_index)
         for weekday in weekdays:
-            d = week_start + timedelta(days=weekday)
-            if d < base:
-                continue
+            first = _next_date_for_weekday(weekday, start=base, include_today=True)
+            d = first + timedelta(days=7 * week_index)
             dates.append(d.isoformat())
 
+    # Deduplicate while keeping chronological order.
+    dates = sorted(set(dates))
     return dates
 
 
@@ -138,11 +167,17 @@ def _build_dates_every_other_day(count: int, start: date | None = None) -> list[
     return [(base + timedelta(days=i * 2)).isoformat() for i in range(count)]
 
 
-def _format_import_result(result: dict) -> str:
+def _format_import_result(result: dict, target_dates: list[str] | None = None) -> str:
     created = result.get("created") or []
     skipped = result.get("skipped") or []
 
     lines = ["Импорт программы завершён.", ""]
+
+    if target_dates:
+        lines.append("Расклад:")
+        for index, date_s in enumerate(target_dates, start=1):
+            lines.append(f"- День {index}: {date_s}")
+        lines.append("")
 
     lines.append(f"Создано тренировок: {len(created)}")
     for item in created:
@@ -159,6 +194,10 @@ def _format_import_result(result: dict) -> str:
                 lines.append(f"- {date_s}: уже есть активная тренировка — {existing}")
             else:
                 lines.append(f"- {date_s}: {reason}")
+
+    if not created and not skipped:
+        lines.append("")
+        lines.append("Ни одной тренировки не создано и не пропущено. Это ошибка построения дат импорта.")
 
     return "\n".join(lines)
 
@@ -269,6 +308,12 @@ async def handle_training_program_import_pending(
     if len(target_dates) > expected_count:
         target_dates = target_dates[:expected_count]
 
+    if not target_dates:
+        return (
+            "Не смог построить даты для импорта. "
+            "Укажи расклад, например: `пн вт чт пт`, `пн ср пт сб` или `через день`."
+        )
+
     result = await import_training_program_to_calendar(
         telegram_user_id=telegram_user_id,
         program=program,
@@ -280,4 +325,4 @@ async def handle_training_program_import_pending(
 
     await resolve_fitness_pending_decision(pending["id"], status="resolved")
 
-    return _format_import_result(result)
+    return _format_import_result(result, target_dates=target_dates)
