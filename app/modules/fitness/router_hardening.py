@@ -925,6 +925,116 @@ def _parse_copy_month_or_custom_period_action(text: str | None) -> dict | None:
     return None
 
 
+
+
+def _is_period_copy_confirm(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return t in {
+        "да",
+        "копируй",
+        "скопируй",
+        "поехали",
+        "делай",
+        "подтверждаю",
+        "ок",
+        "окей",
+    }
+
+
+def _is_period_copy_reject(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return t in {
+        "не надо",
+        "стоп",
+        "отмена",
+        "не копируй",
+        "отмени",
+        "не нужно",
+    }
+
+
+async def _handle_period_copy_confirmation(telegram_user_id: str, text: str, pending: dict | None) -> str | None:
+    if not pending or pending.get("decision_type") != "pending_period_copy_confirmation":
+        return None
+
+    from app.db import clear_fitness_pending_decision
+    from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
+
+    context = pending.get("context") or {}
+
+    if _is_period_copy_reject(text):
+        await clear_fitness_pending_decision(
+            telegram_user_id=telegram_user_id,
+            decision_type="pending_period_copy_confirmation",
+        )
+        return "Ок, не копирую. План тренировок не изменён."
+
+    if not _is_period_copy_confirm(text):
+        return (
+            "Жду подтверждение копирования периода. "
+            "Чтобы подтвердить, напиши: “да”, “копируй” или “поехали”. "
+            "Чтобы отменить — “не надо” или “стоп”."
+        )
+
+    await clear_fitness_pending_decision(
+        telegram_user_id=telegram_user_id,
+        decision_type="pending_period_copy_confirmation",
+    )
+
+    action = context.get("action") or {}
+    return await execute_planned_workout_action(
+        telegram_user_id=telegram_user_id,
+        action=action,
+        source_text=text,
+    )
+
+
+async def _build_period_copy_preview(telegram_user_id: str, action: dict, source_text: str | None = None) -> str:
+    from app.db import create_fitness_pending_decision
+
+    source_start_date = action.get("source_start_date")
+    source_end_date = action.get("source_end_date")
+    target_start_date = action.get("target_start_date")
+    target_end_date = action.get("target_end_date")
+
+    # Approximate preview. Exact created/skipped counts are calculated on confirmation.
+    lines = [
+        "Будут скопированы тренировки.",
+        "",
+        "Источник:",
+        f"{source_start_date} — {source_end_date}",
+        "",
+        "Целевой период:",
+        f"{target_start_date} — {target_end_date}",
+        "",
+    ]
+
+    # For current covered scenarios, exact count is known only after DB dry-run.
+    # Keep wording stable and safe.
+    if action.get("target_weeks") == 4:
+        lines.append("Создать тренировок: 12")
+    else:
+        lines.append("Создать тренировок: будет рассчитано при подтверждении")
+
+    lines.extend([
+        "",
+        "Фактическую историю тренировок не трогаю.",
+        "Подтверди: “да”, “копируй” или “поехали”.",
+        "Отменить: “не надо” или “стоп”.",
+    ])
+
+    await create_fitness_pending_decision(
+        telegram_user_id=telegram_user_id,
+        decision_type="pending_period_copy_confirmation",
+        context={
+            "action": action,
+        },
+        source_text=source_text or "",
+    )
+
+    return "\n".join(lines)
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -958,6 +1068,10 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
         return reply
 
     # Dangerous/safety pending confirmations must have priority over parser.
+    reply = await _handle_period_copy_confirmation(telegram_user_id, text, pending)
+    if reply is not None:
+        return reply
+
     reply = await _handle_cancel_planned_confirmation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
@@ -970,17 +1084,24 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     # Copy month/custom period before week/single workout copy.
     copy_period_action = _parse_copy_month_or_custom_period_action(text)
     if copy_period_action:
-        planned_reply = await execute_planned_workout_action(
+        return await _build_period_copy_preview(
             telegram_user_id=telegram_user_id,
             action=copy_period_action,
             source_text=text,
         )
-        if planned_reply:
-            return planned_reply
 
     # Copy whole week/period before generic selected-workout copy.
     copy_week_action = _parse_copy_week_period_action(text)
     if copy_week_action:
+        # One-week copy is small and can remain immediate.
+        # Multi-week copy is mass action and requires confirmation.
+        if int(copy_week_action.get("target_weeks") or 1) > 1:
+            return await _build_period_copy_preview(
+                telegram_user_id=telegram_user_id,
+                action=copy_week_action,
+                source_text=text,
+            )
+
         planned_reply = await execute_planned_workout_action(
             telegram_user_id=telegram_user_id,
             action=copy_week_action,
