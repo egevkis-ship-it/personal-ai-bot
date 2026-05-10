@@ -11,5 +11,5 @@ async def build_status_text() -> str:
         f"Bot: running\n"
         f"PostgreSQL: {'healthy' if db_ok else 'error'}\n"
         f"Redis: {'healthy' if redis_ok else 'error'}\n"
-        "Version: v0.8.4-fitness"
+        "Version: v0.8.5-fitness"
     )

@@ -163,6 +163,43 @@ def _safe_json_loads(text: str) -> dict:
         raise
 
 
+
+
+def _looks_like_create_workout_request(text: str | None) -> bool:
+    t = _clean(text)
+
+    create_markers = [
+        "добавим тренировку",
+        "добавь тренировку",
+        "добавить тренировку",
+        "создай тренировку",
+        "создать тренировку",
+        "запланируй тренировку",
+        "запиши тренировку",
+        "поставь тренировку",
+        "хочу тренировку",
+        "хочу потренироваться",
+        "сделаем тренировку",
+        "тренировка в понедельник",
+        "тренировка во вторник",
+        "тренировка в среду",
+        "тренировка в четверг",
+        "тренировка в пятницу",
+        "тренировка в субботу",
+        "тренировка в воскресенье",
+    ]
+
+    if any(x in t for x in create_markers):
+        return True
+
+    # “добавь треньку / треню / занятие” is also creation unless it says
+    # “сюда / в эту тренировку / упражнением”, which is editing.
+    has_create = any(x in t for x in ["добавь", "добавим", "создай", "запланируй", "запиши", "собери"])
+    has_workout_object = any(x in t for x in ["тренировк", "треню", "треньк", "занятие", "воркаут", "workout"])
+    has_edit_context = any(x in t for x in ["сюда", "в эту", "упражнением", "упражнение", "после", "перед"])
+
+    return has_create and has_workout_object and not has_edit_context
+
 def _looks_like_edit_request(text: str | None) -> bool:
     t = _clean(text)
 
@@ -220,6 +257,10 @@ def fast_parse_workout_edit(text: str | None) -> dict | None:
     If it does not confidently understand, AI parser will handle.
     """
     t = _clean(text)
+
+    # Creating a new workout is planning, not editing.
+    if _looks_like_create_workout_request(t):
+        return None
 
     if not _looks_like_edit_request(t):
         return None
@@ -334,6 +375,10 @@ async def parse_workout_edit_action(text: str, context: dict | None = None) -> d
     fast = fast_parse_workout_edit(text)
     if fast:
         return fast
+
+    # Creating a new workout is planning, not editing.
+    if _looks_like_create_workout_request(text):
+        return {"action": "unknown", "confidence": 0.0}
 
     if not _looks_like_edit_request(text):
         return {"action": "unknown", "confidence": 0.0}
