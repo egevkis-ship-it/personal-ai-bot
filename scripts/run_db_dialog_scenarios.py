@@ -326,6 +326,24 @@ async def run_step(user_id: str, step: dict[str, Any]) -> tuple[bool, str]:
                     f"reply={reply!r}"
                 )
 
+    if "expect_contains_any" in step:
+        expected_values = step["expect_contains_any"] or []
+        if not any(expected in reply for expected in expected_values):
+            return False, (
+                f"send={text!r}: expected reply to contain any of {expected_values!r}\n"
+                f"action={action!r}\n"
+                f"reply={reply!r}"
+            )
+
+    if "expect_not_contains" in step:
+        forbidden = step["expect_not_contains"]
+        if forbidden in reply:
+            return False, (
+                f"send={text!r}: expected reply NOT to contain {forbidden!r}\n"
+                f"action={action!r}\n"
+                f"reply={reply!r}"
+            )
+
     return True, f"send={text!r}: OK"
 
 
