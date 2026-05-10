@@ -709,10 +709,22 @@ def _parse_copy_week_period_action(text: str | None) -> dict | None:
     if not any(x in t for x in ["скопируй", "копируй", "продублируй", "дублируй"]):
         return None
 
-    if not any(x in t for x in ["эту неделю", "текущую неделю", "неделю"]):
+    explicit_week_copy = any(
+        x in t
+        for x in [
+            "эту неделю",
+            "текущую неделю",
+            "всю неделю",
+            "неделю на следующую",
+            "неделю на следующие",
+        ]
+    )
+
+    if not explicit_week_copy:
         return None
 
-    # Do not hijack selected single workout copy.
+    # Do not hijack selected single-workout copy:
+    # “скопируй на следующую неделю” after showing a workout.
     if any(x in t for x in ["эту тренировку", "тренировку", "треньку", "треню"]):
         return None
 

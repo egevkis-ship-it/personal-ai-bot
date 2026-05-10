@@ -2086,7 +2086,6 @@ async def copy_planned_workouts_period(
                         """
                         INSERT INTO planned_workouts (
                             telegram_user_id,
-                            training_plan_id,
                             planned_date,
                             weekday,
                             sequence_number,
@@ -2100,7 +2099,6 @@ async def copy_planned_workouts_period(
                         )
                         VALUES (
                             :telegram_user_id,
-                            NULL,
                             :planned_date,
                             :weekday,
                             1,
