@@ -967,7 +967,10 @@ async def execute_planned_workout_action(
                 )
 
                 if replaced:
-                    applied.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
+                    applied.append(
+                        f"замена: {_compound_canonical_exercise_name(op.get('old_name'))} → "
+                        f"{_compound_canonical_exercise_name(op.get('new_name'))}"
+                    )
                 else:
                     failed.append(f"замена: {op.get('old_name')} → {op.get('new_name')}")
 
@@ -998,7 +1001,7 @@ async def execute_planned_workout_action(
                     or "Актуальная тренировка:" in result
                     or str(exercise_name or "").lower() in result.lower()
                 ):
-                    applied.append(f"добавление: {exercise_name}")
+                    applied.append(f"добавление: {_compound_canonical_exercise_name(exercise_name)}")
                 else:
                     failed.append(f"добавление: {exercise_name}")
 
