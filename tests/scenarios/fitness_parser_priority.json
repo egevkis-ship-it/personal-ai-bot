@@ -63,6 +63,14 @@
       "name": "copy selected workout next mondays",
       "input": "скопируй эту тренировку на следующие понедельники",
       "expect_action": "copy_workout"
+    },
+    {
+      "name": "delete workouts in June must use June period",
+      "input": "удали все тренировки в июне",
+      "expect_action": "cancel_planned_workouts",
+      "expect_scope": "period",
+      "expect_start_date": "2026-06-01",
+      "expect_end_date": "2026-06-30"
     }
   ]
 }

@@ -58,6 +58,17 @@ def _check_case(case: dict[str, Any]) -> tuple[bool, str]:
         if action_name != expected:
             return False, f"{name}: expected action {expected!r}, got {action_name!r}; action={action!r}"
 
+    for key in ["expect_scope", "expect_start_date", "expect_end_date"]:
+        if key in case:
+            action_key = key.replace("expect_", "")
+            expected_value = case[key]
+            actual_value = action.get(action_key) if action else None
+            if actual_value != expected_value:
+                return False, (
+                    f"{name}: expected {action_key}={expected_value!r}, "
+                    f"got {actual_value!r}; action={action!r}"
+                )
+
     if "expect_not_action" in case:
         forbidden = case["expect_not_action"]
         if action_name == forbidden:
