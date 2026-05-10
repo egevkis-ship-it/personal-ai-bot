@@ -303,6 +303,56 @@ def _clean(text: str | None) -> str:
     return (text or "").strip().lower().replace("ё", "е")
 
 
+
+
+def _parse_ru_month_period(text: str | None) -> tuple[str, str] | None:
+    t = _clean(text)
+
+    month_map = {
+        "январ": 1,
+        "феврал": 2,
+        "март": 3,
+        "марте": 3,
+        "апрел": 4,
+        "мая": 5,
+        "май": 5,
+        "июн": 6,
+        "июл": 7,
+        "август": 8,
+        "сентябр": 9,
+        "октябр": 10,
+        "ноябр": 11,
+        "декабр": 12,
+    }
+
+    month = None
+    for key, value in month_map.items():
+        if key in t:
+            month = value
+            break
+
+    if month is None:
+        return None
+
+    today = date.today()
+    year = today.year
+
+    # If user asks for a month that already passed this year,
+    # assume next year only for future/planning contexts.
+    # For current tests on May 2026: июнь => 2026-06.
+    if month < today.month and any(x in t for x in ["следующ", "будущ"]):
+        year += 1
+
+    start = date(year, month, 1)
+
+    if month == 12:
+        next_start = date(year + 1, 1, 1)
+    else:
+        next_start = date(year, month + 1, 1)
+
+    end = next_start - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
 def _parse_copy_selected_workout_action(text: str | None) -> dict | None:
     t = _clean(text)
 
@@ -405,8 +455,13 @@ def fast_parse_planning_action(text: str) -> dict | None:
         start_date = None
         end_date = None
 
+        month_period = _parse_ru_month_period(t)
         dates = _extract_ru_dates_from_text(t) if "_extract_ru_dates_from_text" in globals() else []
-        if len(dates) >= 2:
+
+        if month_period:
+            scope = "period"
+            start_date, end_date = month_period
+        elif len(dates) >= 2:
             scope = "period"
             start_date = min(dates)
             end_date = max(dates)
