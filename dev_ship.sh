@@ -22,11 +22,15 @@ echo "== 3. Internal parser scenarios =="
 python3 scripts/run_internal_scenarios.py
 
 echo
-echo "== 4. Existing ship =="
+echo "== 4. Stage all changed files =="
+git add -A
+
+echo
+echo "== 5. Existing ship =="
 ./ship.sh "$MSG"
 
 echo
-echo "== 5. Coolify deploy =="
+echo "== 6. Coolify deploy =="
 if [[ "${FORCE_COOLIFY_WEBHOOK:-}" == "1" ]]; then
   if [[ -f ".env" ]]; then
     set -a
@@ -56,5 +60,5 @@ fi
 
 
 echo
-echo "== 6. Last commits =="
+echo "== 7. Last commits =="
 git log --oneline -3
