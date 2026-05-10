@@ -170,6 +170,7 @@ def _build_dates_every_other_day(count: int, start: date | None = None) -> list[
 def _format_import_result(result: dict, target_dates: list[str] | None = None) -> str:
     created = result.get("created") or []
     skipped = result.get("skipped") or []
+    replaced = result.get("replaced") or []
 
     lines = ["Импорт программы завершён.", ""]
 
@@ -177,6 +178,14 @@ def _format_import_result(result: dict, target_dates: list[str] | None = None) -
         lines.append("Расклад:")
         for index, date_s in enumerate(target_dates, start=1):
             lines.append(f"- День {index}: {date_s}")
+        lines.append("")
+
+    if replaced:
+        lines.append(f"Заменено: {len(replaced)}")
+        for item in replaced:
+            date_s = item.get("target_date") or "дата не указана"
+            title = item.get("title") or "Плановая тренировка"
+            lines.append(f"- {date_s}: {title}")
         lines.append("")
 
     lines.append(f"Создано тренировок: {len(created)}")
