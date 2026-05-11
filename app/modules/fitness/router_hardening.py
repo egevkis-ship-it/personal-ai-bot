@@ -1865,7 +1865,86 @@ async def _log_continuation_set_to_active_session(
     return "\n".join(lines)
 
 
+
+
+def _looks_like_copy_this_week_workouts_period(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    if "скопир" not in t:
+        return False
+
+    # Critical: phrases with "тренировки этой недели" mean period copy,
+    # not selected single workout copy.
+    week_markers = [
+        "тренировки этой недели",
+        "тренировки текущей недели",
+        "тренировки на этой неделе",
+        "тренировки на текущей неделе",
+        "эту неделю",
+        "текущую неделю",
+        "этой недели",
+        "текущей недели",
+    ]
+
+    if not any(marker in t for marker in week_markers):
+        return False
+
+    if "эту тренировку" in t or "выбранную тренировку" in t:
+        return False
+
+    return True
+
+
+def _canonical_week_copy_command(text: str | None) -> str:
+    t = _clean(text).replace("ё", "е")
+
+    if "два месяца" in t or "2 месяца" in t:
+        return "скопируй эту неделю на следующие 8 недель"
+
+    if "три месяца" in t or "3 месяца" in t:
+        return "скопируй эту неделю на следующие 12 недель"
+
+    if "месяц" in t:
+        return "скопируй эту неделю на следующие 4 недели"
+
+    if "4 недели" in t or "четыре недели" in t:
+        return "скопируй эту неделю на следующие 4 недели"
+
+    if "3 недели" in t or "три недели" in t:
+        return "скопируй эту неделю на следующие 3 недели"
+
+    if "2 недели" in t or "две недели" in t:
+        return "скопируй эту неделю на следующие 2 недели"
+
+    return "скопируй эту неделю на следующую"
+
+
+async def _handle_copy_this_week_workouts_period_priority(
+    telegram_user_id: str | None,
+    text_value: str | None,
+) -> str | None:
+    if not _looks_like_copy_this_week_workouts_period(text_value):
+        return None
+
+    canonical = _canonical_week_copy_command(text_value)
+    action = parse_fitness_message(canonical)
+    if not action:
+        return None
+
+    return await execute_planned_workout_action(
+        telegram_user_id=telegram_user_id,
+        action=action,
+        source_text=text_value or canonical,
+    )
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
+    copy_week_priority_reply = await _handle_copy_this_week_workouts_period_priority(
+        telegram_user_id=telegram_user_id,
+        text_value=text,
+    )
+    if copy_week_priority_reply is not None:
+        return copy_week_priority_reply
+
     from app.db import (
         create_fitness_pending_decision,
         get_latest_fitness_pending_decision,
