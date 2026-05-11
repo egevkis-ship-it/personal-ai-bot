@@ -2,28 +2,120 @@
 set -euo pipefail
 
 CMD="${1:-help}"
+ARTIFACT_DIR="${ARTIFACT_DIR:-/tmp/botctl}"
+mkdir -p "$ARTIFACT_DIR"
 
 function usage() {
-  cat <<'EOF'
+  cat <<'HELP'
 Usage:
+  ./botctl help
+  ./botctl doctor
+  ./botctl quick
   ./botctl check
-  ./botctl ship "commit message"
-  ./botctl release patch "commit message"
+  ./botctl dbcheck
+  ./botctl ci
+  ./botctl report
+  ./botctl tailfail
+  ./botctl apply name
+  ./botctl snapshot name
+  ./botctl restore [path]
   ./botctl status
   ./botctl log
-  ./botctl dbcheck
+  ./botctl ship "commit message"
+  ./botctl release patch "commit message"
 
 Commands:
-  check              Run local syntax + smoke + parser scenarios
+  doctor             Check environment and important files
+  quick              Fast checks: syntax + smoke + internal parser + dialog scenarios
+  check              Same as quick
+  dbcheck            Run DB-backed dialog scenarios
+  ci                 Full local check: quick + dbcheck
+  report             Run ci, save full log, print short failure tail if failed
+  tailfail           Show last report failure context
+  apply name         Apply Python patch from stdin with snapshot + full report
+  snapshot name      Save rollback snapshot
+  restore [path]     Restore last or specified snapshot
+  status             Show git/VERSION/BUILD status if git exists
+  log                Show recent commits if git exists
   ship "message"     Run dev_ship.sh with checks, commit, push
-  release bump msg   Run release.sh, e.g. ./botctl release patch "Stable release"
-  status             Show git status, VERSION, current HEAD
-  log                Show last commits
-  dbcheck            Run DB-backed dialog scenarios on synthetic test user
-EOF
+  release bump msg   Run release.sh
+
+Main workflow:
+  ./botctl report
+
+Patch workflow:
+  ./botctl apply patch_name <<'PY'
+  # patch code here
+  PY
+HELP
 }
 
-function check() {
+function has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+function safe_git() {
+  if has_cmd git; then
+    git "$@"
+  else
+    echo "git not installed; skipped: git $*" >&2
+    return 0
+  fi
+}
+
+function doctor() {
+  echo "== Doctor =="
+
+  echo
+  echo "== Python =="
+  python3 --version
+
+  echo
+  echo "== Working directory =="
+  pwd
+
+  echo
+  echo "== Required files =="
+  local missing=0
+  for f in \
+    app/db.py \
+    app/version.py \
+    app/telegram_bot.py \
+    app/main.py \
+    scripts/smoke_fitness.py \
+    scripts/run_internal_scenarios.py \
+    scripts/run_dialog_scenarios.py \
+    scripts/run_db_dialog_scenarios.py \
+    scripts/assistant_apply.py
+  do
+    if [[ -f "$f" ]]; then
+      echo "OK  $f"
+    else
+      echo "MISS $f"
+      missing=1
+    fi
+  done
+
+  echo
+  echo "== Git =="
+  safe_git status --short
+
+  echo
+  echo "== Version =="
+  cat VERSION 2>/dev/null || echo "VERSION missing"
+  cat BUILD 2>/dev/null || echo "BUILD missing"
+
+  if [[ "$missing" -ne 0 ]]; then
+    echo
+    echo "DOCTOR FAILED: missing required files"
+    exit 1
+  fi
+
+  echo
+  echo "DOCTOR OK"
+}
+
+function syntax_check() {
   echo "== 1. Python syntax check =="
   python3 -m py_compile \
     app/db.py \
@@ -33,6 +125,10 @@ function check() {
     app/modules/ops/status.py \
     app/modules/fitness/*.py \
     scripts/*.py
+}
+
+function quick() {
+  syntax_check
 
   echo
   echo "== 2. Fitness smoke =="
@@ -48,26 +144,158 @@ function check() {
 
   echo
   echo "== 5. Git status =="
-  git status --short
+  safe_git status --short
 
   echo
-  echo "CHECK OK"
+  echo "QUICK OK"
+}
+
+function dbcheck() {
+  echo "== DB-backed dialog scenarios =="
+  python3 scripts/run_db_dialog_scenarios.py
+}
+
+function ci() {
+  quick
+  echo
+  dbcheck
+  echo
+  echo "CI OK"
 }
 
 function status_cmd() {
   echo "== Git =="
-  git status --short
+  safe_git status --short
+
   echo
   echo "== VERSION =="
   cat VERSION 2>/dev/null || echo "VERSION missing"
+
+  echo
+  echo "== BUILD =="
+  cat BUILD 2>/dev/null || echo "BUILD missing"
+
   echo
   echo "== HEAD =="
-  git log --oneline -5
+  safe_git log --oneline -5
+}
+
+function tailfail() {
+  local log="${1:-$ARTIFACT_DIR/last_report.log}"
+
+  if [[ ! -f "$log" ]]; then
+    echo "No report log found: $log"
+    echo "Run: ./botctl report"
+    exit 1
+  fi
+
+  echo "== Failure summary from $log =="
+  grep -nE "Traceback|SyntaxError|AssertionError|sqlalchemy\\.exc\\.|UndefinedTableError|ProgrammingError|REPORT FAILED|DB dialog scenarios failed|FAILED|❌" "$log" | tail -80 || true
+
+  echo
+  echo "== Last 120 lines =="
+  tail -120 "$log"
+}
+
+function report() {
+  local ts
+  ts="$(date +%Y%m%d_%H%M%S)"
+  local log="$ARTIFACT_DIR/report_${ts}.log"
+  local last="$ARTIFACT_DIR/last_report.log"
+
+  echo "Running full report..."
+  echo "Log: $log"
+  echo
+
+  set +e
+  {
+    echo "BOTCTL REPORT"
+    echo "Timestamp: $(date -Iseconds)"
+    echo "PWD: $(pwd)"
+    echo
+    doctor
+    echo
+    ci
+  } >"$log" 2>&1
+  local code=$?
+  set -e
+
+  cp "$log" "$last"
+
+  if grep -qE "Traceback|SyntaxError|AssertionError|sqlalchemy\\.exc\\.|UndefinedTableError|ProgrammingError|REPORT FAILED|DB dialog scenarios failed|❌" "$log"; then
+    code=1
+  fi
+
+  if [[ "$code" -eq 0 ]]; then
+    echo "REPORT OK"
+    echo "Full log: $log"
+    echo
+    tail -40 "$log"
+    exit 0
+  fi
+
+  echo "REPORT FAILED"
+  echo "Exit code: $code"
+  echo "Full log: $log"
+  echo
+  tailfail "$log"
+  exit "$code"
 }
 
 case "$CMD" in
-  check)
-    check
+  help|-h|--help)
+    usage
+    ;;
+
+  doctor)
+    doctor
+    ;;
+
+  quick|check)
+    quick
+    ;;
+
+  dbcheck)
+    dbcheck
+    ;;
+
+  ci)
+    ci
+    ;;
+
+  report)
+    report
+    ;;
+
+  tailfail)
+    tailfail "${2:-$ARTIFACT_DIR/last_report.log}"
+    ;;
+
+  apply)
+    NAME="${2:-assistant_patch}"
+    python3 scripts/assistant_apply.py apply "$NAME"
+    ;;
+
+  snapshot)
+    NAME="${2:-manual}"
+    python3 scripts/assistant_apply.py snapshot "$NAME"
+    ;;
+
+  restore)
+    SNAP="${2:-}"
+    if [[ -n "$SNAP" ]]; then
+      python3 scripts/assistant_apply.py restore "$SNAP"
+    else
+      python3 scripts/assistant_apply.py restore
+    fi
+    ;;
+
+  status)
+    status_cmd
+    ;;
+
+  log)
+    safe_git log --oneline -10
     ;;
 
   ship)
@@ -75,7 +303,7 @@ case "$CMD" in
     ./dev_ship.sh "$MSG"
     echo
     echo "Expected Build:"
-    git rev-parse --short HEAD
+    safe_git rev-parse --short HEAD
     ;;
 
   release)
@@ -84,24 +312,7 @@ case "$CMD" in
     ./release.sh "$BUMP" "$MSG"
     echo
     echo "Expected Build:"
-    git rev-parse --short HEAD
-    ;;
-
-  status)
-    status_cmd
-    ;;
-
-  log)
-    git log --oneline -10
-    ;;
-
-  dbcheck)
-    echo "== DB-backed dialog scenarios =="
-    python3 scripts/run_db_dialog_scenarios.py
-    ;;
-
-  help|-h|--help)
-    usage
+    safe_git rev-parse --short HEAD
     ;;
 
   *)

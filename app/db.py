@@ -161,6 +161,38 @@ async def init_db() -> None:
         """))
 
         await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fitness_workout_logs (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT NOT NULL,
+            planned_workout_id BIGINT REFERENCES planned_workouts(id) ON DELETE SET NULL,
+            workout_date DATE,
+            title TEXT,
+            status TEXT DEFAULT 'active',
+            started_at TIMESTAMPTZ DEFAULT now(),
+            finished_at TIMESTAMPTZ,
+            source_text TEXT,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fitness_workout_log_sets (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            workout_log_id BIGINT REFERENCES fitness_workout_logs(id) ON DELETE CASCADE,
+            exercise_name TEXT,
+            exercise_key TEXT,
+            set_number INTEGER,
+            weight_kg NUMERIC,
+            reps INTEGER,
+            rpe NUMERIC,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
         CREATE TABLE IF NOT EXISTS body_measurements (
             id BIGSERIAL PRIMARY KEY,
             created_at TIMESTAMPTZ DEFAULT now(),
@@ -219,6 +251,16 @@ async def init_db() -> None:
         await conn.execute(text("""
         CREATE INDEX IF NOT EXISTS idx_planned_workouts_user_sequence_status
         ON planned_workouts (telegram_user_id, sequence_number, status);
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_fitness_workout_logs_user_status
+        ON fitness_workout_logs (telegram_user_id, status);
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_fitness_workout_log_sets_log
+        ON fitness_workout_log_sets (workout_log_id);
         """))
 
         await conn.execute(text("""

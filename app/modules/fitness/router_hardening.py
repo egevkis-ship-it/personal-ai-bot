@@ -1154,10 +1154,15 @@ def _looks_like_finish_active_workout(text: str | None) -> bool:
     return t in {
         "закончил тренировку",
         "завершил тренировку",
+        "заверши тренировку",
+        "сохрани тренировку",
+        "сохранить тренировку",
         "тренировка закончена",
         "тренировка завершена",
+        "тренировка сохранена",
         "закончил треньку",
         "завершил треньку",
+        "сохрани треньку",
     }
 
 
@@ -1899,24 +1904,48 @@ async def _handle_copy_this_week_workouts_period_priority(
     telegram_user_id: str | None,
     text_value: str | None,
 ) -> str | None:
-    if not _looks_like_copy_this_week_workouts_period(text_value):
+    """
+    HARD PRIORITY:
+    Whole-week copy must be routed before generic selected-workout copy.
+
+    Important:
+    executor handles period copy as action="copy_period_workouts".
+    Do not use copy_workout / copy_planned_workouts here.
+    """
+    if not _is_this_week_period_copy_request(text_value):
         return None
 
-    # Build period-copy action directly. Do not call parse_fitness_message here:
-    # this helper is intentionally placed inside router_hardening and must not
-    # depend on parser imports/scope.
+    from datetime import timedelta
+    from app.modules.fitness.planned_workout_executor import execute_planned_workout_action
+
     weeks_count = _extract_week_copy_weeks_count(text_value)
 
+    today = _today()
+    source_start = today - timedelta(days=today.weekday())
+    source_end = source_start + timedelta(days=6)
+
+    target_start = source_start + timedelta(days=7)
+    target_end = source_end + timedelta(days=7 * weeks_count)
+
     action = {
-        "action": "copy_planned_workouts",
+        "action": "copy_period_workouts",
         "confidence": 0.99,
-        "scope": "week",
-        "source_scope": "current_week",
-        "target_scope": "next_weeks",
-        "weeks_count": weeks_count,
-        "requires_confirmation": weeks_count > 1,
+        "source_scope": "week",
+        "source_start_date": source_start.isoformat(),
+        "source_end_date": source_end.isoformat(),
+        "target_start_date": target_start.isoformat(),
+        "target_end_date": target_end.isoformat(),
+        "target_weeks": weeks_count,
+        "collision_policy": "skip_existing",
         "summary": "Скопировать тренировки этой недели",
     }
+
+    if weeks_count > 1:
+        return await _build_period_copy_preview(
+            telegram_user_id=telegram_user_id,
+            action=action,
+            source_text=text_value,
+        )
 
     return await execute_planned_workout_action(
         telegram_user_id=telegram_user_id,
@@ -1928,10 +1957,24 @@ async def _handle_copy_this_week_workouts_period_priority(
 # --- Week period copy priority helpers ---
 
 def _is_this_week_period_copy_request(text: str | None) -> bool:
+    """
+    HARD PRIORITY detector for whole-week copy.
+
+    Must catch:
+      - скопируй тренировки этой недели на следующую неделю
+      - скопируй тренировки этой недели на два месяца вперед
+      - скопируй текущую неделю на два месяца вперед
+      - скопируй эту неделю на следующие 8 недель
+
+    Must NOT catch:
+      - скопируй эту тренировку на следующую неделю
+      - скопируй выбранную тренировку
+      - скопируй на следующую неделю
+    """
     if not text:
         return False
 
-    t = text.lower().replace("ё", "е")
+    t = text.lower().replace("ё", "е").strip()
 
     has_copy = any(x in t for x in (
         "скопируй",
@@ -1943,19 +1986,28 @@ def _is_this_week_period_copy_request(text: str | None) -> bool:
     if not has_copy:
         return False
 
-    # Do not steal explicit single-workout copy.
-    if "эту тренировку" in t or "данную тренировку" in t:
+    if any(x in t for x in (
+        "эту тренировку",
+        "данную тренировку",
+        "выбранную тренировку",
+        "последнюю тренировку",
+        "тренировку с ",
+        "тренировку на ",
+    )):
         return False
 
     has_week_source = any(x in t for x in (
         "тренировки этой недели",
         "тренировки текущей недели",
+        "тренировки на этой неделе",
+        "тренировки на текущей неделе",
+        "тренировочный план этой недели",
+        "тренировочный план текущей недели",
         "эту неделю",
         "текущую неделю",
         "эта неделя",
         "неделю целиком",
         "всю неделю",
-        "тренировочный план этой недели",
     ))
     if not has_week_source:
         return False
@@ -1971,6 +2023,8 @@ def _is_this_week_period_copy_request(text: str | None) -> bool:
         "на месяц",
         "на два месяца",
         "на 2 месяца",
+        "на три месяца",
+        "на 3 месяца",
         "на следующие",
         "вперед",
         "вперёд",
@@ -2014,10 +2068,302 @@ def _extract_week_copy_weeks_count(text: str | None) -> int:
     return 1
 
 # --- End week period copy priority helpers ---
+def _is_show_active_workout_log_request(text: str | None) -> bool:
+    """
+    User wants the current in-progress workout log, not the planned workout template.
+
+    Must catch:
+      - покажи текущую тренировку
+      - что я уже сделал
+      - что уже сделал
+      - покажи что я сделал
+      - покажи записанные подходы
+    """
+    if not text:
+        return False
+
+    t = text.lower().replace("ё", "е").strip()
+
+    return any(x in t for x in (
+        "покажи текущую тренировку",
+        "текущая тренировка",
+        "что я уже сделал",
+        "что уже сделал",
+        "что сделал",
+        "покажи что я сделал",
+        "покажи записанные подходы",
+        "записанные подходы",
+        "что записано",
+        "что я записал",
+    ))
+
+async def _handle_show_active_workout_log(telegram_user_id: str | None, text: str | None) -> str | None:
+    """
+    Show sets already logged in the active workout session.
+    Falls back to None if there is no active workout log.
+    """
+    from app.db import AsyncSessionLocal
+    from sqlalchemy import text as sql_text
+
+    async with AsyncSessionLocal() as session:
+        # Find latest active workout session for this Telegram user.
+        result = await session.execute(
+            sql_text(
+                """
+                SELECT id, planned_workout_id, workout_date, focus_label AS title
+                  FROM fitness_workouts
+                  WHERE telegram_user_id = :telegram_user_id
+                    AND completion_type = 'active_session'
+                  ORDER BY created_at DESC, id DESC
+                  LIMIT 1
+                """
+            ),
+            {"telegram_user_id": telegram_user_id},
+        )
+        workout = result.mappings().first()
+
+        if not workout:
+            return None
+
+        workout_id = workout["id"]
+
+        sets_result = await session.execute(
+            sql_text(
+                """
+                SELECT
+                    exercise_name,
+                    set_number,
+                    weight_kg,
+                    reps
+                FROM fitness_exercise_sets
+                  WHERE workout_id = :workout_id
+                ORDER BY id ASC
+                """
+            ),
+            {"workout_id": workout_id},
+        )
+        rows = list(sets_result.mappings().all())
+
+    title = workout.get("title") or "Текущая тренировка"
+    workout_date = workout.get("workout_date")
+
+    lines = [
+        "Текущая тренировка:",
+        "",
+        f"{title}",
+    ]
+
+    if workout_date:
+        lines.append(f"Дата: {workout_date}")
+
+    if not rows:
+        lines.extend([
+            "",
+            "Пока нет записанных подходов.",
+        ])
+        return "\n".join(lines)
+
+    lines.extend([
+        "",
+        "Записанные подходы:",
+    ])
+
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        name = row.get("exercise_name") or "Упражнение"
+        grouped.setdefault(name, []).append(row)
+
+    for exercise_name, sets in grouped.items():
+        lines.append(f"- {exercise_name}:")
+        for s in sets:
+            set_number = s.get("set_number")
+            weight = s.get("weight_kg")
+            reps = s.get("reps")
+
+            if weight is None:
+                lines.append(f"  {set_number}) {reps} повторов")
+            else:
+                weight_str = ("%g" % float(weight)).replace(".", ",")
+                lines.append(f"  {set_number}) {weight_str} кг × {reps}")
+
+    return "\n".join(lines)
+
+
+def _looks_like_delete_last_logged_set(text: str | None) -> bool:
+    t = _clean(text).replace("ё", "е")
+    return (
+        ("удали" in t or "убери" in t or "сотри" in t)
+        and ("последний" in t or "последнии" in t)
+        and ("сет" in t or "подход" in t)
+    )
+
+
+def _extract_last_set_reps_edit(text: str | None) -> int | None:
+    if not text:
+        return None
+
+    t = _clean(text).replace("ё", "е")
+
+    if not (
+        ("исправь" in t or "измени" in t or "поменяй" in t)
+        and ("последний" in t or "последнии" in t)
+        and ("подход" in t or "сет" in t)
+    ):
+        return None
+
+    import re
+
+    m = re.search(r"на\s+(\d+)\s*(?:повтор|раз|реп)", t)
+    if m:
+        return int(m.group(1))
+
+    m = re.search(r"(\d+)\s*(?:повтор|раз|реп)", t)
+    if m:
+        return int(m.group(1))
+
+    return None
+
+
+async def _delete_last_logged_set_from_active_session(
+    telegram_user_id: str | None,
+    source_text: str | None = None,
+) -> str | None:
+    from app.db import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as session:
+        active_result = await session.execute(
+            text(
+                """
+                SELECT id
+                FROM fitness_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND completion_type = 'active_session'
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+        )
+        active = active_result.mappings().first()
+
+        if not active:
+            return "Нет активной тренировки. Сначала напиши “начал тренировку”."
+
+        set_result = await session.execute(
+            text(
+                """
+                SELECT id, exercise_name, set_number, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :workout_id
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {"workout_id": int(active["id"])},
+        )
+        row = set_result.mappings().first()
+
+        if not row:
+            return "В активной тренировке пока нет записанных подходов."
+
+        await session.execute(
+            text(
+                """
+                DELETE FROM fitness_exercise_sets
+                WHERE id = :set_id
+                """
+            ),
+            {"set_id": int(row["id"])},
+        )
+        await session.commit()
+
+    name = row.get("exercise_name") or "упражнение"
+    reps = row.get("reps")
+    weight = row.get("weight_kg")
+
+    if weight is None:
+        deleted = f"{reps} повторов"
+    else:
+        weight_str = ("%g" % float(weight)).replace(".", ",")
+        deleted = f"{weight_str} кг × {reps}"
+
+    return f"Удалил последний подход.\n\n{name}: {deleted}"
+
+
+async def _edit_last_logged_set_reps_in_active_session(
+    telegram_user_id: str | None,
+    reps: int,
+    source_text: str | None = None,
+) -> str | None:
+    from app.db import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as session:
+        active_result = await session.execute(
+            text(
+                """
+                SELECT id
+                FROM fitness_workouts
+                WHERE telegram_user_id = :telegram_user_id
+                  AND completion_type = 'active_session'
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+        )
+        active = active_result.mappings().first()
+
+        if not active:
+            return "Нет активной тренировки. Сначала напиши “начал тренировку”."
+
+        set_result = await session.execute(
+            text(
+                """
+                SELECT id, exercise_name, set_number, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :workout_id
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {"workout_id": int(active["id"])},
+        )
+        row = set_result.mappings().first()
+
+        if not row:
+            return "В активной тренировке пока нет записанных подходов."
+
+        await session.execute(
+            text(
+                """
+                UPDATE fitness_exercise_sets
+                SET reps = :reps
+                WHERE id = :set_id
+                """
+            ),
+            {
+                "set_id": int(row["id"]),
+                "reps": int(reps),
+            },
+        )
+        await session.commit()
+
+    name = row.get("exercise_name") or "упражнение"
+    weight = row.get("weight_kg")
+
+    if weight is None:
+        updated = f"{reps} повторов"
+    else:
+        weight_str = ("%g" % float(weight)).replace(".", ",")
+        updated = f"{weight_str} кг × {reps}"
+
+    return f"Исправил последний подход.\n\n{name}: {updated}"
+
 
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
-
-    # Priority: copy the whole current week as a period before selected-workout copy can steal it.
+    # HARD PRIORITY: whole-week copy before generic selected-workout copy.
     if _is_this_week_period_copy_request(text):
         copy_week_priority_reply = await _handle_copy_this_week_workouts_period_priority(
             telegram_user_id,
@@ -2025,13 +2371,6 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
         )
         if copy_week_priority_reply is not None:
             return copy_week_priority_reply
-
-    copy_week_priority_reply = await _handle_copy_this_week_workouts_period_priority(
-        telegram_user_id=telegram_user_id,
-        text_value=text,
-    )
-    if copy_week_priority_reply is not None:
-        return copy_week_priority_reply
 
     from app.db import (
         create_fitness_pending_decision,
@@ -2063,6 +2402,31 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_add_exercises_to_selected_workout(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+
+    # Active workout log summary aliases must win over planned workout display.
+    if _is_show_active_workout_log_request(text):
+        active_summary = await _handle_show_active_workout_log(telegram_user_id, text)
+        if active_summary is not None:
+            return active_summary
+
+    if _looks_like_delete_last_logged_set(text):
+        delete_last_set_reply = await _delete_last_logged_set_from_active_session(
+            telegram_user_id=telegram_user_id,
+            source_text=text,
+        )
+        if delete_last_set_reply is not None:
+            return delete_last_set_reply
+
+    edit_last_reps = _extract_last_set_reps_edit(text)
+    if edit_last_reps is not None:
+        edit_last_set_reply = await _edit_last_logged_set_reps_in_active_session(
+            telegram_user_id=telegram_user_id,
+            reps=edit_last_reps,
+            source_text=text,
+        )
+        if edit_last_set_reply is not None:
+            return edit_last_set_reply
 
     # Dangerous/safety pending confirmations must have priority over parser.
     reply = await _handle_period_copy_confirmation(telegram_user_id, text, pending)

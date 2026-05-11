@@ -9,6 +9,24 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+
+BARE_CONFIRMATION_TEXTS = {
+    "да",
+    "ок",
+    "окей",
+    "копируй",
+    "копировать",
+    "подтверждаю",
+    "давай",
+    "удаляй",
+    "отменяй",
+    "отмена",
+    "не надо",
+    "не нужно",
+    "нет",
+}
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -413,6 +431,11 @@ async def run_scenario(path: Path) -> tuple[int, int]:
 
 async def amain() -> None:
     ensure_db_dependencies()
+
+    from app.db import init_db
+
+    # Ensure DB bootstrap tables exist before DB-backed scenarios.
+    await init_db()
 
     scenario_paths = [Path(p) for p in sys.argv[1:]]
     if not scenario_paths:
