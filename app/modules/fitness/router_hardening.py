@@ -1894,28 +1894,28 @@ def _looks_like_copy_this_week_workouts_period(text: str | None) -> bool:
     return True
 
 
-def _canonical_week_copy_command(text: str | None) -> str:
+def _extract_week_copy_weeks_count(text: str | None) -> int:
     t = _clean(text).replace("ё", "е")
 
-    if "два месяца" in t or "2 месяца" in t:
-        return "скопируй эту неделю на следующие 8 недель"
-
     if "три месяца" in t or "3 месяца" in t:
-        return "скопируй эту неделю на следующие 12 недель"
+        return 12
+
+    if "два месяца" in t or "2 месяца" in t:
+        return 8
 
     if "месяц" in t:
-        return "скопируй эту неделю на следующие 4 недели"
+        return 4
 
-    if "4 недели" in t or "четыре недели" in t:
-        return "скопируй эту неделю на следующие 4 недели"
+    if "четыре недели" in t or "4 недели" in t:
+        return 4
 
-    if "3 недели" in t or "три недели" in t:
-        return "скопируй эту неделю на следующие 3 недели"
+    if "три недели" in t or "3 недели" in t:
+        return 3
 
-    if "2 недели" in t or "две недели" in t:
-        return "скопируй эту неделю на следующие 2 недели"
+    if "две недели" in t or "2 недели" in t:
+        return 2
 
-    return "скопируй эту неделю на следующую"
+    return 1
 
 
 async def _handle_copy_this_week_workouts_period_priority(
@@ -1925,15 +1925,26 @@ async def _handle_copy_this_week_workouts_period_priority(
     if not _looks_like_copy_this_week_workouts_period(text_value):
         return None
 
-    canonical = _canonical_week_copy_command(text_value)
-    action = parse_fitness_message(canonical)
-    if not action:
-        return None
+    # Build period-copy action directly. Do not call parse_fitness_message here:
+    # this helper is intentionally placed inside router_hardening and must not
+    # depend on parser imports/scope.
+    weeks_count = _extract_week_copy_weeks_count(text_value)
+
+    action = {
+        "action": "copy_planned_workouts",
+        "confidence": 0.99,
+        "scope": "week",
+        "source_scope": "current_week",
+        "target_scope": "next_weeks",
+        "weeks_count": weeks_count,
+        "requires_confirmation": weeks_count > 1,
+        "summary": "Скопировать тренировки этой недели",
+    }
 
     return await execute_planned_workout_action(
         telegram_user_id=telegram_user_id,
         action=action,
-        source_text=text_value or canonical,
+        source_text=text_value or "",
     )
 
 
