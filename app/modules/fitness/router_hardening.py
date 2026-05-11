@@ -1569,12 +1569,26 @@ async def _log_exercise_sets_to_active_session(
         return None
 
     raw = _clean(text_value)
-    match = re.match(r"^(.+?)\s+(\d+(?:[.,]\d+)?\s*(?:на|x|×|\*)\s*\d+.*)$", raw, re.IGNORECASE)
-    if not match:
+
+    # Split as:
+    #   exercise name = everything before first number
+    #   sets text     = everything from first number
+    #
+    # Supports:
+    #   жим лежа 80 на 10, 80 на 8
+    #   жим лежа 80х10 80х8 75х10
+    #   подтягивания 10 8 7
+    first_number = re.search(r"\d+(?:[.,]\d+)?", raw)
+    if not first_number:
         return None
 
-    exercise_name = _normalize_logged_exercise_name(match.group(1))
-    sets_text = match.group(2)
+    exercise_part = raw[:first_number.start()].strip(" :—-")
+    sets_text = raw[first_number.start():].strip()
+
+    if not exercise_part or not sets_text:
+        return None
+
+    exercise_name = _normalize_logged_exercise_name(exercise_part)
 
     parsed_sets = _parse_flexible_sets_text(sets_text)
 
