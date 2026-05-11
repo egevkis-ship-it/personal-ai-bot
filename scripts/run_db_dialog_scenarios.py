@@ -277,6 +277,17 @@ async def seed_scenario(user_id: str, seed: dict[str, Any]) -> str:
 
         return f"Создал seed тренировку на {target_date}. ID плана: {plan_id}"
 
+    if seed_type == "multiple_custom_workouts":
+        replies = []
+        for item in seed.get("items") or []:
+            item_seed = {
+                "type": "custom_workout",
+                "target_date": item.get("target_date"),
+                "text": item.get("text") or "",
+            }
+            replies.append(await seed_scenario(user_id, item_seed))
+        return "\n".join(replies)
+
     raise RuntimeError(f"Unsupported seed type: {seed_type!r}")
 
 
