@@ -1,0 +1,31 @@
+{
+  "name": "db workout log delete last set synonym set",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа приседания подтягивания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 80 на 10 80 на 8",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "удали последний сет",
+      "expect_contains_any": [
+        "Удалил",
+        "последний"
+      ],
+      "todo": true,
+      "todo_reason": "Delete last set synonym."
+    }
+  ]
+}

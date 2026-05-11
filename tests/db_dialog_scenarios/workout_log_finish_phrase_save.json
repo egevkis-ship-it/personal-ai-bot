@@ -1,0 +1,40 @@
+{
+  "name": "workout log finish phrase save",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа приседания подтягивания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 80 на 10",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "сохрани тренировку",
+      "expect_contains_any": [
+        "Завершил тренировку",
+        "Тренировка завершена"
+      ],
+      "todo": true,
+      "todo_reason": "Finish workout synonym."
+    },
+    {
+      "send": "покажи последнюю тренировку",
+      "expect_contains_all": [
+        "Последняя тренировка",
+        "Жим",
+        "80"
+      ],
+      "todo": true
+    }
+  ]
+}

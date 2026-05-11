@@ -1,0 +1,31 @@
+{
+  "name": "db workout log edit last set reps only",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа приседания подтягивания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "подтягивания 10 8",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "исправь последний подход на 9 повторов",
+      "expect_contains_all": [
+        "Исправил",
+        "9"
+      ],
+      "todo": true,
+      "todo_reason": "Edit last set reps."
+    }
+  ]
+}
