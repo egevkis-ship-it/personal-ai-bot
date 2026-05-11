@@ -1894,29 +1894,6 @@ def _looks_like_copy_this_week_workouts_period(text: str | None) -> bool:
     return True
 
 
-def _extract_week_copy_weeks_count(text: str | None) -> int:
-    t = _clean(text).replace("ё", "е")
-
-    if "три месяца" in t or "3 месяца" in t:
-        return 12
-
-    if "два месяца" in t or "2 месяца" in t:
-        return 8
-
-    if "месяц" in t:
-        return 4
-
-    if "четыре недели" in t or "4 недели" in t:
-        return 4
-
-    if "три недели" in t or "3 недели" in t:
-        return 3
-
-    if "две недели" in t or "2 недели" in t:
-        return 2
-
-    return 1
-
 
 async def _handle_copy_this_week_workouts_period_priority(
     telegram_user_id: str | None,
@@ -1948,7 +1925,107 @@ async def _handle_copy_this_week_workouts_period_priority(
     )
 
 
+# --- Week period copy priority helpers ---
+
+def _is_this_week_period_copy_request(text: str | None) -> bool:
+    if not text:
+        return False
+
+    t = text.lower().replace("ё", "е")
+
+    has_copy = any(x in t for x in (
+        "скопируй",
+        "копируй",
+        "перенеси",
+        "продублируй",
+        "дублируй",
+    ))
+    if not has_copy:
+        return False
+
+    # Do not steal explicit single-workout copy.
+    if "эту тренировку" in t or "данную тренировку" in t:
+        return False
+
+    has_week_source = any(x in t for x in (
+        "тренировки этой недели",
+        "тренировки текущей недели",
+        "эту неделю",
+        "текущую неделю",
+        "эта неделя",
+        "неделю целиком",
+        "всю неделю",
+        "тренировочный план этой недели",
+    ))
+    if not has_week_source:
+        return False
+
+    has_target = any(x in t for x in (
+        "на следующую неделю",
+        "на две недели",
+        "на 2 недели",
+        "на три недели",
+        "на 3 недели",
+        "на четыре недели",
+        "на 4 недели",
+        "на месяц",
+        "на два месяца",
+        "на 2 месяца",
+        "на следующие",
+        "вперед",
+        "вперёд",
+    ))
+
+    return has_target
+
+
+def _extract_week_copy_weeks_count(text: str | None) -> int:
+    if not text:
+        return 1
+
+    t = text.lower().replace("ё", "е")
+
+    if "два месяца" in t or "2 месяца" in t:
+        return 8
+
+    if "месяц" in t:
+        return 4
+
+    if "две недели" in t or "2 недели" in t:
+        return 2
+
+    if "три недели" in t or "3 недели" in t:
+        return 3
+
+    if "четыре недели" in t or "4 недели" in t:
+        return 4
+
+    m = re.search(r"следующ(?:ие|их)\s+(\d+)\s+нед", t)
+    if m:
+        return max(1, int(m.group(1)))
+
+    m = re.search(r"на\s+(\d+)\s+нед", t)
+    if m:
+        return max(1, int(m.group(1)))
+
+    if "на следующую неделю" in t:
+        return 1
+
+    return 1
+
+# --- End week period copy priority helpers ---
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
+
+    # Priority: copy the whole current week as a period before selected-workout copy can steal it.
+    if _is_this_week_period_copy_request(text):
+        copy_week_priority_reply = await _handle_copy_this_week_workouts_period_priority(
+            telegram_user_id,
+            text,
+        )
+        if copy_week_priority_reply is not None:
+            return copy_week_priority_reply
+
     copy_week_priority_reply = await _handle_copy_this_week_workouts_period_priority(
         telegram_user_id=telegram_user_id,
         text_value=text,
