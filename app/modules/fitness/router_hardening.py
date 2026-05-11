@@ -1443,12 +1443,22 @@ async def _finish_active_workout_session(
 def _looks_like_exercise_sets_log(text: str | None) -> bool:
     import re
 
-    t = _clean(text).replace("ё", "е")
+    t = _clean(text).replace("ё", "е").replace("×", "x").replace("х", "x")
     if not t:
         return False
 
-    # Example: "жим лежа 80 на 10, 80 на 8, 75 на 10"
-    return bool(re.search(r"[а-яa-z].*\d+(?:[.,]\d+)?\s*(?:на|x|×|\*)\s*\d+", t))
+    # Explicit formats:
+    # "80 на 10", "80x10", "80 x 10", "80*10"
+    if re.search(r"[а-яa-z].*\d+(?:[.,]\d+)?\s*(?:на|x|\*)\s*\d+", t, re.IGNORECASE):
+        return True
+
+    # Numeric tail after exercise name:
+    # "подтягивания 10 8 7"
+    # "жим 80 10 80 8 75 10"
+    if re.search(r"[а-яa-z]{3,}.*\d+(?:\s+\d+){1,}", t, re.IGNORECASE):
+        return True
+
+    return False
 
 
 def _normalize_logged_exercise_name(name: str) -> str:
@@ -1458,6 +1468,12 @@ def _normalize_logged_exercise_name(name: str) -> str:
         "жим штанги лежа": "Жим штанги лёжа",
         "присед": "Приседания со штангой",
         "становая": "Становая тяга",
+        "подтягивания": "Подтягивания",
+        "подтягивание": "Подтягивания",
+        "подтягивания широким хватом": "Подтягивания широким хватом",
+        "отжимания": "Отжимания",
+        "отжимание": "Отжимания",
+        "жим": "Жим штанги лёжа",
     }
     key = name.lower().replace("ё", "е")
     return aliases.get(key, name[:1].upper() + name[1:] if name else "Упражнение")
@@ -1485,6 +1501,57 @@ async def _get_active_fitness_workout_id(telegram_user_id: str | None) -> int | 
         return int(row["id"]) if row else None
 
 
+
+
+def _parse_flexible_sets_text(sets_text: str):
+    import re
+
+    raw = (sets_text or "").strip().lower()
+    raw = raw.replace("ё", "е")
+    raw = raw.replace("×", "x").replace("х", "x")
+    raw = raw.replace(" кг", "").replace("kg", "")
+    raw = raw.replace("повторов", "").replace("повтора", "").replace("повтор", "")
+    raw = raw.replace("раза", "").replace("раз", "")
+
+    # 1) Explicit pairs: 80x10, 80 x 10, 80*10, 80 на 10
+    explicit = []
+    for m in re.finditer(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|\*)\s*(\d+)", raw, re.IGNORECASE):
+        weight = float(m.group(1).replace(",", "."))
+        reps = int(m.group(2))
+        explicit.append((weight, reps))
+
+    if explicit:
+        # Special case: "100 на 5 5 5"
+        # First pair = 100x5, then tail reps use the same weight.
+        first = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|\*)\s*(\d+)(.*)$", raw, re.IGNORECASE)
+        if first and len(explicit) == 1:
+            weight = float(first.group(1).replace(",", "."))
+            tail = first.group(3) or ""
+            tail_nums = [int(x) for x in re.findall(r"\b\d+\b", tail)]
+            for reps in tail_nums:
+                explicit.append((weight, reps))
+        return explicit
+
+    # 2) Plain numeric tail: "80 10 80 8 75 10" or "10 8 7"
+    nums = re.findall(r"\d+(?:[.,]\d+)?", raw)
+    if not nums:
+        return []
+
+    values = [float(x.replace(",", ".")) for x in nums]
+
+    # Weighted plain pairs.
+    if len(values) >= 4 and len(values) % 2 == 0 and any(v > 40 for v in values[::2]):
+        parsed = []
+        for i in range(0, len(values), 2):
+            parsed.append((values[i], int(values[i + 1])))
+        return parsed
+
+    # Bodyweight reps-only.
+    if all(v <= 40 for v in values):
+        return [(None, int(v)) for v in values]
+
+    return []
+
 async def _log_exercise_sets_to_active_session(
     telegram_user_id: str | None,
     text_value: str | None,
@@ -1509,16 +1576,7 @@ async def _log_exercise_sets_to_active_session(
     exercise_name = _normalize_logged_exercise_name(match.group(1))
     sets_text = match.group(2)
 
-    parsed_sets = []
-    for part in re.split(r"[,;]+", sets_text):
-        part = part.strip()
-        m = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|×|\*)\s*(\d+)", part, re.IGNORECASE)
-        if not m:
-            continue
-
-        weight = float(m.group(1).replace(",", "."))
-        reps = int(m.group(2))
-        parsed_sets.append((weight, reps))
+    parsed_sets = _parse_flexible_sets_text(sets_text)
 
     if not parsed_sets:
         return None
@@ -1581,8 +1639,11 @@ async def _log_exercise_sets_to_active_session(
     ]
 
     for idx, (weight, reps) in enumerate(parsed_sets, start=start_number + 1):
-        weight_text = int(weight) if float(weight).is_integer() else weight
-        lines.append(f"{idx}) {weight_text} кг × {reps}")
+        if weight is None:
+            lines.append(f"{idx}) {reps} повторов")
+        else:
+            weight_text = int(weight) if float(weight).is_integer() else weight
+            lines.append(f"{idx}) {weight_text} кг × {reps}")
 
     return "\n".join(lines)
 
