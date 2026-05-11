@@ -1447,6 +1447,10 @@ def _looks_like_exercise_sets_log(text: str | None) -> bool:
     if not t:
         return False
 
+    # Voice messages often contain spoken numbers:
+    # "семьдесят по десять", "35 килограмм на восемь".
+    t = _normalize_spoken_numbers(t).replace("×", "x").replace("х", "x")
+
     # Remove common spoken/unit words for detection only.
     normalized = t
     normalized = re.sub(r"\b(кг|килограмм|килограмма|килограммов)\b", " ", normalized)
@@ -1536,14 +1540,14 @@ def _parse_flexible_sets_text(sets_text: str):
 
     # 1) Explicit pairs: 80x10, 80 x 10, 80*10, 80 на 10.
     explicit = []
-    for m in re.finditer(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|\*)\s*(\d+)", raw, re.IGNORECASE):
+    for m in re.finditer(r"(\d+(?:[.,]\d+)?)\s*(?:на|по|x|\*)\s*(\d+)", raw, re.IGNORECASE):
         weight = float(m.group(1).replace(",", "."))
         reps = int(m.group(2))
         explicit.append((weight, reps))
 
     if explicit:
         # Special case: "100 на 5 5 5"
-        first = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|\*)\s*(\d+)(.*)$", raw, re.IGNORECASE)
+        first = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:на|по|x|\*)\s*(\d+)(.*)$", raw, re.IGNORECASE)
         if first and len(explicit) == 1:
             weight = float(first.group(1).replace(",", "."))
             tail = first.group(3) or ""
@@ -1600,6 +1604,10 @@ async def _log_exercise_sets_to_active_session(
         raw,
         flags=re.IGNORECASE,
     ).strip()
+
+    # Normalize spoken numbers in the set part while keeping exercise words intact.
+    # Example: "тягу гантелей ... 35 килограмм на восемь" -> "... 35 на 8".
+    raw = _normalize_spoken_numbers(raw)
 
     # Split as:
     #   exercise name = everything before first number
@@ -1702,11 +1710,14 @@ def _looks_like_continuation_set(text: str | None) -> bool:
     if not t:
         return False
 
+    raw_t = t
+    normalized_t = _normalize_spoken_numbers(t).replace("×", "x").replace("х", "x")
+
     # "второй семьдесят по десять", "третий 90 на 14", "еще 70 на 10"
-    if re.search(r"\b(первый|второй|третий|четвертый|пятый|шестой|седьмой|восьмой|девятый|десятый|еще|следующий)\b", t):
+    if re.search(r"\b(первый|второй|третий|четвертый|пятый|шестой|седьмой|восьмой|девятый|десятый|еще|следующий)\b", raw_t):
         return True
 
-    return bool(re.search(r"^\s*\d+(?:[.,]\d+)?\s*(?:на|по|x|\*)\s*\d+", t))
+    return bool(re.search(r"^\s*\d+(?:[.,]\d+)?\s*(?:на|по|x|\*)\s*\d+", normalized_t))
 
 
 def _normalize_spoken_numbers(text: str | None) -> str:
