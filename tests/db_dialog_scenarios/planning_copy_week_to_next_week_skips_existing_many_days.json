@@ -1,0 +1,49 @@
+{
+  "name": "db planning copy week to next week skips existing many days",
+  "seed": {
+    "type": "multiple_custom_workouts",
+    "items": [
+      {
+        "target_date": "2026-05-11",
+        "text": "жим"
+      },
+      {
+        "target_date": "2026-05-12",
+        "text": "присед"
+      },
+      {
+        "target_date": "2026-05-14",
+        "text": "тяга"
+      },
+      {
+        "target_date": "2026-05-15",
+        "text": "плечи"
+      },
+      {
+        "target_date": "2026-05-18",
+        "text": "уже есть понедельник"
+      },
+      {
+        "target_date": "2026-05-19",
+        "text": "уже есть вторник"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "send": "скопируй тренировки этой недели на следующую неделю",
+      "expect_contains_all": [
+        "Пропущено",
+        "18 мая",
+        "19 мая"
+      ]
+    },
+    {
+      "send": "покажи тренировки на месяц",
+      "expect_contains_all": [
+        "21 мая",
+        "22 мая"
+      ]
+    }
+  ]
+}
