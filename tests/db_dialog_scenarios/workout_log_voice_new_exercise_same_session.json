@@ -1,0 +1,38 @@
+{
+  "name": "db workout log voice new exercise in same session",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим штанги лежа тягу гантели приседания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "начинаю делать тягу гантелей в наклоне 35 килограмм на восемь",
+      "expect_contains_all": [
+        "Записал",
+        "Тяга гантелей",
+        "35",
+        "8"
+      ],
+      "todo": true,
+      "todo_reason": "New exercise phrase inside active session should not create new workout."
+    },
+    {
+      "send": "закончил тренировку",
+      "expect_contains_all": [
+        "Завершил тренировку",
+        "Тяга"
+      ],
+      "todo": true,
+      "todo_reason": "Finished workout should include new exercise logged in same session."
+    }
+  ]
+}

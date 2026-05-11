@@ -1,0 +1,49 @@
+{
+  "name": "db workout log voice continuation sets",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем жим штанги лежа тягу гантели приседания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим штанги лежа 70 кг на 10 раз",
+      "expect_contains_all": [
+        "Записал",
+        "Жим",
+        "70",
+        "10"
+      ]
+    },
+    {
+      "send": "второй семьдесят по десять",
+      "expect_contains_all": [
+        "Записал",
+        "Жим",
+        "70",
+        "10"
+      ],
+      "todo": true,
+      "todo_reason": "Continuation set without exercise name should use current exercise."
+    },
+    {
+      "send": "третий девяносто на четырнадцать",
+      "expect_contains_all": [
+        "Записал",
+        "Жим",
+        "90",
+        "14"
+      ],
+      "todo": true,
+      "todo_reason": "Continuation ordinal set should use current exercise."
+    }
+  ]
+}

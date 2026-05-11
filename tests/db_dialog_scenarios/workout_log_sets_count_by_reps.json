@@ -1,0 +1,30 @@
+{
+  "name": "db workout log sets count by reps format",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "сделаем приседания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "приседания со штангой 70 килограмм 4 по 14",
+      "expect_contains_all": [
+        "Записал",
+        "Приседания",
+        "70",
+        "14",
+        "4"
+      ],
+      "todo": true,
+      "todo_reason": "Format '70 kg 4 by 14' should create 4 sets."
+    }
+  ]
+}

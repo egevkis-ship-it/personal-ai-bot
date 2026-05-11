@@ -1,0 +1,36 @@
+{
+  "name": "db planning copy current week voice two months",
+  "seed": {
+    "type": "multiple_custom_workouts",
+    "items": [
+      {
+        "target_date": "2026-05-11",
+        "text": "жим присед становая"
+      },
+      {
+        "target_date": "2026-05-12",
+        "text": "отжимания брусья пресс"
+      },
+      {
+        "target_date": "2026-05-14",
+        "text": "тяга штанги тяга блока"
+      },
+      {
+        "target_date": "2026-05-15",
+        "text": "армейский жим бицепс трицепс"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "send": "скопируй тренировки этой недели на два месяца вперед",
+      "expect_contains_all": [
+        "Будут скопированы тренировки",
+        "2026-05-11",
+        "Подтверди"
+      ],
+      "todo": true,
+      "todo_reason": "Voice week copy to two months should route to period copy."
+    }
+  ]
+}
