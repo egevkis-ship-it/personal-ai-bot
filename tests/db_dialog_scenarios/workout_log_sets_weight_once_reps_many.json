@@ -21,18 +21,14 @@
         "Приседания",
         "100",
         "5"
-      ],
-      "todo": true,
-      "todo_reason": "weight once + many reps parser is next."
+      ]
     },
     {
       "send": "закончил тренировку",
       "expect_contains_all": [
         "Завершил тренировку",
         "Приседания"
-      ],
-      "todo": true,
-      "todo_reason": "logged squat sets should be summarized."
+      ]
     }
   ]
 }

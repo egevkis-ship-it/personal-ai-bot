@@ -22,18 +22,14 @@
         "10",
         "8",
         "7"
-      ],
-      "todo": true,
-      "todo_reason": "bodyweight reps-only parser is next."
+      ]
     },
     {
       "send": "закончил тренировку",
       "expect_contains_all": [
         "Завершил тренировку",
         "Подтягивания"
-      ],
-      "todo": true,
-      "todo_reason": "logged pull-up sets should be summarized."
+      ]
     }
   ]
 }
