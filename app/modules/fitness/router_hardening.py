@@ -1447,15 +1447,26 @@ def _looks_like_exercise_sets_log(text: str | None) -> bool:
     if not t:
         return False
 
+    # Remove common spoken/unit words for detection only.
+    normalized = t
+    normalized = re.sub(r"\b(кг|килограмм|килограмма|килограммов)\b", " ", normalized)
+    normalized = re.sub(r"\b(раз|раза|повтор|повтора|повторов)\b", " ", normalized)
+    normalized = " ".join(normalized.split())
+
     # Explicit formats:
-    # "80 на 10", "80x10", "80 x 10", "80*10"
-    if re.search(r"[а-яa-z].*\d+(?:[.,]\d+)?\s*(?:на|x|\*)\s*\d+", t, re.IGNORECASE):
+    # "80 на 10", "80x10", "80 x 10", "80*10", "70 кг на 10 раз"
+    if re.search(r"[а-яa-z].*\d+(?:[.,]\d+)?\s*(?:на|x|\*)\s*\d+", normalized, re.IGNORECASE):
+        return True
+
+    # Count-by-reps format:
+    # "70 килограмм 4 по 14"
+    if re.search(r"[а-яa-z].*\d+(?:[.,]\d+)?\s+\d+\s+по\s+\d+", normalized, re.IGNORECASE):
         return True
 
     # Numeric tail after exercise name:
     # "подтягивания 10 8 7"
     # "жим 80 10 80 8 75 10"
-    if re.search(r"[а-яa-z]{3,}.*\d+(?:\s+\d+){1,}", t, re.IGNORECASE):
+    if re.search(r"[а-яa-z]{3,}.*\d+(?:\s+\d+){1,}", normalized, re.IGNORECASE):
         return True
 
     return False
@@ -1509,11 +1520,21 @@ def _parse_flexible_sets_text(sets_text: str):
     raw = (sets_text or "").strip().lower()
     raw = raw.replace("ё", "е")
     raw = raw.replace("×", "x").replace("х", "x")
-    raw = raw.replace(" кг", "").replace("kg", "")
-    raw = raw.replace("повторов", "").replace("повтора", "").replace("повтор", "")
-    raw = raw.replace("раза", "").replace("раз", "")
 
-    # 1) Explicit pairs: 80x10, 80 x 10, 80*10, 80 на 10
+    # Normalize spoken units.
+    raw = re.sub(r"\b(кг|килограмм|килограмма|килограммов)\b", " ", raw)
+    raw = re.sub(r"\b(повторов|повтора|повтор|раза|раз)\b", " ", raw)
+    raw = " ".join(raw.split())
+
+    # 0) Count-by-reps: "70 4 по 14" = 4 sets of 70x14.
+    m_count = re.search(r"(\d+(?:[.,]\d+)?)\s+(\d+)\s+по\s+(\d+)", raw, re.IGNORECASE)
+    if m_count:
+        weight = float(m_count.group(1).replace(",", "."))
+        count = int(m_count.group(2))
+        reps = int(m_count.group(3))
+        return [(weight, reps) for _ in range(count)]
+
+    # 1) Explicit pairs: 80x10, 80 x 10, 80*10, 80 на 10.
     explicit = []
     for m in re.finditer(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|\*)\s*(\d+)", raw, re.IGNORECASE):
         weight = float(m.group(1).replace(",", "."))
@@ -1522,7 +1543,6 @@ def _parse_flexible_sets_text(sets_text: str):
 
     if explicit:
         # Special case: "100 на 5 5 5"
-        # First pair = 100x5, then tail reps use the same weight.
         first = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:на|x|\*)\s*(\d+)(.*)$", raw, re.IGNORECASE)
         if first and len(explicit) == 1:
             weight = float(first.group(1).replace(",", "."))
@@ -1532,7 +1552,7 @@ def _parse_flexible_sets_text(sets_text: str):
                 explicit.append((weight, reps))
         return explicit
 
-    # 2) Plain numeric tail: "80 10 80 8 75 10" or "10 8 7"
+    # 2) Plain numeric tail: "80 10 80 8 75 10" or "10 8 7".
     nums = re.findall(r"\d+(?:[.,]\d+)?", raw)
     if not nums:
         return []
@@ -1552,6 +1572,7 @@ def _parse_flexible_sets_text(sets_text: str):
 
     return []
 
+
 async def _log_exercise_sets_to_active_session(
     telegram_user_id: str | None,
     text_value: str | None,
@@ -1569,6 +1590,16 @@ async def _log_exercise_sets_to_active_session(
         return None
 
     raw = _clean(text_value)
+    raw = raw.replace("ё", "е")
+
+    # Voice prefixes inside an active session:
+    # "начинаю делать тягу ...", "перехожу к тяге ...", etc.
+    raw = re.sub(
+        r"^(так,\s*)?(начинаю|начал|начала|перехожу|перешел|перешла)\s+(делать|к)?\s*",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
 
     # Split as:
     #   exercise name = everything before first number
@@ -1662,6 +1693,167 @@ async def _log_exercise_sets_to_active_session(
     return "\n".join(lines)
 
 
+
+
+def _looks_like_continuation_set(text: str | None) -> bool:
+    import re
+
+    t = _clean(text).replace("ё", "е").replace("×", "x").replace("х", "x")
+    if not t:
+        return False
+
+    # "второй семьдесят по десять", "третий 90 на 14", "еще 70 на 10"
+    if re.search(r"\b(первый|второй|третий|четвертый|пятый|шестой|седьмой|восьмой|девятый|десятый|еще|следующий)\b", t):
+        return True
+
+    return bool(re.search(r"^\s*\d+(?:[.,]\d+)?\s*(?:на|по|x|\*)\s*\d+", t))
+
+
+def _normalize_spoken_numbers(text: str | None) -> str:
+    t = (text or "").lower().replace("ё", "е")
+    words = {
+        "ноль": "0",
+        "один": "1", "одна": "1", "первый": "",
+        "два": "2", "две": "2", "второй": "",
+        "три": "3", "третий": "",
+        "четыре": "4", "четвертый": "",
+        "пять": "5", "пятый": "",
+        "шесть": "6", "шестой": "",
+        "семь": "7", "седьмой": "",
+        "восемь": "8", "восьмой": "",
+        "девять": "9", "девятый": "",
+        "десять": "10", "десятый": "",
+        "одиннадцать": "11",
+        "двенадцать": "12",
+        "тринадцать": "13",
+        "четырнадцать": "14",
+        "пятнадцать": "15",
+        "шестнадцать": "16",
+        "семнадцать": "17",
+        "восемнадцать": "18",
+        "девятнадцать": "19",
+        "двадцать": "20",
+        "тридцать": "30",
+        "сорок": "40",
+        "пятьдесят": "50",
+        "шестьдесят": "60",
+        "семьдесят": "70",
+        "восемьдесят": "80",
+        "девяносто": "90",
+        "сто": "100",
+    }
+
+    for word, value in words.items():
+        t = re.sub(rf"\b{word}\b", value, t)
+
+    t = re.sub(r"\b(кг|килограмм|килограмма|килограммов|раз|раза|повтор|повтора|повторов)\b", " ", t)
+    t = re.sub(r"\b(еще|следующий)\b", " ", t)
+    return " ".join(t.split())
+
+
+async def _get_last_logged_exercise_name(telegram_user_id: str | None) -> tuple[int, str] | None:
+    from sqlalchemy import text
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT fw.id AS workout_id, fes.exercise_name AS exercise_name
+                FROM fitness_workouts fw
+                JOIN fitness_exercise_sets fes ON fes.workout_id = fw.id
+                WHERE fw.telegram_user_id = :telegram_user_id
+                  AND fw.completion_type = 'active_session'
+                ORDER BY fes.created_at DESC, fes.id DESC
+                LIMIT 1
+                """
+            ),
+            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+        )
+        row = result.mappings().first()
+        if not row:
+            return None
+        return int(row["workout_id"]), str(row["exercise_name"])
+
+
+async def _log_continuation_set_to_active_session(
+    telegram_user_id: str | None,
+    text_value: str | None,
+) -> str | None:
+    if not _looks_like_continuation_set(text_value):
+        return None
+
+    last = await _get_last_logged_exercise_name(telegram_user_id)
+    if not last:
+        return None
+
+    workout_id, exercise_name = last
+    normalized = _normalize_spoken_numbers(text_value)
+    parsed_sets = _parse_flexible_sets_text(normalized)
+    if not parsed_sets:
+        return None
+
+    from sqlalchemy import text
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        max_result = await session.execute(
+            text(
+                """
+                SELECT COALESCE(MAX(set_number), 0)
+                FROM fitness_exercise_sets
+                WHERE workout_id = :workout_id
+                  AND exercise_name = :exercise_name
+                """
+            ),
+            {"workout_id": workout_id, "exercise_name": exercise_name},
+        )
+        start_number = int(max_result.scalar_one() or 0)
+
+        for idx, (weight, reps) in enumerate(parsed_sets, start=1):
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO fitness_exercise_sets (
+                        workout_id,
+                        exercise_name,
+                        set_number,
+                        weight_kg,
+                        reps,
+                        notes
+                    )
+                    VALUES (
+                        :workout_id,
+                        :exercise_name,
+                        :set_number,
+                        :weight_kg,
+                        :reps,
+                        :notes
+                    )
+                    """
+                ),
+                {
+                    "workout_id": workout_id,
+                    "exercise_name": exercise_name,
+                    "set_number": start_number + idx,
+                    "weight_kg": weight,
+                    "reps": reps,
+                    "notes": text_value or "",
+                },
+            )
+
+        await session.commit()
+
+    lines = ["Записал подходы.", "", f"{exercise_name}:"]
+    for idx, (weight, reps) in enumerate(parsed_sets, start=start_number + 1):
+        if weight is None:
+            lines.append(f"{idx}) {reps} повторов")
+        else:
+            weight_text = int(weight) if float(weight).is_integer() else weight
+            lines.append(f"{idx}) {weight_text} кг × {reps}")
+    return "\n".join(lines)
+
+
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
     from app.db import (
         create_fitness_pending_decision,
@@ -1707,6 +1899,13 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     reply = await _handle_exercise_disambiguation(telegram_user_id, text, pending)
     if reply is not None:
         return reply
+
+    active_continuation_reply = await _log_continuation_set_to_active_session(
+        telegram_user_id=telegram_user_id,
+        text_value=text,
+    )
+    if active_continuation_reply is not None:
+        return active_continuation_reply
 
     # If a workout session is active, exercise set messages must be logged
     # into the active factual workout, not converted into planned workouts.
