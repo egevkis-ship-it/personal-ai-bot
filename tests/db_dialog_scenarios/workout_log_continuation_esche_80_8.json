@@ -1,0 +1,32 @@
+{
+  "name": "workout log continuation esche 80 8",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Жим"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 80 на 10",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "еще 80 на 8",
+      "expect_contains_all": [
+        "Записал",
+        "80",
+        "8"
+      ],
+      "todo": true,
+      "todo_reason": "Continuation set should use current exercise if not fully supported yet."
+    }
+  ]
+}

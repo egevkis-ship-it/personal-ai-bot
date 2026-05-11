@@ -1,0 +1,32 @@
+{
+  "name": "workout log continuation chetverty 70 po 12",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Жим"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 80 на 10, 80 на 9, 75 на 10",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "четвертый 70 по 12",
+      "expect_contains_all": [
+        "Записал",
+        "70",
+        "12"
+      ],
+      "todo": true,
+      "todo_reason": "Continuation set should use current exercise if not fully supported yet."
+    }
+  ]
+}

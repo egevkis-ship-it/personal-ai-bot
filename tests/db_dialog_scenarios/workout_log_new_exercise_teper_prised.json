@@ -1,0 +1,32 @@
+{
+  "name": "workout log new exercise teper prised",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа приседания тяга гантели бицепс трицепс"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 70 на 10",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "теперь приседания 100 на 5",
+      "expect_contains_all": [
+        "Записал",
+        "100",
+        "5"
+      ],
+      "todo": true,
+      "todo_reason": "New exercise inside active session should log into same workout."
+    }
+  ]
+}

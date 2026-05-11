@@ -1,0 +1,32 @@
+{
+  "name": "workout log new exercise delayu triceps",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа приседания тяга гантели бицепс трицепс"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 70 на 10",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "делаю трицепс в блоке 30 на 15",
+      "expect_contains_all": [
+        "Записал",
+        "30",
+        "15"
+      ],
+      "todo": true,
+      "todo_reason": "New exercise inside active session should log into same workout."
+    }
+  ]
+}

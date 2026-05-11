@@ -1,0 +1,26 @@
+{
+  "name": "workout log sets machine weight count by reps",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа отжимания брусья трицепс приседания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "трицепс в блоке 30 килограмм 4 по 15",
+      "expect_contains_all": [
+        "Записал",
+        "30",
+        "15"
+      ]
+    }
+  ]
+}

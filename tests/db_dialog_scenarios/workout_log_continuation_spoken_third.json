@@ -1,0 +1,32 @@
+{
+  "name": "workout log continuation spoken third",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Жим"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим штанги лежа 70 кг на 10 раз",
+      "expect_contains": "Записал"
+    },
+    {
+      "send": "третий девяносто на четырнадцать",
+      "expect_contains_all": [
+        "Записал",
+        "90",
+        "14"
+      ],
+      "todo": true,
+      "todo_reason": "Continuation set should use current exercise if not fully supported yet."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "workout log sets comma decimal weight",
+  "seed": {
+    "type": "custom_workout",
+    "target_date": "2026-05-11",
+    "text": "жим штанги лежа отжимания брусья трицепс приседания"
+  },
+  "steps": [
+    {
+      "send": "покажи тренировку на понедельник",
+      "expect_contains": "Кастомная тренировка"
+    },
+    {
+      "send": "начал тренировку",
+      "expect_contains": "Начал тренировку"
+    },
+    {
+      "send": "жим лежа 82,5 на 8",
+      "expect_contains_all": [
+        "Записал",
+        "82",
+        "8"
+      ]
+    }
+  ]
+}
