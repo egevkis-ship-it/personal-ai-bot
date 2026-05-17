@@ -28,6 +28,16 @@ WEEKDAYS_RU = {
     6: "воскресенье",
 }
 
+WEEKDAYS_RU_SHORT = {
+    0: "пн",
+    1: "вт",
+    2: "ср",
+    3: "чт",
+    4: "пт",
+    5: "сб",
+    6: "вс",
+}
+
 STATUS_LABELS = {
     "planned": "запланировано",
     "completed": "выполнено",
@@ -58,14 +68,23 @@ def parse_date(value):
 
 
 def format_human_date(value, include_weekday: bool = True) -> str:
+    """Return a date as 'дд-мм-гггг — день недели'."""
     d = parse_date(value)
     if not d:
         return "без даты"
 
-    base = f"{d.day} {MONTHS_RU[d.month]}"
+    base = f"{d.day:02d}-{d.month:02d}-{d.year}"
     if include_weekday:
-        return f"{base}, {WEEKDAYS_RU[d.weekday()]}"
+        return f"{base} — {WEEKDAYS_RU[d.weekday()]}"
     return base
+
+
+def format_human_date_short(value) -> str:
+    """Return a date as 'дд-мм-гггг — пн' (short weekday)."""
+    d = parse_date(value)
+    if not d:
+        return "без даты"
+    return f"{d.day:02d}-{d.month:02d}-{d.year} — {WEEKDAYS_RU_SHORT[d.weekday()]}"
 
 
 def status_label(status: str | None) -> str:

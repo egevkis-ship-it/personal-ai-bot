@@ -18,7 +18,7 @@ from app.modules.fitness.exercise_normalizer import (
     get_exercise_title,
     possible_matches,
 )
-from app.modules.fitness.formatter import format_planned_workout, format_period_plan
+from app.modules.fitness.formatter import format_planned_workout, format_period_plan, format_human_date
 from app.modules.fitness.utils import week_bounds, next_week_bounds, month_bounds
 
 
@@ -2658,17 +2658,18 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
         target_date = _parse_ru_date(text)
         if target_date:
             data = await get_today_planned_workout(telegram_user_id, target_date)
+            human_date = format_human_date(target_date)
             if not data:
-                return f"На {target_date} активная плановая тренировка не найдена."
+                return f"На {human_date} активная плановая тренировка не найдена."
 
             if _wants_weights(text):
                 return await _format_workouts_with_weights(
                     telegram_user_id=telegram_user_id,
                     items=[data],
-                    title=f"Тренировка на {target_date} с весами:",
+                    title=f"Тренировка на {human_date} с весами:",
                 )
 
-            return f"Тренировка на {target_date}:\n\n" + format_planned_workout(data)
+            return f"Тренировка на {human_date}:\n\n" + format_planned_workout(data)
 
     # 6. Move/copy workout между датами.
     t = _clean(text)

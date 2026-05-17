@@ -347,8 +347,12 @@ async def _save_weekly_plan(telegram_user_id: str | None, text: str, parsed: dic
 
     count = len(planned_workouts)
     days_summary = []
-    for pw in planned_workouts[:5]:
-        date_str = pw.get("planned_date", "")[:10] if pw.get("planned_date") else pw.get("weekday", "—")
+    for pw in planned_workouts:
+        raw_date = pw.get("planned_date")
+        if raw_date:
+            date_str = format_human_date(raw_date[:10] if isinstance(raw_date, str) else raw_date)
+        else:
+            date_str = pw.get("weekday", "—")
         title = pw.get("title") or pw.get("focus_label") or "Тренировка"
         ex_count = len(pw.get("exercises") or [])
         days_summary.append(f"  • {date_str}: {title} ({ex_count} упр.)")
@@ -357,9 +361,6 @@ async def _save_weekly_plan(telegram_user_id: str | None, text: str, parsed: dic
         f"✅ Записал программу на {count} тренировок. ID: {plan_id}",
         "",
     ] + days_summary
-
-    if count > 5:
-        lines.append(f"  ... и ещё {count - 5}")
 
     return "\n".join(lines)
 
@@ -1575,6 +1576,27 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
                 planned_workouts=[],
             )
             return "Сохранил программу тренировок как свободный текст. Если хочешь, чтобы я разложил её по дням — пришли в более чётком формате."
+
+    # ── Multi-exercise workout description bypasses single-exercise router ────
+    # Pattern: "запиши тренировку" + multiple exercise transitions ("потом", "затем")
+    # OR many distinct exercise names → goes straight to full AI parser
+    t_lower = text.lower().replace("ё", "е")
+    record_intent = any(x in t_lower for x in [
+        "запиши тренировку", "запиши тренеровку", "записать тренировку",
+        "запиши пожалуйста тренировку", "записать сегодняшнюю тренировку",
+        "запиши тренировку сегодняшнюю", "сегодняшнюю тренировку запиши",
+    ])
+    transition_count = sum(t_lower.count(x) for x in [" потом ", " потом,", " затем ", " затем,", " далее ", " после ", " следом "])
+    exercise_keywords = ["жим", "тяга", "бицепс", "трицепс", "присед", "становая", "брус", "подтяг", "пресс", "махи", "разводк", "разгибан", "сгибан", "выпад", "отжим", "икр", "ягодиц", "пуловер", "плечи", "грудь"]
+    distinct_exercises = sum(1 for kw in exercise_keywords if kw in t_lower)
+
+    is_multi_exercise_record = record_intent and (transition_count >= 1 or distinct_exercises >= 3)
+
+    if is_multi_exercise_record and not active_session:
+        # Force the full AI parser; never let router_hardening single-exercise this.
+        parsed_multi = await parse_fitness_action_v2(text, active_session=active_session)
+        if parsed_multi.get("action") == "log_workout_sets" and parsed_multi.get("logged_exercises"):
+            return await _log_workout_sets(telegram_user_id, text, parsed_multi, active_session)
 
     # ── Router hardening (handles set logging, confirmation flows, etc.) ───────
     hardening_reply = await handle_router_hardening(telegram_user_id, text)
