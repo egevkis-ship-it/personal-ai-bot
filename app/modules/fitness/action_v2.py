@@ -3,7 +3,7 @@ import json
 import re
 from datetime import date, datetime, timezone
 
-from app.ai import client
+from app.ai import claude_client
 from app.db import (
     create_fitness_pending_decision,
     get_latest_fitness_pending_decision,
@@ -120,7 +120,7 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
     return result
 
 
-def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> dict:
+async def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> dict:
     today = date.today().isoformat()
     current_week_start, current_week_end = week_bounds()
     next_week_start, next_week_end = next_week_bounds()
@@ -143,7 +143,7 @@ def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> di
 
 Схема:
 {{
-  "action": "show_today_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | correct_previous_action | delete_last_set | dangerous_delete | unknown | clarify",
+  "action": "show_today_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | correct_previous_action | delete_last_set | edit_plan | show_progress | dangerous_delete | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -244,20 +244,48 @@ def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> di
 => dangerous_delete.
 Нельзя исполнять сразу.
 
-7. Если смысл неясен => clarify или unknown.
+7. Редактирование плана:
+- "добавь жим в сегодняшнюю тренировку"
+- "убери тягу из плана на пятницу"
+- "замени жим лёжа на жим гантелей в тренировке груди"
+- "поменяй тренировки местами — перенеси пятницу на среду"
+- "измени веса в плане"
+- "давай её изменим", "измени план"
+=> edit_plan. Поставь в target.exercise_name что менять.
+
+8. Прогресс и история:
+- "покажи мои результаты", "какой у меня прогресс по жиму", "история тренировок"
+- "мои рекорды", "последние тренировки", "статистика"
+=> show_progress.
+
+9. Если смысл неясен => clarify или unknown.
 Если команда поддерживаемая, confidence >= 0.75.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
     )
 
-    return _safe_json_loads(response.choices[0].message.content or "{}")
+    return _safe_json_loads(response.content[0].text if response.content else "{}")
+
+
+async def _parse_finish_confirmation_with_ai_async(text: str, active_session: dict | None) -> dict:
+    system_prompt = (
+        f"Ты parser ответа на вопрос: 'Ты закончил тренировку?'\n"
+        f"Активная сессия: {json.dumps(active_session or {}, ensure_ascii=False)}\n"
+        "Верни строго JSON: {\"action\": \"finish|continue|danger|unclear\", \"confidence\": 0.0, \"summary\": \"\"}\n"
+        "finish — закончил/хватит/сохраняй. continue — продолжает. danger — удалить. unclear — непонятно."
+    )
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=128,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    return _safe_json_loads(response.content[0].text if response.content else "{}")
 
 
 async def _get_plan_for_period(telegram_user_id: str | None, start_date: str, end_date: str, title: str) -> str:
@@ -752,40 +780,8 @@ def _fast_finish_response(text: str) -> str | None:
 
 
 def _parse_finish_confirmation_with_ai(text: str, active_session: dict | None) -> dict:
-    system_prompt = f"""
-Ты parser ответа на вопрос фитнес-ассистента: "Ты закончил тренировку?"
-
-Активная сессия:
-{json.dumps(active_session or {}, ensure_ascii=False)}
-
-Пользователь ответил:
-{text}
-
-Верни строго JSON:
-{{
-  "action": "finish | continue | danger | unclear",
-  "confidence": 0.0,
-  "summary": ""
-}}
-
-Правила:
-- finish: пользователь говорит, что закончил / хватит / закрывай / сохраняй.
-- continue: пользователь говорит, что продолжает / ещё тренируется / сделает ещё подходы.
-- danger: пользователь хочет удалить/не сохранять/стереть тренировку.
-- unclear: непонятно.
-Ответ только JSON.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
-    )
-
-    return _safe_json_loads(response.choices[0].message.content or "{}")
+    """Kept for sync compatibility — prefer the async version."""
+    return {"action": "unclear", "confidence": 0.0, "summary": ""}
 
 
 async def _close_active_workout_session(telegram_user_id: str | None, active_session: dict, reason: str = "finished") -> str:
@@ -867,7 +863,7 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
 
     # If bot is waiting for finish confirmation, use AI parser as fallback.
     if status == "awaiting_finish_confirmation":
-        parsed = _parse_finish_confirmation_with_ai(text, active_session)
+        parsed = await _parse_finish_confirmation_with_ai_async(text, active_session)
         action = parsed.get("action")
         confidence = float(parsed.get("confidence") or 0)
 
@@ -890,6 +886,142 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
     return None
 
 
+async def _edit_plan(telegram_user_id: str | None, text: str, parsed: dict) -> str:
+    from app.db import (
+        get_best_planned_workout_for_edit,
+        add_exercise_to_planned_workout,
+        remove_exercise_from_planned_workout,
+        replace_exercise_in_planned_workout,
+    )
+    target = parsed.get("target") or {}
+    exercise_name = target.get("exercise_name")
+    target_date = parsed.get("date")
+
+    workout = await get_best_planned_workout_for_edit(telegram_user_id, target_date=target_date)
+    if not workout:
+        return "Не нашёл активный план для редактирования. Сначала создай план."
+
+    workout_id = workout.get("id")
+    summary = parsed.get("summary") or ""
+
+    # Ask Claude to figure out exact edit intent
+    edit_prompt = f"""
+Пользователь хочет изменить план тренировки (ID {workout_id}).
+
+Запрос: {text}
+Текущий план: {json.dumps(workout, ensure_ascii=False, default=str)}
+
+Верни JSON:
+{{
+  "operation": "add | remove | replace | unknown",
+  "exercise_name": "название упражнения",
+  "new_exercise_name": "новое название (только для replace)",
+  "sets": null,
+  "reps_min": null,
+  "reps_max": null,
+  "weight_kg": null
+}}
+Только JSON.
+"""
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=256,
+        system="Ты parser команд редактирования фитнес-плана. Ответ только JSON.",
+        messages=[{"role": "user", "content": edit_prompt}],
+    )
+    edit_parsed = _safe_json_loads(response.content[0].text if response.content else "{}")
+
+    operation = edit_parsed.get("operation")
+    ex_name = edit_parsed.get("exercise_name") or exercise_name
+
+    if operation == "add" and ex_name:
+        result = await add_exercise_to_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=workout_id,
+            exercise_name=ex_name,
+            target_sets=edit_parsed.get("sets") or 3,
+            target_reps_min=edit_parsed.get("reps_min"),
+            target_reps_max=edit_parsed.get("reps_max"),
+            target_weight_kg=edit_parsed.get("weight_kg"),
+            source_text=text,
+        )
+        if result.get("ok"):
+            return f"Добавил {ex_name} в план."
+        return result.get("message") or f"Не удалось добавить {ex_name}."
+
+    if operation == "remove" and ex_name:
+        result = await remove_exercise_from_planned_workout(
+            telegram_user_id=telegram_user_id,
+            planned_workout_id=workout_id,
+            exercise_name=ex_name,
+            source_text=text,
+        )
+        if result.get("ok"):
+            return f"Убрал {ex_name} из плана."
+        return result.get("message") or f"Упражнение {ex_name!r} не найдено в плане."
+
+    if operation == "replace" and ex_name:
+        new_name = edit_parsed.get("new_exercise_name")
+        if not new_name:
+            return "Не понял, на что заменить. Уточни: 'замени X на Y'."
+        result = await replace_exercise_in_planned_workout(
+            telegram_user_id=telegram_user_id,
+            target_date=target_date or date.today().isoformat(),
+            old_exercise_name=ex_name,
+            new_exercise_name=new_name,
+            source_text=text,
+        )
+        if result.get("ok"):
+            return f"Заменил {ex_name} на {new_name}."
+        return result.get("message") or f"Упражнение {ex_name!r} не найдено."
+
+    return f"Уточни что изменить: добавить, убрать или заменить упражнение?\n\nТекущий план: {workout.get('title', 'без названия')}"
+
+
+async def _show_progress(telegram_user_id: str | None, text: str, parsed: dict) -> str:
+    from app.db import get_last_workout, get_last_measurement, get_recent_exercise_history
+
+    target = parsed.get("target") or {}
+    exercise_name = target.get("exercise_name")
+
+    lines = []
+
+    if exercise_name:
+        history = await get_recent_exercise_history(telegram_user_id, exercise_key=exercise_name, limit_workouts=5)
+        if not history:
+            return f"Нет истории по упражнению «{exercise_name}»."
+        lines.append(f"История: {exercise_name}")
+        for entry in history[:5]:
+            date_str = str(entry.get("workout_date", ""))[:10]
+            sets_info = ", ".join(
+                f"{s.get('weight_kg')} кг × {s.get('reps')}"
+                for s in (entry.get("sets") or [])
+            )
+            lines.append(f"  {date_str}: {sets_info}")
+    else:
+        last = await get_last_workout(telegram_user_id)
+        if last:
+            lines.append(f"Последняя тренировка: {str(last.get('workout_date', ''))[:10]}")
+            for ex in (last.get("exercises") or [])[:5]:
+                sets_info = ", ".join(
+                    f"{s.get('weight_kg')} кг × {s.get('reps')}"
+                    for s in (ex.get("sets") or [])
+                )
+                lines.append(f"  {ex.get('exercise_name')}: {sets_info}")
+
+        measurement = await get_last_measurement(telegram_user_id)
+        if measurement:
+            lines.append(
+                f"\nПоследние замеры ({str(measurement.get('measured_at', ''))[:10]}): "
+                f"{measurement.get('weight_kg')} кг"
+            )
+
+    if not lines:
+        return "Данных пока нет. Начни записывать тренировки!"
+
+    return "\n".join(lines)
+
+
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
@@ -906,7 +1038,7 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     if history_reply is not None:
         return history_reply
 
-    parsed = parse_fitness_action_v2(text, active_session=active_session)
+    parsed = await parse_fitness_action_v2(text, active_session=active_session)
 
     action = parsed.get("action")
     confidence = float(parsed.get("confidence") or 0)
@@ -960,6 +1092,12 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
 
     if action == "correct_previous_action":
         return await _correct_previous_action(telegram_user_id, text, parsed, active_session)
+
+    if action == "edit_plan":
+        return await _edit_plan(telegram_user_id, text, parsed)
+
+    if action == "show_progress":
+        return await _show_progress(telegram_user_id, text, parsed)
 
     if action == "dangerous_delete":
         return (
