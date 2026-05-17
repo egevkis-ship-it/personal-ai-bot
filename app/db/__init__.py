@@ -237,6 +237,55 @@ async def init_db() -> None:
         );
         """))
 
+        # ═══ Самообучение ════════════════════════════════════════════
+        # Каждое сообщение бота вместе с входом — лог последнего взаимодействия.
+        # Если пользователь пишет фидбек ("неправильно понял", "не так", "запомни"),
+        # мы создаём корректировку, привязанную к последнему взаимодействию.
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS last_interaction (
+            telegram_user_id TEXT PRIMARY KEY,
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            input_text TEXT,
+            bot_response TEXT,
+            action TEXT,
+            parsed_json JSONB
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS learning_corrections (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            telegram_user_id TEXT,
+            original_input TEXT,
+            bot_response TEXT,
+            user_feedback TEXT,
+            correction_type TEXT, -- parser_error / format / naming / behavior / code_fix
+            rule_pattern TEXT,    -- когда применять (low-level паттерн от Claude)
+            rule_action TEXT,     -- что делать (правильный ответ/действие)
+            scope TEXT DEFAULT 'fitness', -- fitness / general / ops
+            status TEXT DEFAULT 'active', -- active / disabled / superseded
+            applied_count INTEGER DEFAULT 0,
+            notes TEXT
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_user_id TEXT,
+            key TEXT,
+            value TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (telegram_user_id, key)
+        );
+        """))
+
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_corrections_user_status
+        ON learning_corrections (telegram_user_id, status, created_at DESC);
+        """))
+
         # Helpful indexes
         await conn.execute(text("""
         CREATE INDEX IF NOT EXISTS idx_training_plans_user_status
@@ -724,6 +773,146 @@ async def get_last_workout(telegram_user_id: str | None) -> dict | None:
             "workout": dict(workout),
             "sets": [dict(row) for row in sets_result.mappings().all()],
         }
+
+
+async def save_last_interaction(
+    telegram_user_id: str | None,
+    input_text: str,
+    bot_response: str,
+    action: str | None = None,
+    parsed: dict | None = None,
+) -> None:
+    """Upsert the most recent user↔bot interaction for use by self-learning."""
+    import json as _json
+    if not telegram_user_id:
+        return
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""
+            INSERT INTO last_interaction (telegram_user_id, updated_at, input_text, bot_response, action, parsed_json)
+            VALUES (:uid, now(), :inp, :resp, :act, CAST(:parsed AS JSONB))
+            ON CONFLICT (telegram_user_id) DO UPDATE
+            SET updated_at = now(),
+                input_text = EXCLUDED.input_text,
+                bot_response = EXCLUDED.bot_response,
+                action = EXCLUDED.action,
+                parsed_json = EXCLUDED.parsed_json
+            """),
+            {
+                "uid": telegram_user_id,
+                "inp": input_text[:4000] if input_text else None,
+                "resp": bot_response[:4000] if bot_response else None,
+                "act": action,
+                "parsed": _json.dumps(parsed or {}, ensure_ascii=False),
+            },
+        )
+        await session.commit()
+
+
+async def get_last_interaction(telegram_user_id: str | None) -> dict | None:
+    if not telegram_user_id:
+        return None
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("SELECT * FROM last_interaction WHERE telegram_user_id = :uid"),
+            {"uid": telegram_user_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
+async def save_learning_correction(
+    telegram_user_id: str | None,
+    original_input: str | None,
+    bot_response: str | None,
+    user_feedback: str,
+    rule_pattern: str,
+    rule_action: str,
+    correction_type: str = "parser_error",
+    scope: str = "fitness",
+    notes: str | None = None,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO learning_corrections
+              (telegram_user_id, original_input, bot_response, user_feedback,
+               correction_type, rule_pattern, rule_action, scope, notes)
+            VALUES (:uid, :orig, :resp, :fb, :ct, :rp, :ra, :sc, :n)
+            RETURNING id
+            """),
+            {
+                "uid": telegram_user_id, "orig": original_input, "resp": bot_response,
+                "fb": user_feedback, "ct": correction_type, "rp": rule_pattern,
+                "ra": rule_action, "sc": scope, "n": notes,
+            },
+        )
+        cid = result.scalar()
+        await session.commit()
+        return cid
+
+
+async def get_active_corrections(
+    telegram_user_id: str | None,
+    scope: str = "fitness",
+    limit: int = 30,
+) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, original_input, user_feedback, rule_pattern, rule_action, correction_type
+            FROM learning_corrections
+            WHERE telegram_user_id = :uid AND scope = :sc AND status = 'active'
+            ORDER BY created_at DESC
+            LIMIT :lim
+            """),
+            {"uid": telegram_user_id, "sc": scope, "lim": limit},
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def disable_correction(correction_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE learning_corrections SET status = 'disabled' WHERE id = :id"),
+            {"id": correction_id},
+        )
+        await session.commit()
+
+
+async def increment_correction_applied(correction_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE learning_corrections SET applied_count = applied_count + 1 WHERE id = :id"),
+            {"id": correction_id},
+        )
+        await session.commit()
+
+
+async def set_user_preference(telegram_user_id: str | None, key: str, value: str) -> None:
+    if not telegram_user_id:
+        return
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""
+            INSERT INTO user_preferences (telegram_user_id, key, value)
+            VALUES (:uid, :k, :v)
+            ON CONFLICT (telegram_user_id, key) DO UPDATE SET value = :v, created_at = now()
+            """),
+            {"uid": telegram_user_id, "k": key, "v": value},
+        )
+        await session.commit()
+
+
+async def get_user_preferences(telegram_user_id: str | None) -> dict[str, str]:
+    if not telegram_user_id:
+        return {}
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("SELECT key, value FROM user_preferences WHERE telegram_user_id = :uid"),
+            {"uid": telegram_user_id},
+        )
+        return {r["key"]: r["value"] for r in result.mappings().all()}
 
 
 async def get_completed_workouts_in_period(

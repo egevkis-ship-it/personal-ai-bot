@@ -26,6 +26,14 @@ from app.db import (
 )
 from app.modules.fitness.exercise_history import handle_exercise_history_request
 from app.modules.fitness.router_hardening import handle_router_hardening
+from app.modules.fitness.self_learning import (
+    handle_self_correction,
+    handle_forget_request,
+    build_corrections_context,
+    is_correction_message,
+    is_forget_message,
+)
+from app.db import save_last_interaction
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_period_plan,
@@ -543,12 +551,24 @@ async def _save_monthly_plan(telegram_user_id: str | None, full_text: str) -> st
     return "\n".join(lines)
 
 
-async def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> dict:
+async def parse_fitness_action_v2(
+    text: str,
+    active_session: dict | None = None,
+    telegram_user_id: str | None = None,
+) -> dict:
     today = date.today().isoformat()
     current_week_start, current_week_end = week_bounds()
     next_week_start, next_week_end = next_week_bounds()
     month_start, month_end = month_bounds()
     next_month_start, next_month_end = next_month_bounds()
+
+    # ── Self-learning: inject active corrections from this user ──
+    corrections_block = ""
+    if telegram_user_id:
+        try:
+            corrections_block = await build_corrections_context(telegram_user_id)
+        except Exception:
+            corrections_block = ""
 
     system_prompt = f"""
 Ты главный parser фитнес-ассистента. Возвращай СТРОГО JSON без markdown.
@@ -561,9 +581,11 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 - Следующий месяц: {next_month_start} — {next_month_end}
 - Активная сессия: {json.dumps(active_session or {}, ensure_ascii=False)}
 
+{corrections_block}
+
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -720,6 +742,10 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 
 14. ПОМОЩЬ (help):
 - "что ты умеешь", "помощь", "как пользоваться", "команды"
+
+14b. ВЫУЧЕННЫЕ ПРАВИЛА (show_learned_rules):
+- "покажи правила", "что ты выучил", "какие у меня правила",
+- "список правил", "что ты запомнил"
 
 15. НЕ-ФИТНЕС сообщения → non_fitness:
 - "какая сегодня погода", "сколько времени", "найди ресторан", "напомни купить молоко", "что такое X"
@@ -1718,6 +1744,37 @@ async def _ask_clarification(text: str) -> str:
 
 
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
+    """Public entry. Wraps the inner handler with self-learning hooks."""
+
+    # ── Self-learning gate: feedback / forget messages bypass normal flow ──
+    forget_reply = await handle_forget_request(telegram_user_id, text)
+    if forget_reply:
+        return forget_reply
+
+    correction_reply = await handle_self_correction(telegram_user_id, text)
+    if correction_reply:
+        return correction_reply
+
+    # ── Normal flow ──
+    response = await _handle_fitness_action_v2_inner(telegram_user_id, text)
+
+    # Save last interaction for future self-corrections (fire & forget)
+    if response and telegram_user_id:
+        try:
+            await save_last_interaction(
+                telegram_user_id=telegram_user_id,
+                input_text=text,
+                bot_response=response,
+                action=None,
+                parsed=None,
+            )
+        except Exception:
+            pass
+
+    return response
+
+
+async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: str) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
 
@@ -1832,7 +1889,7 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     )
 
     if is_multi_exercise_record and not active_session:
-        parsed_multi = await parse_fitness_action_v2(text, active_session=active_session)
+        parsed_multi = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id)
         if parsed_multi.get("action") == "log_workout_sets" and parsed_multi.get("logged_exercises"):
             return await _log_workout_sets(telegram_user_id, text, parsed_multi, active_session)
 
@@ -1849,7 +1906,7 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     if history_reply is not None:
         return history_reply
 
-    parsed = await parse_fitness_action_v2(text, active_session=active_session)
+    parsed = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id)
 
     action = parsed.get("action")
     confidence = float(parsed.get("confidence") or 0)
@@ -2004,6 +2061,9 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     if action == "help":
         return _help_text()
 
+    if action == "show_learned_rules":
+        return await _show_learned_rules(telegram_user_id)
+
     if action == "show_next_workout":
         from app.db import get_next_planned_workout
         nxt = await get_next_planned_workout(telegram_user_id)
@@ -2142,6 +2202,37 @@ async def _move_or_copy_workout(telegram_user_id: str | None, parsed: dict, copy
             """), {"to_d": to_date, "sid": row["id"]})
             await session.commit()
             return f"📅 Перенёс тренировку с {format_human_date(from_date)} на {format_human_date(to_date)}."
+
+
+async def _show_learned_rules(telegram_user_id: str | None) -> str:
+    from app.db import get_active_corrections, get_user_preferences
+    rules = await get_active_corrections(telegram_user_id, scope="fitness", limit=50)
+    prefs = await get_user_preferences(telegram_user_id)
+
+    if not rules and not prefs:
+        return (
+            "Пока ничего не выучил.\n\n"
+            "Чтобы научить меня: после моего ответа скажи «понял неправильно: ...» "
+            "или «когда я говорю X — это Y». Я запомню и применю в следующих ответах."
+        )
+
+    lines = ["🧠 Что я выучил:", ""]
+    if rules:
+        lines.append("Правила парсинга/поведения:")
+        for r in rules:
+            pattern = (r.get("rule_pattern") or "")[:80]
+            action = (r.get("rule_action") or "")[:100]
+            lines.append(f"  #{r['id']} [{r['correction_type']}]")
+            lines.append(f"    если: {pattern}")
+            lines.append(f"    тогда: {action}")
+        lines.append("")
+    if prefs:
+        lines.append("Предпочтения:")
+        for k, v in prefs.items():
+            lines.append(f"  • {k} = {v}")
+    lines.append("")
+    lines.append("Отключить правило: «забудь правило #N»")
+    return "\n".join(lines)
 
 
 async def _compare_weeks(telegram_user_id: str | None) -> str:
