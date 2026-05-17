@@ -273,6 +273,26 @@ async def init_db() -> None:
         ON body_measurements (telegram_user_id, measurement_date);
         """))
 
+        # Forward-compat: % жира + длительность упражнения (для кардио/планки)
+        await conn.execute(text("""
+        ALTER TABLE body_measurements ADD COLUMN IF NOT EXISTS bodyfat_pct NUMERIC;
+        """))
+        await conn.execute(text("""
+        ALTER TABLE fitness_exercise_sets ADD COLUMN IF NOT EXISTS duration_seconds INTEGER;
+        """))
+        await conn.execute(text("""
+        ALTER TABLE fitness_exercise_sets ADD COLUMN IF NOT EXISTS distance_m NUMERIC;
+        """))
+        await conn.execute(text("""
+        ALTER TABLE fitness_exercise_sets ADD COLUMN IF NOT EXISTS is_warmup BOOLEAN DEFAULT false;
+        """))
+        await conn.execute(text("""
+        ALTER TABLE planned_exercises ADD COLUMN IF NOT EXISTS superset_group TEXT;
+        """))
+        await conn.execute(text("""
+        ALTER TABLE planned_exercises ADD COLUMN IF NOT EXISTS tempo TEXT;
+        """))
+
         # Compatibility migrations if older tables already existed
         await conn.execute(text("""
         ALTER TABLE fitness_workouts

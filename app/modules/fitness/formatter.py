@@ -417,7 +417,8 @@ def format_completed_period(workouts: list[dict], title: str) -> str:
 
         grouped: dict[str, list[dict]] = {}
         for s in sets:
-            grouped.setdefault(s["exercise_name"], []).append(s)
+            ex_name = s.get("exercise_name") or "Упражнение"
+            grouped.setdefault(ex_name, []).append(s)
 
         for ex_name, ex_sets in grouped.items():
             parts = []

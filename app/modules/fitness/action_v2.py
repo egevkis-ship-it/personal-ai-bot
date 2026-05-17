@@ -132,7 +132,7 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
 
         sets = []
         for i, s in enumerate(ex.get("sets") or [], start=1):
-            reps = s.get("reps")
+            reps_raw = s.get("reps")
             weight = s.get("weight_kg")
             notes = s.get("notes")
             tags = []
@@ -142,14 +142,34 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
                 tags.append("дроп")
             if s.get("is_failure"):
                 tags.append("до отказа")
+            duration = s.get("duration_seconds") or s.get("duration_sec")
+            distance = s.get("distance_m") or s.get("distance_meters")
+            if duration:
+                tags.append(f"{duration} с")
+            if distance:
+                tags.append(f"{distance} м")
+
+            # reps может прийти строкой (AMRAP, до отказа) — конвертим в int или сдвигаем в notes
+            reps_int: int | None = None
+            if isinstance(reps_raw, (int, float)):
+                reps_int = int(reps_raw)
+            elif isinstance(reps_raw, str):
+                m = re.search(r"\d+", reps_raw)
+                if m:
+                    reps_int = int(m.group())
+                else:
+                    tags.append(reps_raw)
+
             if tags:
                 notes = (notes + " | " if notes else "") + ", ".join(tags)
-            if reps is None and weight is None and not notes:
+
+            if reps_int is None and weight is None and not notes and not duration:
                 continue
+
             sets.append({
                 "set_number": s.get("set_number") or i,
                 "weight_kg": weight,
-                "reps": reps,
+                "reps": reps_int,
                 "rpe": s.get("rpe"),
                 "notes": notes,
             })
@@ -543,7 +563,7 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -611,6 +631,9 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 - "что я делал в прошлую неделю", "тренировки прошлой недели" → show_completed_period с period.start_date/end_date
 - "что я сделал в этом месяце", "отчёт за месяц", "сводка за месяц", "тренировки месяца" → show_completed_month
 - "за период с X по Y", "с понедельника по пятницу", "с 1 по 15 мая" → show_completed_period
+- "что дальше", "следующая тренировка", "когда след треня", "что у меня дальше по плану" → show_next_workout
+- "сравни эту неделю с прошлой", "сравни недели", "прогресс по неделям" → compare_weeks
+- "сводка", "быстрая статистика", "что у меня", "статус", "кратко" (без указания периода) → quick_stats
 - "как у меня жим", "прогресс по приседу", "история жима", "сколько я жал" → show_exercise_stats. target.exercise_name = "жим штанги".
 - "мои рекорды", "PR", "ПР", "личный рекорд по жиму", "максимум" → show_personal_records
 - "сколько раз я приседал в этом месяце", "статистика за месяц" → show_progress с period.
@@ -650,11 +673,13 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 - Если есть активная сессия и: "третий 20 на 10", "следующий 20 на 8", "ещё 20 на 6" → continue_current_exercise
 - "закончил тренировку", "всё, хватит", "финиш", "сохраняй" → finish_workout
 
-5. ИСПРАВЛЕНИЯ (correct_previous_action):
-- "не 20, а 17.5", "во втором было 12, не 10"
-- "ой, не на сегодня — на пятницу", "перепутал, не жим а тяга"
-→ correct_previous_action. correction.field/old/new.
-- "удали последний подход", "убери последний сет", "не последний" → delete_last_set
+5. ИСПРАВЛЕНИЯ (correct_previous_action / edit_last_set / delete_last_set):
+- "не 20, а 17.5" / "во втором было 12, не 10" / "поменяй последний на 80×6"
+- "поправь последний подход: 85×5", "исправь второй: 80×8"
+→ edit_last_set если правится последний/конкретный подход в активной сессии.
+  Поставь target.set_number (если указан), correction.field ("weight_kg" или "reps"), correction.new_value.
+- "ой, не на сегодня — на пятницу", "перепутал, не жим а тяга" → correct_previous_action.
+- "удали последний подход", "убери последний сет", "не последний", "удали" в активной сессии → delete_last_set
 
 6. ПЕРЕМЕЩЕНИЕ ТРЕНИРОВКИ (move_workout / copy_workout):
 - "перенеси пятницу на среду", "сегодняшнюю на завтра"
@@ -1979,6 +2004,22 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     if action == "help":
         return _help_text()
 
+    if action == "show_next_workout":
+        from app.db import get_next_planned_workout
+        nxt = await get_next_planned_workout(telegram_user_id)
+        if not nxt:
+            return "Дальше по плану ничего нет — добавь тренировки или импортируй программу."
+        return "Следующая тренировка:\n\n" + format_planned_workout(nxt)
+
+    if action == "compare_weeks":
+        return await _compare_weeks(telegram_user_id)
+
+    if action == "quick_stats":
+        return await _quick_stats(telegram_user_id)
+
+    if action == "edit_last_set":
+        return await _edit_last_set(telegram_user_id, parsed, active_session)
+
     if action == "non_fitness":
         # Делегируем общему AI-ответчику, не ломая активную сессию
         from app.ai import generate_general_answer
@@ -2074,9 +2115,9 @@ async def _move_or_copy_workout(telegram_user_id: str | None, parsed: dict, copy
             new_id = await session.execute(sql_text("""
                 INSERT INTO planned_workouts
                   (telegram_user_id, planned_date, title, focus, focus_label,
-                   workout_type, status, notes, plan_id, source)
+                   workout_type, status, notes, plan_id, source_text)
                 SELECT telegram_user_id, :to_d, title, focus, focus_label,
-                       workout_type, 'planned', notes, plan_id, 'copy'
+                       workout_type, 'planned', notes, plan_id, 'copy_from_' || :sid::text
                 FROM planned_workouts WHERE id = :sid
                 RETURNING id
             """), {"to_d": to_date, "sid": row["id"]})
@@ -2101,6 +2142,149 @@ async def _move_or_copy_workout(telegram_user_id: str | None, parsed: dict, copy
             """), {"to_d": to_date, "sid": row["id"]})
             await session.commit()
             return f"📅 Перенёс тренировку с {format_human_date(from_date)} на {format_human_date(to_date)}."
+
+
+async def _compare_weeks(telegram_user_id: str | None) -> str:
+    """Compare this week's volume vs previous week."""
+    from datetime import timedelta
+    cur_start, cur_end = week_bounds()
+    cur_start_d = datetime.strptime(cur_start, "%Y-%m-%d").date()
+    prev_start = (cur_start_d - timedelta(days=7)).isoformat()
+    prev_end = (cur_start_d - timedelta(days=1)).isoformat()
+
+    cur = await get_completed_workouts_in_period(telegram_user_id, cur_start, cur_end)
+    prev = await get_completed_workouts_in_period(telegram_user_id, prev_start, prev_end)
+
+    def stats(workouts):
+        total_sets = 0
+        total_tonnage = 0.0
+        for w in workouts:
+            for s in (w.get("sets") or []):
+                total_sets += 1
+                try:
+                    if s.get("weight_kg") and s.get("reps"):
+                        total_tonnage += float(s["weight_kg"]) * int(s["reps"])
+                except Exception:
+                    pass
+        return len(workouts), total_sets, round(total_tonnage, 1)
+
+    cw, cs, ct = stats(cur)
+    pw, ps, pt = stats(prev)
+
+    def diff(a, b, unit=""):
+        if b == 0:
+            return f"{a}{unit} (на прошлой неделе 0)"
+        delta = a - b
+        sign = "▲" if delta > 0 else ("▼" if delta < 0 else "≈")
+        pct = round((a - b) / b * 100, 1) if b else 0
+        return f"{a}{unit} vs {b}{unit} ({sign} {delta:+}{unit}, {pct:+}%)"
+
+    lines = [
+        f"Сравнение недель:",
+        f"  {format_human_date(prev_start, include_weekday=False)} — {format_human_date(prev_end, include_weekday=False)}  vs",
+        f"  {format_human_date(cur_start, include_weekday=False)} — {format_human_date(cur_end, include_weekday=False)}",
+        "",
+        f"Тренировок: {diff(cw, pw)}",
+        f"Подходов: {diff(cs, ps)}",
+        f"Тоннаж: {diff(ct, pt, ' кг')}",
+    ]
+    return "\n".join(lines)
+
+
+async def _quick_stats(telegram_user_id: str | None) -> str:
+    """Quick overview: today's plan, this week's done, last workout, next workout."""
+    today = date.today().isoformat()
+    today_plan = await get_today_planned_workout(telegram_user_id, today)
+    week_start, week_end = week_bounds()
+    week_done = await get_completed_workouts_in_period(telegram_user_id, week_start, week_end)
+    last = await get_last_workout(telegram_user_id)
+    from app.db import get_next_planned_workout
+    nxt = await get_next_planned_workout(telegram_user_id)
+
+    lines = ["📊 Быстрая сводка:", ""]
+    if today_plan:
+        title = today_plan["workout"].get("title") or today_plan["workout"].get("focus_label") or "Тренировка"
+        ex_count = len(today_plan.get("exercises") or [])
+        lines.append(f"• Сегодня по плану: {title} ({ex_count} упр.)")
+    else:
+        lines.append("• Сегодня: плана нет")
+
+    lines.append(f"• Сделано на этой неделе: {len(week_done)} тренировок")
+
+    if last:
+        lw = last["workout"]
+        lines.append(f"• Последняя: {format_human_date(lw.get('workout_date'))} — {lw.get('focus_label') or lw.get('focus') or '—'}")
+
+    if nxt:
+        nd = nxt["workout"].get("planned_date")
+        title = nxt["workout"].get("title") or nxt["workout"].get("focus_label") or "Тренировка"
+        lines.append(f"• Следующая: {format_human_date(nd)} — {title}")
+
+    return "\n".join(lines)
+
+
+async def _edit_last_set(
+    telegram_user_id: str | None,
+    parsed: dict,
+    active_session: dict | None,
+) -> str:
+    """Edit weight/reps of the last (or specific) set in the active workout."""
+    if not active_session or not active_session.get("workout_id"):
+        # Try to use last completed workout
+        last = await get_last_workout(telegram_user_id)
+        if not last:
+            return "Не нашёл активной сессии и записанных тренировок для исправления."
+        workout_id = last["workout"]["id"]
+    else:
+        workout_id = int(active_session["workout_id"])
+
+    correction = parsed.get("correction") or {}
+    field = correction.get("field") or "weight_kg"
+    new_value = correction.get("new_value")
+    if new_value is None:
+        return "Не понял что менять. Скажи, например: «не 80, а 85», «поменяй последний на 90×6»."
+
+    target = parsed.get("target") or {}
+    set_number = target.get("set_number")
+
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    async with get_session() as session:
+        if set_number:
+            row = await session.execute(sql_text("""
+                SELECT id, exercise_name, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid AND set_number = :sn
+                ORDER BY id DESC LIMIT 1
+            """), {"wid": workout_id, "sn": int(set_number)})
+        else:
+            row = await session.execute(sql_text("""
+                SELECT id, exercise_name, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                ORDER BY id DESC LIMIT 1
+            """), {"wid": workout_id})
+        rec = row.mappings().first()
+        if not rec:
+            return "Не нашёл подход для правки."
+
+        if field == "reps":
+            await session.execute(
+                sql_text("UPDATE fitness_exercise_sets SET reps = :v WHERE id = :id"),
+                {"v": int(new_value), "id": rec["id"]},
+            )
+        else:
+            await session.execute(
+                sql_text("UPDATE fitness_exercise_sets SET weight_kg = :v WHERE id = :id"),
+                {"v": float(new_value), "id": rec["id"]},
+            )
+        await session.commit()
+
+    return (
+        f"✏️ Поправил: {rec['exercise_name']}, подход {set_number or 'последний'}, "
+        f"{field}={new_value} (было: {rec['weight_kg']} кг × {rec['reps']})."
+    )
 
 
 def _help_text() -> str:
@@ -2139,7 +2323,8 @@ def _looks_like_fitness_text(text: str) -> bool:
         "штанг", "гантел", "блок", "канат", "тренаж", "брус",
         "подтяг", "отжим", "пресс", "икр",
         "рпе", "rpe", "rir", "amrap", "дроп",
-        "суперсет", "пирамид", "тоннаж", "пр", "рекорд",
+        "суперсет", "пирамид", "тоннаж", "рекорд",
+        " пр", " pr", "1пм", "1rm",
         "вес тела", "талия", "замер", "% жира",
         "сделал", "сделала", "записать", "запиши",
         "план", "программа", "график",
