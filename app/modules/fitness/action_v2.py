@@ -72,7 +72,10 @@ def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
         weight = ex.get("target_weight_kg") or ex.get("weight_kg")
 
         # Merge warmup_sets into notes for storage
-        notes = ex.get("notes") or ""
+        notes_parts = []
+        if ex.get("notes"):
+            notes_parts.append(str(ex["notes"]).strip())
+
         warmup = ex.get("warmup_sets") or []
         if warmup:
             warmup_str = "Разминка: " + ", ".join(
@@ -80,7 +83,18 @@ def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
                 if w.get('reps_max') else f"{w.get('weight_kg')}×{w.get('reps_min', '')}"
                 for w in warmup
             )
-            notes = (notes + "\n" + warmup_str).strip() if notes else warmup_str
+            notes_parts.append(warmup_str)
+
+        if ex.get("superset_group"):
+            notes_parts.append(f"Суперсет: {ex['superset_group']}")
+        if ex.get("tempo"):
+            notes_parts.append(f"Темп: {ex['tempo']}")
+        if ex.get("rpe") is not None:
+            notes_parts.append(f"RPE {ex['rpe']}")
+        if ex.get("rest_seconds"):
+            notes_parts.append(f"Отдых: {ex['rest_seconds']} с")
+
+        notes = "\n".join(notes_parts) or None
 
         result.append({
             "exercise_order": ex.get("exercise_order") or i,
@@ -90,7 +104,7 @@ def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
             "target_reps_max": reps_max,
             "target_reps_text": reps_text,
             "target_weight_kg": weight,
-            "notes": notes or None,
+            "notes": notes,
         })
     return result
 
@@ -111,21 +125,34 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
         for i, s in enumerate(ex.get("sets") or [], start=1):
             reps = s.get("reps")
             weight = s.get("weight_kg")
-            if reps is None and weight is None:
+            notes = s.get("notes")
+            tags = []
+            if s.get("is_warmup"):
+                tags.append("разминка")
+            if s.get("is_drop"):
+                tags.append("дроп")
+            if s.get("is_failure"):
+                tags.append("до отказа")
+            if tags:
+                notes = (notes + " | " if notes else "") + ", ".join(tags)
+            if reps is None and weight is None and not notes:
                 continue
             sets.append({
                 "set_number": s.get("set_number") or i,
                 "weight_kg": weight,
                 "reps": reps,
                 "rpe": s.get("rpe"),
-                "notes": s.get("notes"),
+                "notes": notes,
             })
 
         if sets:
+            ex_notes = ex.get("notes")
+            if ex.get("superset_group"):
+                ex_notes = (ex_notes + " | " if ex_notes else "") + f"Суперсет: {ex['superset_group']}"
             result.append({
                 "exercise_name": name,
                 "sets": sets,
-                "notes": ex.get("notes"),
+                "notes": ex_notes,
             })
 
     return result
@@ -192,17 +219,46 @@ async def parse_complex_workout_plan(text: str, target_date: str | None = None) 
 
 Пользователь описал детальную тренировку. Распарси её ПОЛНОСТЬЮ в JSON.
 
-ПРАВИЛА ПАРСИНГА:
-- Разминочные подходы (секция "Разминка:") → sets с пометкой "is_warmup": true
-- Рабочие подходы (секция "Рабочие подходы:" или без метки) → is_warmup: false
-- Диапазон повторений "10–12" или "10-12" → target_reps_min=10, target_reps_max=12
-- "90 кг × 10–12 × 4 подхода" → target_sets=4, weight=90, reps_min=10, reps_max=12
-- "25 кг × 10–12 × 4 подхода" → target_sets=4, weight=25, reps_min=10, reps_max=12
-- Настройки тренажёра, пометки ("не до отказа", "сидушка — 2 дырки") → notes упражнения
-- Запятая или тире в весе: "8–9 кг" → weight_min=8, weight_max=9, target_weight_kg=8.5
-- Если дата явно указана ("завтра", "понедельник", конкретное число) — вычисли planned_date
+═══ ОБЩИЕ ПРАВИЛА ═══
+- Разминочные подходы (секция "Разминка:", "разминочные", "разогрев") → warmup_sets массив + notes
+- Рабочие подходы (секция "Рабочие:", "Working sets", или без явной метки) → target_sets/reps/weight
+- Десятичные: "17,5" → 17.5
+- Диапазон повторений "10–12" / "10-12" / "10..12" / "от 10 до 12" → target_reps_min=10, target_reps_max=12
+- Точные повторы "10" → target_reps_min=10, target_reps_max=10
+- Диапазон весов "8–9 кг" / "8-9кг" → target_weight_kg=8.5, notes="Диапазон веса: 8–9 кг"
+- Настройки тренажёра ("сидушка — 2 дырки", "наклон 30°", "узкий хват") → notes упражнения
+- Цели ("Цель: 90×12", "сделать лучше чем"), условия ("если получится", "только если") → notes
+- "AMRAP" / "до отказа" / "макс" → target_reps_text="AMRAP", target_reps_min=null
+- RPE/RIR ("RPE 8", "RIR 2", "оставь 2 в запасе") → notes
+- Темп "3-1-2-0" / "3010" → notes ("Темп: 3-1-2-0")
+- % от 1ПМ ("80% 1ПМ", "@75%") → notes
 
-Верни JSON строго:
+═══ НОТАЦИИ ПОДХОДОВ (распознавай ВСЕ) ═══
+- "90 кг × 10 × 4 подхода" / "90×10×4" / "4 подхода 90 на 10" / "4×10 с 90 кг" → 4 sets, 90 kg, 10 reps
+- "4 на 10, 90 кг" / "4 по 10 90кг" / "4х10 90" → 4 sets, 90 kg, 10 reps
+- "3 подхода по 12 повторений с 50 кг" → 3 sets, 50 kg, 12 reps
+- Перечисление каждого подхода:
+    "90×12 / 90×12 / 90×8 / 90×8" → 4 явных подхода
+    "60-70-80-70-60" (пирамида) → target_sets=5, notes="Пирамида: 60-70-80-70-60"
+    "65/70/70/65" → target_sets=4, target_weight_kg=65 (min), notes="Прогрессия по подходам: 65/70/70/65"
+- "5×5" / "5*5" / "5x5" → target_sets=5, target_reps_min=5
+- "3×AMRAP" → target_sets=3, target_reps_text="AMRAP"
+- "до отказа × 3 подхода" → target_sets=3, target_reps_text="до отказа"
+- "100×5, отдых 15с, ×3, отдых 15с, ×2" (rest-pause/cluster) → target_sets=3, notes="Rest-pause 5+3+2"
+- "80→70→60×8" (drop set) → target_sets=3, notes="Drop set: 80→70→60×8"
+- "21" (биц 7+7+7) → target_reps_text="21 (7+7+7)"
+
+═══ СУПЕРСЕТЫ И КОМПЛЕКСЫ ═══
+- "Суперсет: A) жим лёжа 4×10 + B) тяга 4×10" → у обоих exercises: superset_group="A"
+- "СС1: ..., СС2: ..." → группы superset_group="СС1", "СС2"
+- "1A. Жим / 1B. Тяга / 2A. Присед / 2B. Сгибание" → группы "1", "2"
+- "Трисет: A) ... B) ... C) ..." → у всех трёх superset_group одинаковый, superset_size=3
+- "Круговая: ..., 4 круга" → каждое упражнение superset_group="круг", target_sets=4
+- "Гигантский сет" / "Giant set" → superset_group="гигант"
+- "Мехдроп" / "механический дроп" → notes
+- Если суперсета НЕТ — superset_group=null
+
+═══ JSON-СХЕМА (СТРОГО) ═══
 {{
   "action": "add_custom_workout",
   "confidence": 0.95,
@@ -210,7 +266,7 @@ async def parse_complex_workout_plan(text: str, target_date: str | None = None) 
   "workout": {{
     "title": "Грудь силовая + дельта + трицепс",
     "focus": "chest",
-    "focus_label": "грудь",
+    "focus_label": "грудь + дельта + трицепс",
     "notes": null,
     "exercises": [
       {{
@@ -218,30 +274,26 @@ async def parse_complex_workout_plan(text: str, target_date: str | None = None) 
         "target_sets": 4,
         "target_reps_min": 10,
         "target_reps_max": 12,
+        "target_reps_text": null,
         "target_weight_kg": 90,
-        "notes": "Разминка: 20×8, 50×8, 70×6, 80×3",
+        "rpe": null,
+        "superset_group": null,
+        "tempo": null,
+        "rest_seconds": null,
+        "notes": "Цель: 90×12/12/8/8. Разминка: 20×8, 50×8, 70×6, 80×3",
         "warmup_sets": [
           {{"weight_kg": 20, "reps_min": 8, "reps_max": 10}},
           {{"weight_kg": 50, "reps_min": 8, "reps_max": 10}},
           {{"weight_kg": 70, "reps_min": 6, "reps_max": 8}},
           {{"weight_kg": 80, "reps_min": 3, "reps_max": 5}}
         ]
-      }},
-      {{
-        "exercise_name": "Жим гантелей под углом",
-        "target_sets": 4,
-        "target_reps_min": 10,
-        "target_reps_max": 12,
-        "target_weight_kg": 25,
-        "notes": null,
-        "warmup_sets": []
       }}
     ]
   }},
   "summary": "Тренировка грудь + дельта + трицепс на {today}"
 }}
 
-Только JSON. Без markdown. Распарси ВСЕ упражнения из текста."""
+Только JSON. Без markdown. Распарси ВСЕ упражнения из текста. Не теряй ни одного."""
 
     response = await claude_client.messages.create(
         model="claude-sonnet-4-6",
@@ -258,35 +310,65 @@ async def parse_weekly_plan(text: str) -> dict:
     week_start, week_end = week_bounds()
     next_start, next_end = next_week_bounds()
 
-    system_prompt = f"""Ты парсер недельной программы тренировок. Сегодня: {today}.
+    system_prompt = f"""Ты парсер недельной/многодневной программы тренировок. Сегодня: {today}.
 Текущая неделя: {week_start} — {week_end}. Следующая: {next_start} — {next_end}.
 
-Распарси КАЖДЫЙ день как отдельную тренировку. Распарси ВСЕ упражнения полностью.
+Распарси КАЖДЫЙ день как отдельную тренировку. Распарси ВСЕ упражнения. Ничего не теряй.
 
-ПРАВИЛА ПАРСИНГА:
-- Каждый заголовок дня (Понедельник, Вторник, Среда, Четверг, Пятница, Суббота) → отдельный объект
-- planned_date: вычисли ближайший такой день недели от сегодня (или используй указанную дату)
-- weekday: "monday"/"tuesday"/"wednesday"/"thursday"/"friday"/"saturday"/"sunday"
-- "90×8–12×4" или "90 кг × 8–12 × 4" → target_sets=4, weight=90, reps_min=8, reps_max=12
-- "65/70/70/65×10–12" → weight=65 (первый), notes="прогрессия: 65/70/70/65"
-- Перечисление подходов ("90×10–12 / 90×10–12 / 90×8–10 / 90×8–10") → target_sets=4, weight=90
-- Диапазон весов "8–9 кг" → target_weight_kg=8.5
-- "3 × 12–15" (без веса) → target_sets=3, reps_min=12, reps_max=15, target_weight_kg=null
-- "Разминка: ..." → сохрани в notes упражнения как "Разминка: 20×8-10, 50×8-10..."
-- "Рабочие:" → это основные подходы, используй их для target_sets/weight/reps
-- "Вариант А / Вариант Б" → используй Вариант А как основной, Вариант Б → notes
-- "Если X было легко" / "только если колени спокойны" / "если плечи живые" → notes
-- "Цель: ..." → notes упражнения
-- Настройки тренажёра ("сидушка — 2 дырки") → notes
-- "1. 5 кг" в контексте жима гантелей — это "17.5 кг" (артефакт форматирования)
-- Определи focus каждого дня: chest/back/legs/shoulders/arms/full_body/cardio
+═══ ДАТЫ И ДНИ ═══
+- Заголовки: "Понедельник"/"Пн"/"ПН", "Вторник"/"Вт", "Среда"/"Ср", "Четверг"/"Чт", "Пятница"/"Пт", "Суббота"/"Сб", "Воскресенье"/"Вс"
+- "День 1" / "Day 1" / "A" (в ABC/PPL/AB схемах) → если пользователь сказал "со следующего понедельника", раскладывай по порядку начиная с понедельника
+- "Push / Pull / Legs" (PPL) → 3 тренировки, не привязаны к датам (planned_date=null, weekday=null), если не сказано иначе
+- Если сказано "на следующую неделю" → planned_date в диапазоне {next_start} — {next_end}
+- Если сказано "на этой неделе" → planned_date в диапазоне {week_start} — {week_end}
+- "Отдых" / "rest day" / "восстановление" → создай день с title="Отдых", exercises=[]
+- weekday: "monday"/"tuesday"/"wednesday"/"thursday"/"friday"/"saturday"/"sunday" или null
 
-Верни JSON:
+═══ ОБОЗНАЧЕНИЯ ПОДХОДОВ (распознавай все варианты) ═══
+- "90 кг × 10–12 × 4 подхода" / "90×10–12×4" / "4 по 10-12 90кг" / "4 на 10-12 с 90" → 4 sets, 90 kg, 10–12 reps
+- "4×10" / "4х10" / "4*10" / "4 на 10" / "4 по 10" → 4 sets × 10 reps
+- "5×5 @ 80" / "5×5 80кг" → 5×5 с 80 кг
+- "90×12 / 90×12 / 90×8 / 90×8" → target_sets=4, target_weight_kg=90, target_reps_min=8, target_reps_max=12
+- "65/70/70/65 × 10–12" (4 подхода с разными весами) → target_sets=4, target_weight_kg=65, notes="Прогрессия: 65/70/70/65×10–12"
+- "10/10/8/8" (одинаковый вес, разные повторы) → target_sets=4
+- "60-70-80-70-60" (пирамида) → target_sets=5, notes="Пирамида: 60-70-80-70-60"
+- "8–9 кг" (диапазон веса) → target_weight_kg=8.5, notes="Диапазон: 8–9 кг"
+- "3 × 12–15" (без веса, своим весом) → target_sets=3, target_weight_kg=null
+- "AMRAP", "до отказа", "до жжения", "макс" → target_reps_text="AMRAP" или "до отказа", target_reps_min=null
+- "5+5+5" (rest-pause) → notes="Rest-pause 5+5+5", target_sets=1
+- "80→70→60×8" (drop set) → notes="Drop set 80→70→60×8"
+- "21s" (биц) → target_reps_text="21 (7+7+7)"
+- "RPE 8" / "RIR 2" → rpe=8 (или сохраняй в notes если нет поля)
+- Темп "3-1-2-0" / "3010" → tempo поле или notes
+- "%" от 1ПМ ("@75%") → notes
+
+═══ СУПЕРСЕТЫ И КОМПЛЕКСЫ ═══
+- "Суперсет А) ... Б) ..." / "СС1: ... + ..." / "1A. ... 1B. ..." → у этих упражнений одинаковый superset_group
+- "Трисет" → 3 упражнения в одной superset_group
+- "Круговая: ..., 4 круга" → superset_group="круг1", target_sets=4
+- Если не суперсет → superset_group=null
+
+═══ ОСОБЫЕ КОНСТРУКЦИИ ═══
+- "Разминка: 20×8, 50×8, 70×6, 80×3" → сохрани В notes упражнения как "Разминка: ..."
+- "Рабочие:" / "рабочие подходы:" — это основные, используй для target_sets/weight/reps
+- "Вариант А / Вариант Б" → Вариант А = основные target_*, Вариант Б → notes
+- "Если X легко — переходи на Y", "только если колени спокойны", "если плечи живые" → notes
+- "Цель: 90×12 / 90×12 / 90×8 / 90×8" → notes
+- "Опционально" / "если останутся силы" → notes ("Опционально")
+- Настройки тренажёра ("сидушка — 2 дырки", "наклон 30°", "узкий хват") → notes
+- "Не до отказа", "техника важнее веса", "чисто, без читинга" → notes
+- "Компенсация 50 кг" (гравитрон) → target_weight_kg=50, notes="Компенсация (гравитрон)"
+- "7–10 минут" (кардио) → target_reps_text="7–10 минут", target_sets=1
+
+═══ FOCUS КАЖДОГО ДНЯ ═══
+chest / back / legs / shoulders / arms / full_body / push / pull / cardio / abs / rest
+
+═══ JSON-СХЕМА (СТРОГО) ═══
 {{
   "action": "create_weekly_plan",
   "confidence": 0.95,
   "plan": {{
-    "plan_name": "Программа",
+    "plan_name": "Программа недели",
     "period_type": "week",
     "start_date": "{week_start}",
     "end_date": "{week_end}",
@@ -304,17 +386,21 @@ async def parse_weekly_plan(text: str) -> dict:
             "target_sets": 4,
             "target_reps_min": 8,
             "target_reps_max": 12,
+            "target_reps_text": null,
             "target_weight_kg": 90,
-            "notes": "Разминка: 20×8-10, 50×8-10, 70×6-8, 80×3-5"
+            "rpe": null,
+            "superset_group": null,
+            "tempo": null,
+            "notes": "Цель: 90×12/12/8/8. Разминка: 20×8-10, 50×8-10, 70×6-8, 80×3-5"
           }}
         ]
       }}
     ]
   }},
-  "summary": "5 тренировок"
+  "summary": "5 тренировок на неделю"
 }}
 
-Только JSON. Без markdown."""
+Только JSON. Без markdown. Распарси ВСЕ упражнения. Не пропускай дни."""
 
     response = await claude_client.messages.create(
         model="claude-sonnet-4-6",
@@ -436,36 +522,31 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
     next_month_start, next_month_end = next_month_bounds()
 
     system_prompt = f"""
-Ты главный parser фитнес-ассистента Егора.
+Ты главный parser фитнес-ассистента. Возвращай СТРОГО JSON без markdown.
 
-Сегодня: {today}
-Текущая неделя: {current_week_start} — {current_week_end}
-Следующая неделя: {next_week_start} — {next_week_end}
-Текущий месяц: {month_start} — {month_end}
-Следующий месяц: {next_month_start} — {next_month_end}
+Контекст:
+- Сегодня: {today}
+- Текущая неделя: {current_week_start} — {current_week_end}
+- Следующая неделя: {next_week_start} — {next_week_end}
+- Текущий месяц: {month_start} — {month_end}
+- Следующий месяц: {next_month_start} — {next_month_end}
+- Активная сессия: {json.dumps(active_session or {}, ensure_ascii=False)}
 
-Активная тренировочная сессия, если есть:
-{json.dumps(active_session or {}, ensure_ascii=False)}
-
-Твоя задача — вернуть СТРОГО JSON, без markdown.
-
-Схема:
+═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | correct_previous_action | delete_last_set | edit_plan | show_progress | add_note | import_program | export_workouts | dangerous_delete | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
-  "period": {{
-    "start_date": null,
-    "end_date": null,
-    "period_type": null
-  }},
+  "period": {{"start_date": null, "end_date": null, "period_type": null}},
   "target": {{
     "focus": null,
     "focus_label": null,
     "exercise_name": null,
     "set_number": null,
-    "note_text": null
+    "note_text": null,
+    "from_date": null,
+    "to_date": null
   }},
   "workout": {{
     "title": null,
@@ -480,6 +561,9 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
         "target_reps_max": null,
         "target_reps_text": null,
         "target_weight_kg": null,
+        "rpe": null,
+        "superset_group": null,
+        "tempo": null,
         "notes": null
       }}
     ]
@@ -487,110 +571,138 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
   "logged_exercises": [
     {{
       "exercise_name": null,
+      "superset_group": null,
       "sets": [
-        {{
-          "set_number": null,
-          "weight_kg": null,
-          "reps": null,
-          "rpe": null,
-          "notes": null
-        }}
+        {{"set_number": null, "weight_kg": null, "reps": null, "rpe": null, "is_warmup": false, "is_drop": false, "is_failure": false, "notes": null}}
       ],
       "notes": null
     }}
   ],
-  "correction": {{
-    "field": null,
-    "old_value": null,
-    "new_value": null
-  }},
+  "measurement": {{"weight_kg": null, "waist_cm": null, "chest_cm": null, "hips_cm": null, "arm_cm": null, "thigh_cm": null, "neck_cm": null, "bodyfat_pct": null, "notes": null}},
+  "correction": {{"field": null, "old_value": null, "new_value": null}},
   "needs_confirmation": false,
   "summary": ""
 }}
 
-Правила:
+═══ КОМАНДЫ И ИХ ВАРИАЦИИ ═══
 
-1. Запросы просмотра:
-- "какая тренировка сегодня", "что сегодня по плану", "покажи сегодняшнюю тренировку" => show_today_workout.
-- "дай план тренировок на неделю", "покажи план на неделю" => show_week_plan.
-- "покажи следующую неделю тренировок", "что на следующей неделе" => show_next_week_plan.
-- "покажи месячный план", "план на месяц" => show_month_plan.
-- "план на следующий месяц" => show_next_month_plan.
-- "что у меня в пятницу" => show_workout_on_date, date = ближайшая такая дата.
+1. ПРОСМОТР (show_*):
+- "что сегодня", "тренировка на сегодня", "что у меня сегодня", "план на сегодня", "что делаем" → show_today_workout
+- "что вчера было", "вчерашняя тренировка" → show_yesterday_workout
+- "что завтра", "тренировка завтра", "завтрашняя" → show_tomorrow_workout
+- "план на неделю", "что на этой неделе", "недельный план", "тренировки недели" → show_week_plan
+- "следующая неделя", "что на след неделе", "план на следующую" → show_next_week_plan
+- "план на месяц", "месячный план" → show_month_plan / show_next_month_plan
+- "что в пятницу", "тренировка в пн", "что 20-го" → show_workout_on_date. date = вычисли ближайшую такую.
+- "что я делал в прошлый раз", "последняя тренировка", "что было на прошлой тренировке" → show_last_workout
+- "как у меня жим", "прогресс по приседу", "история жима", "сколько я жал" → show_exercise_stats. target.exercise_name = "жим штанги".
+- "мои рекорды", "PR", "ПР", "личный рекорд по жиму", "максимум" → show_personal_records
+- "сколько раз я приседал в этом месяце", "статистика за месяц" → show_progress с period.
 
-2. Замена сегодняшней тренировки:
+2. ЗАМЕНА сегодняшней (replace_today_workout):
 - "сегодня вместо ног делаем плечи"
-- "замени сегодняшнюю тренировку на плечи"
-- "на сегодня поставь тренировку плеч"
-- "сегодня тренировка: жим гантелей сидя, разводка, фронтальный подъем"
-=> replace_today_workout.
-Если упражнения перечислены, заполни workout.exercises.
-Если только группа, заполни focus/focus_label.
+- "замени сегодняшнюю на плечи"
+- "поставь на сегодня плечи"
+- "сегодня тренировка: жим гантелей, разводка, фронтальный подъём" → replace_today_workout, заполни workout.exercises
 
-3. Добавление новой тренировки:
-- "добавь тренировку на сегодня/завтра/пятницу"
-=> add_custom_workout.
+3. ДОБАВЛЕНИЕ (add_custom_workout):
+- "добавь тренировку на сегодня/завтра/пятницу", "поставь тренировку на ...", "запиши тренировку на завтра"
 
-4. Запись факта / тренировочная сессия:
+4. ЗАПИСЬ ФАКТА (log_workout_sets):
+КЛЮЧЕВОЕ — распознавай ВСЕ варианты:
 - "записываем сегодняшнюю тренировку..."
-- "жим гантелей сидя: 17.5 на 20, 20 на 12"
-- "первый подход 17,5 кг на 20, второй 20 на 12"
-=> log_workout_sets.
-Если есть активная сессия и пользователь говорит "третий 20 на 10", "следующий 20 на 8" => continue_current_exercise.
-Десятичную запятую превращай в точку: 17,5 => 17.5.
+- "жим: 80×5, 80×5, 75×8" / "жим 80 на 5, 80 на 5, 75 на 8"
+- "присед 4 подхода 100×5" / "присед 4×5 100кг" / "100 на 5 четыре раза"
+- "сделал жим: 1) 80×5, 2) 80×5, 3) 75×6" (явная нумерация)
+- "первый 80×5, второй 80×5, третий 75×6" / "первый подход 80 на 5..."
+- "жим штанги 4 на 10 по 25 кг" → 4 sets × 10 reps × 25 kg, exercise="жим штанги"
+- "3 подхода по 12 повторений с весом 50 кг"
+- "до отказа на брусьях × 4 подхода" → reps=null, notes="до отказа"
+- "AMRAP подтягивания × 3" → reps=null, notes="AMRAP"
+- "брусья: ширина+узко+обратный — суперсет 4 круга" → 3 упражнения в одной superset_group
+- Несколько упражнений в одном сообщении:
+    "Запиши тренировку: жим 4×10 80кг, потом бицепс 25кг 4×15, потом брусья 4 до отказа, пресс v-складка 4×12, трицепс канат 25×14×3"
+    → ПЯТЬ объектов в logged_exercises: жим, бицепс, брусья, пресс, трицепс. КАЖДЫЙ со своими подходами.
+- Разделители упражнений: "потом", "затем", "далее", "после", "следующее", ".", ";", новая строка, или явное название нового упражнения
+- Числительные словами: "первый/второй/третий", "раз/два/три", "восемь раз"
+- "RPE 8" / "оставил 2 в запасе" → rpe в подходе
+- "разминка 20×10, потом рабочий 80×5×5" → разминка = is_warmup:true, рабочие = is_warmup:false
+- "дроп: 80→70→60×8" → 3 подхода с is_drop:true
+- "rest-pause 80×5+3+2" → одно упражнение, 3 подхода, notes="Rest-pause"
+- "до отказа" / "до жжения" / "макс" → is_failure:true
+- Десятичные: "17,5" → 17.5
+- Если есть активная сессия и: "третий 20 на 10", "следующий 20 на 8", "ещё 20 на 6" → continue_current_exercise
+- "закончил тренировку", "всё, хватит", "финиш", "сохраняй" → finish_workout
 
-5. Исправления:
-- "не 20, а 17.5"
-- "во втором было 12, не 10"
-- "на сегодня, не на пятницу"
-=> correct_previous_action.
-Если "удали последний подход" => delete_last_set.
+5. ИСПРАВЛЕНИЯ (correct_previous_action):
+- "не 20, а 17.5", "во втором было 12, не 10"
+- "ой, не на сегодня — на пятницу", "перепутал, не жим а тяга"
+→ correct_previous_action. correction.field/old/new.
+- "удали последний подход", "убери последний сет", "не последний" → delete_last_set
 
-6. Опасные удаления:
-- "удали все тренировки"
-- "очисти память"
-- "удали все тренировки из памяти"
-=> dangerous_delete.
-Нельзя исполнять сразу.
+6. ПЕРЕМЕЩЕНИЕ ТРЕНИРОВКИ (move_workout / copy_workout):
+- "перенеси пятницу на среду", "сегодняшнюю на завтра"
+- "скопируй понедельник на четверг", "продублируй вторник"
+→ move_workout / copy_workout. target.from_date, target.to_date.
 
-7. Редактирование плана:
-- "добавь жим в сегодняшнюю тренировку"
-- "убери тягу из плана на пятницу"
-- "замени жим лёжа на жим гантелей в тренировке груди"
-- "поменяй тренировки местами — перенеси пятницу на среду"
-- "измени веса в плане"
-- "давай её изменим", "измени план"
-=> edit_plan. Поставь в target.exercise_name что менять.
+7. РЕДАКТИРОВАНИЕ ПЛАНА (edit_plan):
+- "добавь жим в сегодняшнюю", "вставь тягу в план на четверг"
+- "убери присед из вторника", "удали жим из плана"
+- "замени жим лёжа на жим гантелей", "поменяй штангу на гантели"
+- "увеличь вес в жиме до 90", "поставь 4 подхода вместо 3"
+- "измени план", "давай поправим"
 
-8. Прогресс и история:
-- "покажи мои результаты", "какой у меня прогресс по жиму", "история тренировок"
-- "мои рекорды", "последние тренировки", "статистика"
-=> show_progress.
+8. ПРОГРЕСС:
+- "покажи прогресс", "результаты", "как я расту"
+- "сколько раз я в зале был в этом месяце" → show_progress с period.
+- "мой жим лёжа за последние 5 тренировок" → show_exercise_stats.
 
-9. Заметки и комментарии:
-- "добавь заметку к тренировке: не забыть лямки"
-- "запиши комментарий: хорошо прошло, увеличить вес"
-- "заметка к жиму: локти ближе к телу"
-- "комментарий к плану на пятницу: принести резинки"
-=> add_note. Положи текст заметки в target.note_text, имя упражнения (если есть) в target.exercise_name.
+9. ЗАМЕТКИ (add_note):
+- "заметка к тренировке: ...", "комментарий: ..."
+- "запомни: локти ближе к телу" (если в активной сессии — к текущему упражнению)
+- "к пятничной тренировке припиши: принести резинки"
 
-10. Импорт программы тренировок:
-- "вот моя программа: понедельник — грудь: жим 4x8..."
-- "загрузи программу тренировок" (если текст содержит структурированный план)
-- "запиши программу на 4 недели"
-=> import_program. Данные плана кладёшь в поле plan (как для create_plan).
+10. ЗАМЕРЫ ТЕЛА (record_measurement):
+- "вес 80.5 кг", "сегодня 80,5", "взвесился 80.5"
+- "талия 82, грудь 100", "замеры: вес 80, талия 82, бицепс 38"
+- "% жира 15", "процент жира 18"
+→ record_measurement, заполни measurement.
 
-11. Экспорт тренировок:
-- "выгрузи мои тренировки", "экспортируй историю", "дай мне данные тренировок"
-=> export_workouts.
+11. ИМПОРТ ПРОГРАММЫ (import_program):
+- "вот программа: пн — грудь...", "загрузи план", "запиши программу на 4 недели"
 
-12. Если смысл неясен => clarify или unknown.
-Если команда поддерживаемая, confidence >= 0.75.
+12. ЭКСПОРТ (export_workouts):
+- "выгрузи тренировки", "экспортируй", "дай мне данные", "сделай csv"
+
+13. УДАЛЕНИЕ ОПАСНОЕ (dangerous_delete, needs_confirmation=true):
+- "удали все тренировки", "очисти историю", "сотри всё", "обнули"
+
+14. ПОМОЩЬ (help):
+- "что ты умеешь", "помощь", "как пользоваться", "команды"
+
+15. Если непонятно → clarify (confidence 0.3–0.6) или unknown (confidence < 0.3).
+
+═══ ОБЩИЕ ПРАВИЛА ═══
+- Десятичные через запятую: "17,5" → 17.5. Всегда.
+- "×" / "x" / "х" / "*" / "на" / "по" — все эквивалентны как разделитель в "вес × повторы".
+- Поддерживаемая команда: confidence >= 0.75.
+- Если упражнение упомянуто без названия группы — определи focus сам.
 """
 
+    # Auto-pick model: длинные мультиупражненческие сообщения и записи тренировок
+    # дают намного лучший результат на sonnet.
+    text_len = len(text)
+    use_sonnet = text_len > 200 or any(x in text.lower() for x in [
+        "потом", "затем", "далее", "после", "суперсет", "сс1", "сс2", "трисет",
+        "запиши тренировку", "записать тренировку", "сегодняшнюю тренировку",
+        "разминка", "рабочий", "рабочие", "дроп", "rest-pause", "пирамид",
+    ])
+    model = "claude-sonnet-4-6" if use_sonnet else "claude-haiku-4-5"
+    max_tokens = 3072 if use_sonnet else 1024
+
     response = await claude_client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1024,
+        model=model,
+        max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": text}],
     )
@@ -1578,22 +1690,49 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
             return "Сохранил программу тренировок как свободный текст. Если хочешь, чтобы я разложил её по дням — пришли в более чётком формате."
 
     # ── Multi-exercise workout description bypasses single-exercise router ────
-    # Pattern: "запиши тренировку" + multiple exercise transitions ("потом", "затем")
-    # OR many distinct exercise names → goes straight to full AI parser
     t_lower = text.lower().replace("ё", "е")
     record_intent = any(x in t_lower for x in [
         "запиши тренировку", "запиши тренеровку", "записать тренировку",
         "запиши пожалуйста тренировку", "записать сегодняшнюю тренировку",
         "запиши тренировку сегодняшнюю", "сегодняшнюю тренировку запиши",
+        "записываем тренировку", "записываем сегодняшнюю",
+        "вот моя тренировка", "вот тренировка", "сегодня сделал",
+        "сегодня делал", "сегодня было", "тренировка сегодня",
+        "залогируй тренировку", "лог тренировки", "сохрани тренировку",
+        "запиши треню", "записать треню", "сегодня в зале",
     ])
-    transition_count = sum(t_lower.count(x) for x in [" потом ", " потом,", " затем ", " затем,", " далее ", " после ", " следом "])
-    exercise_keywords = ["жим", "тяга", "бицепс", "трицепс", "присед", "становая", "брус", "подтяг", "пресс", "махи", "разводк", "разгибан", "сгибан", "выпад", "отжим", "икр", "ягодиц", "пуловер", "плечи", "грудь"]
+    transition_count = sum(
+        t_lower.count(x)
+        for x in [
+            " потом ", " потом,", " затем ", " затем,",
+            " далее ", " после ", " следом ", " следующее ",
+            " дальше ", " еще ", " ещё ",
+        ]
+    )
+    exercise_keywords = [
+        "жим", "тяга", "бицепс", "трицепс", "присед", "становая",
+        "брус", "подтяг", "пресс", "махи", "разводк", "разгибан",
+        "сгибан", "выпад", "отжим", "икр", "ягодиц", "пуловер",
+        "плечи", "грудь", "спина", "ноги", "дельта", "гантел",
+        "штанг", "канат", "блок", "тренаж", "кросс", "румынск",
+        "скотт", "молоток", "обратн", "гиперэкстенз", "планка",
+        "v-склад", "скручиван",
+    ]
     distinct_exercises = sum(1 for kw in exercise_keywords if kw in t_lower)
+    has_sets_pattern = bool(re.search(r"\d+\s*[×x✕х]\s*\d+", text))
+    has_count_phrases = bool(re.search(r"\d+\s*(подход|раз|повторен|круг)", t_lower))
 
-    is_multi_exercise_record = record_intent and (transition_count >= 1 or distinct_exercises >= 3)
+    # Очень явный многоупражненческий лог:
+    # - "запиши тренировку" + переходы или 3+ упражнения
+    # - 3+ упражнения + 2+ перехода (даже без "запиши")
+    # - 4+ упражнения вообще
+    is_multi_exercise_record = (
+        (record_intent and (transition_count >= 1 or distinct_exercises >= 3))
+        or (distinct_exercises >= 3 and transition_count >= 2 and (has_sets_pattern or has_count_phrases))
+        or (distinct_exercises >= 4 and (has_sets_pattern or has_count_phrases))
+    )
 
     if is_multi_exercise_record and not active_session:
-        # Force the full AI parser; never let router_hardening single-exercise this.
         parsed_multi = await parse_fitness_action_v2(text, active_session=active_session)
         if parsed_multi.get("action") == "log_workout_sets" and parsed_multi.get("logged_exercises"):
             return await _log_workout_sets(telegram_user_id, text, parsed_multi, active_session)
