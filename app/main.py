@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from app.telegram_bot import build_application
@@ -9,6 +10,7 @@ logging.basicConfig(
 
 
 def main() -> None:
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app = build_application()
     app.run_polling()
 
