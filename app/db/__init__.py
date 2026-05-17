@@ -706,6 +706,124 @@ async def get_last_workout(telegram_user_id: str | None) -> dict | None:
         }
 
 
+async def get_completed_workouts_in_period(
+    telegram_user_id: str | None,
+    start_date: str,
+    end_date: str,
+) -> list[dict]:
+    """Return all completed workouts in [start_date, end_date] with their sets."""
+    async with AsyncSessionLocal() as session:
+        workouts_result = await session.execute(
+            text("""
+            SELECT id, workout_date, workout_type, focus, focus_label,
+                   bodyweight_kg, completion_type, notes, source_text
+            FROM fitness_workouts
+            WHERE telegram_user_id = :uid
+              AND workout_date BETWEEN :start_date AND :end_date
+            ORDER BY workout_date ASC, id ASC
+            """),
+            {"uid": telegram_user_id, "start_date": start_date, "end_date": end_date},
+        )
+        workouts = [dict(row) for row in workouts_result.mappings().all()]
+        if not workouts:
+            return []
+
+        ids = [w["id"] for w in workouts]
+        sets_result = await session.execute(
+            text("""
+            SELECT workout_id, exercise_name, set_number, weight_kg, reps, rpe, notes
+            FROM fitness_exercise_sets
+            WHERE workout_id = ANY(:ids)
+            ORDER BY workout_id ASC, id ASC
+            """),
+            {"ids": ids},
+        )
+        sets_by_workout: dict[int, list[dict]] = {}
+        for row in sets_result.mappings().all():
+            sets_by_workout.setdefault(row["workout_id"], []).append(dict(row))
+
+        for w in workouts:
+            w["sets"] = sets_by_workout.get(w["id"], [])
+        return workouts
+
+
+async def get_personal_records(
+    telegram_user_id: str | None,
+    limit: int = 20,
+) -> list[dict]:
+    """Return max weight per exercise across all workouts."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT s.exercise_name,
+                   MAX(s.weight_kg) AS max_weight,
+                   MAX(s.reps) FILTER (WHERE s.weight_kg = sub.max_w) AS best_reps,
+                   COUNT(DISTINCT w.id) AS sessions
+            FROM fitness_exercise_sets s
+            JOIN fitness_workouts w ON w.id = s.workout_id
+            JOIN (
+                SELECT s2.exercise_name, MAX(s2.weight_kg) AS max_w
+                FROM fitness_exercise_sets s2
+                JOIN fitness_workouts w2 ON w2.id = s2.workout_id
+                WHERE w2.telegram_user_id = :uid
+                  AND s2.weight_kg IS NOT NULL
+                GROUP BY s2.exercise_name
+            ) sub ON sub.exercise_name = s.exercise_name
+            WHERE w.telegram_user_id = :uid
+              AND s.weight_kg IS NOT NULL
+            GROUP BY s.exercise_name, sub.max_w
+            ORDER BY max_weight DESC NULLS LAST
+            LIMIT :lim
+            """),
+            {"uid": telegram_user_id, "lim": limit},
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
+async def append_exercise_to_existing_workout(
+    workout_id: int,
+    exercise_name: str,
+    sets: list[dict],
+    source_text: str | None = None,
+) -> int:
+    """Append a new exercise (with sets) to an existing workout. Returns count inserted."""
+    async with AsyncSessionLocal() as session:
+        max_result = await session.execute(
+            text("""
+            SELECT COALESCE(MAX(set_number), 0) AS max_n
+            FROM fitness_exercise_sets
+            WHERE workout_id = :wid AND lower(exercise_name) = lower(:ename)
+            """),
+            {"wid": workout_id, "ename": exercise_name},
+        )
+        start_n = max_result.scalar() or 0
+
+        inserted = 0
+        for i, s in enumerate(sets, start=1):
+            if s.get("weight_kg") is None and s.get("reps") is None:
+                continue
+            await session.execute(
+                text("""
+                INSERT INTO fitness_exercise_sets
+                  (workout_id, exercise_name, set_number, weight_kg, reps, rpe, notes)
+                VALUES
+                  (:wid, :ename, :sn, :w, :r, :rpe, :notes)
+                """),
+                {
+                    "wid": workout_id,
+                    "ename": exercise_name,
+                    "sn": start_n + i,
+                    "w": s.get("weight_kg"),
+                    "r": s.get("reps"),
+                    "rpe": s.get("rpe"),
+                    "notes": s.get("notes") or (source_text[:200] if source_text else None),
+                },
+            )
+            inserted += 1
+        await session.commit()
+        return inserted
+
+
 async def get_last_measurement(telegram_user_id: str | None) -> dict | None:
     async with AsyncSessionLocal() as session:
         if telegram_user_id:

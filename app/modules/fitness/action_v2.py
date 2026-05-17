@@ -15,9 +15,14 @@ from app.db import (
     save_training_plan,
     save_fitness_workout_session_v2,
     append_fitness_workout_sets_v2,
+    append_exercise_to_existing_workout,
     update_fitness_pending_decision_context,
     delete_last_fitness_set_v2,
     update_last_fitness_set_v2,
+    get_completed_workouts_in_period,
+    get_personal_records,
+    get_last_workout,
+    get_last_measurement,
 )
 from app.modules.fitness.exercise_history import handle_exercise_history_request
 from app.modules.fitness.router_hardening import handle_router_hardening
@@ -25,6 +30,10 @@ from app.modules.fitness.formatter import (
     format_planned_workout,
     format_period_plan,
     format_human_date,
+    format_completed_period,
+    format_personal_records,
+    format_last_workout,
+    format_last_measurement,
 )
 from app.modules.fitness.utils import (
     week_bounds,
@@ -534,7 +543,7 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -595,6 +604,13 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 - "план на месяц", "месячный план" → show_month_plan / show_next_month_plan
 - "что в пятницу", "тренировка в пн", "что 20-го" → show_workout_on_date. date = вычисли ближайшую такую.
 - "что я делал в прошлый раз", "последняя тренировка", "что было на прошлой тренировке" → show_last_workout
+- "что я сделал сегодня", "что я делал сегодня", "что я зафиксировал сегодня", "тренировка которую я сегодня сделал" → show_completed_day (date=today)
+- "что я делал вчера", "вчерашняя выполненная тренировка" → show_completed_day с date=вчера
+- "что я делал 15-го", "что было 12 мая" → show_completed_day с явной date
+- "что я сделал на этой неделе", "тренировки за неделю", "отчёт за неделю", "сводка за неделю" → show_completed_week
+- "что я делал в прошлую неделю", "тренировки прошлой недели" → show_completed_period с period.start_date/end_date
+- "что я сделал в этом месяце", "отчёт за месяц", "сводка за месяц", "тренировки месяца" → show_completed_month
+- "за период с X по Y", "с понедельника по пятницу", "с 1 по 15 мая" → show_completed_period
 - "как у меня жим", "прогресс по приседу", "история жима", "сколько я жал" → show_exercise_stats. target.exercise_name = "жим штанги".
 - "мои рекорды", "PR", "ПР", "личный рекорд по жиму", "максимум" → show_personal_records
 - "сколько раз я приседал в этом месяце", "статистика за месяц" → show_progress с period.
@@ -680,7 +696,13 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 14. ПОМОЩЬ (help):
 - "что ты умеешь", "помощь", "как пользоваться", "команды"
 
-15. Если непонятно → clarify (confidence 0.3–0.6) или unknown (confidence < 0.3).
+15. НЕ-ФИТНЕС сообщения → non_fitness:
+- "какая сегодня погода", "сколько времени", "найди ресторан", "напомни купить молоко", "что такое X"
+- любые вопросы и просьбы НЕ про тренировки/упражнения/замеры/еду-калории/прогресс/планы
+- если активная сессия отсутствует и текст не похож на фитнес → non_fitness
+- если в активной сессии — пользователь может задать общий вопрос ("сколько ккал в банане?", "как правильно дышать?") — это всё равно non_fitness, мы ответим как AI и не сломаем сессию
+
+16. Если непонятно → clarify (confidence 0.3–0.6) или unknown (confidence < 0.3).
 
 ═══ ОБЩИЕ ПРАВИЛА ═══
 - Десятичные через запятую: "17,5" → 17.5. Всегда.
@@ -875,6 +897,57 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
     if not logged_exercises:
         return "Я понял, что ты записываешь тренировку, но не смог уверенно выделить подходы."
 
+    # ── SMART CONTINUATION ─────────────────────────────────────────────────
+    # Если есть активная сессия на ту же дату — НЕ создаём новую тренировку,
+    # а добавляем упражнения/подходы к существующей.
+    explicit_new = any(x in text.lower() for x in [
+        "новую тренировку", "новая тренировка", "начни заново",
+        "начни новую", "сброс", "обнови сессию",
+    ])
+    if active_session and active_session.get("workout_id") and not explicit_new:
+        existing_workout_date = str(active_session.get("workout_date") or today)[:10]
+        if existing_workout_date == workout_date:
+            workout_id = int(active_session["workout_id"])
+            total_added = 0
+            for ex in logged_exercises:
+                added = await append_exercise_to_existing_workout(
+                    workout_id=workout_id,
+                    exercise_name=ex["exercise_name"],
+                    sets=ex["sets"],
+                    source_text=text,
+                )
+                total_added += added
+
+            current_exercise = logged_exercises[-1]["exercise_name"]
+            active_session["current_exercise"] = current_exercise
+            active_session["last_activity_at"] = _now_iso()
+            active_session["last_training_activity_at"] = _now_iso()
+            active_session["last_action"] = "log_workout_sets_append"
+            pending = await get_latest_fitness_pending_decision(telegram_user_id)
+            if pending and pending.get("decision_type") == "active_workout_session":
+                await update_fitness_pending_decision_context(pending["id"], active_session)
+
+            lines = [
+                f"Продолжаю тренировку (ID: {workout_id}). Добавил подходы:",
+                "",
+            ]
+            for ex in logged_exercises:
+                lines.append(f"{ex['exercise_name']}:")
+                for s in ex["sets"]:
+                    weight = s.get("weight_kg")
+                    reps = s.get("reps")
+                    sn = s.get("set_number")
+                    if weight is not None and reps is not None:
+                        lines.append(f"  {sn}) {weight} кг × {reps}")
+                    elif reps is not None:
+                        lines.append(f"  {sn}) {reps} повторений")
+                lines.append("")
+            lines.append(f"Всего добавлено: {total_added}")
+            lines.append(f"Текущее упражнение: {current_exercise}")
+            lines.append("Скажи «закончил тренировку», когда всё.")
+            return "\n".join(lines).strip()
+
+    # ── NEW WORKOUT ────────────────────────────────────────────────────────
     workout_id = await save_fitness_workout_session_v2(
         telegram_user_id=telegram_user_id,
         workout_date=workout_date,
@@ -927,6 +1000,7 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
 
     lines.append(f"Всего записано подходов: {total_sets}")
     lines.append(f"Текущее упражнение: {current_exercise}")
+    lines.append("Скажи «закончил тренировку», когда всё, или продолжай диктовать.")
 
     return "\n".join(lines).strip()
 
@@ -1756,6 +1830,10 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     confidence = float(parsed.get("confidence") or 0)
 
     if not action or action in ("unknown", "clarify") or confidence < 0.55:
+        # Если текст явно НЕ про фитнес и нет активной сессии — отвечаем как общий AI
+        if not active_session and not _looks_like_fitness_text(text):
+            from app.ai import generate_general_answer
+            return await generate_general_answer(text)
         return await _ask_clarification(text)
 
     if action == "show_today_workout":
@@ -1829,4 +1907,242 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
             "Фактическую историю тренировок без отдельного жёсткого подтверждения не трогаю."
         )
 
+    # ── Новые экшены: архив, рекорды, замеры, завершение, помощь ──────────
+    if action == "show_yesterday_workout":
+        yesterday = _shift_date(date.today(), -1).isoformat()
+        return await _show_completed_or_planned_for_date(telegram_user_id, yesterday)
+
+    if action == "show_tomorrow_workout":
+        tomorrow = _shift_date(date.today(), 1).isoformat()
+        return await _show_completed_or_planned_for_date(telegram_user_id, tomorrow)
+
+    if action == "show_last_workout":
+        last = await get_last_workout(telegram_user_id)
+        return format_last_workout(last)
+
+    if action == "show_completed_day":
+        target_date = parsed.get("date") or date.today().isoformat()
+        workouts = await get_completed_workouts_in_period(telegram_user_id, target_date, target_date)
+        return format_completed_period(workouts, f"Тренировки за {format_human_date(target_date)}")
+
+    if action == "show_completed_week":
+        start, end = week_bounds()
+        period = parsed.get("period") or {}
+        s = period.get("start_date") or start
+        e = period.get("end_date") or end
+        workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
+        return format_completed_period(workouts, f"Тренировки за неделю ({format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)})")
+
+    if action == "show_completed_month":
+        start, end = month_bounds()
+        period = parsed.get("period") or {}
+        s = period.get("start_date") or start
+        e = period.get("end_date") or end
+        workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
+        return format_completed_period(workouts, f"Тренировки за месяц ({format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)})")
+
+    if action == "show_completed_period":
+        period = parsed.get("period") or {}
+        s = period.get("start_date")
+        e = period.get("end_date")
+        if not s or not e:
+            return "Уточни период: с какой по какую дату показать тренировки."
+        workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
+        return format_completed_period(workouts, f"Тренировки {format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)}")
+
+    if action == "show_personal_records":
+        records = await get_personal_records(telegram_user_id, limit=30)
+        return format_personal_records(records)
+
+    if action == "show_exercise_stats":
+        # Re-use _show_progress (it already handles exercise_name in target)
+        return await _show_progress(telegram_user_id, text, parsed)
+
+    if action == "finish_workout":
+        if active_session and active_session.get("workout_id"):
+            pending = await get_latest_fitness_pending_decision(telegram_user_id)
+            if pending and pending.get("id"):
+                await resolve_fitness_pending_decision(pending["id"], status="resolved")
+            wid = active_session["workout_id"]
+            return f"✅ Тренировка завершена (ID: {wid}). Можешь посмотреть отчёт командой «что я сделал сегодня»."
+        return "Активная тренировочная сессия не найдена. Возможно, она уже завершена."
+
+    if action == "record_measurement":
+        return await _record_measurement(telegram_user_id, parsed)
+
+    if action == "move_workout":
+        return await _move_or_copy_workout(telegram_user_id, parsed, copy=False)
+
+    if action == "copy_workout":
+        return await _move_or_copy_workout(telegram_user_id, parsed, copy=True)
+
+    if action == "help":
+        return _help_text()
+
+    if action == "non_fitness":
+        # Делегируем общему AI-ответчику, не ломая активную сессию
+        from app.ai import generate_general_answer
+        return await generate_general_answer(text)
+
     return None
+
+
+def _shift_date(d: date, days: int) -> date:
+    from datetime import timedelta
+    return d + timedelta(days=days)
+
+
+async def _show_completed_or_planned_for_date(telegram_user_id: str | None, target_date: str) -> str:
+    """Show what was completed on date (if any), or what's planned."""
+    completed = await get_completed_workouts_in_period(telegram_user_id, target_date, target_date)
+    if completed:
+        return format_completed_period(completed, f"Тренировка {format_human_date(target_date)}")
+    planned = await get_today_planned_workout(telegram_user_id, target_date)
+    if planned:
+        return f"План на {format_human_date(target_date)}:\n\n" + format_planned_workout(planned)
+    return f"На {format_human_date(target_date)} — ни выполненных, ни запланированных тренировок."
+
+
+async def _record_measurement(telegram_user_id: str | None, parsed: dict) -> str:
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    m = parsed.get("measurement") or {}
+    measurement_date = parsed.get("date") or date.today().isoformat()
+
+    if not any(v is not None for v in m.values() if not isinstance(v, str)):
+        return "Не понял, какие замеры записать. Пример: «вес 80.5, талия 82, % жира 15»."
+
+    async with get_session() as session:
+        result = await session.execute(sql_text("""
+            INSERT INTO body_measurements
+              (telegram_user_id, measurement_date, weight_kg, waist_cm, chest_cm,
+               hips_cm, arm_cm, thigh_cm, neck_cm, bodyfat_pct, notes)
+            VALUES
+              (:uid, :d, :w, :waist, :chest, :hips, :arm, :thigh, :neck, :bf, :notes)
+            RETURNING id
+        """), {
+            "uid": telegram_user_id,
+            "d": measurement_date,
+            "w": m.get("weight_kg"),
+            "waist": m.get("waist_cm"),
+            "chest": m.get("chest_cm"),
+            "hips": m.get("hips_cm"),
+            "arm": m.get("arm_cm"),
+            "thigh": m.get("thigh_cm"),
+            "neck": m.get("neck_cm"),
+            "bf": m.get("bodyfat_pct"),
+            "notes": m.get("notes"),
+        })
+        mid = result.scalar()
+        await session.commit()
+
+    parts = [f"Записал замеры (ID: {mid}, {format_human_date(measurement_date)}):"]
+    for key, label, unit in [
+        ("weight_kg", "Вес", "кг"), ("waist_cm", "Талия", "см"),
+        ("chest_cm", "Грудь", "см"), ("hips_cm", "Бёдра", "см"),
+        ("arm_cm", "Рука", "см"), ("thigh_cm", "Бедро", "см"),
+        ("neck_cm", "Шея", "см"), ("bodyfat_pct", "% жира", "%"),
+    ]:
+        if m.get(key) is not None:
+            parts.append(f"  {label}: {m[key]} {unit}")
+    return "\n".join(parts)
+
+
+async def _move_or_copy_workout(telegram_user_id: str | None, parsed: dict, copy: bool) -> str:
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    target = parsed.get("target") or {}
+    from_date = target.get("from_date")
+    to_date = target.get("to_date")
+    if not from_date or not to_date:
+        return "Уточни даты: с какой на какую перенести/скопировать."
+
+    async with get_session() as session:
+        src = await session.execute(sql_text("""
+            SELECT id, title, focus, focus_label, workout_type, notes, plan_id
+            FROM planned_workouts
+            WHERE telegram_user_id = :uid AND planned_date = :d AND status = 'planned'
+            ORDER BY id DESC LIMIT 1
+        """), {"uid": telegram_user_id, "d": from_date})
+        row = src.mappings().first()
+        if not row:
+            return f"На {format_human_date(from_date)} не нашёл активной плановой тренировки."
+
+        if copy:
+            new_id = await session.execute(sql_text("""
+                INSERT INTO planned_workouts
+                  (telegram_user_id, planned_date, title, focus, focus_label,
+                   workout_type, status, notes, plan_id, source)
+                SELECT telegram_user_id, :to_d, title, focus, focus_label,
+                       workout_type, 'planned', notes, plan_id, 'copy'
+                FROM planned_workouts WHERE id = :sid
+                RETURNING id
+            """), {"to_d": to_date, "sid": row["id"]})
+            target_id = new_id.scalar()
+            await session.execute(sql_text("""
+                INSERT INTO planned_exercises
+                  (planned_workout_id, exercise_order, exercise_name,
+                   target_sets, target_reps_min, target_reps_max, target_reps_text,
+                   target_weight_kg, notes)
+                SELECT :nid, exercise_order, exercise_name,
+                       target_sets, target_reps_min, target_reps_max, target_reps_text,
+                       target_weight_kg, notes
+                FROM planned_exercises WHERE planned_workout_id = :sid
+            """), {"nid": target_id, "sid": row["id"]})
+            await session.commit()
+            return f"📋 Скопировал тренировку с {format_human_date(from_date)} на {format_human_date(to_date)}."
+        else:
+            await session.execute(sql_text("""
+                UPDATE planned_workouts
+                SET planned_date = :to_d, status = 'planned'
+                WHERE id = :sid
+            """), {"to_d": to_date, "sid": row["id"]})
+            await session.commit()
+            return f"📅 Перенёс тренировку с {format_human_date(from_date)} на {format_human_date(to_date)}."
+
+
+def _help_text() -> str:
+    return (
+        "Я фитнес-ассистент Егора. Что я умею:\n\n"
+        "📋 ПЛАНЫ:\n"
+        "• «что сегодня по плану», «план на неделю», «что на следующей»\n"
+        "• «что в пятницу», «что 20-го»\n"
+        "• «сегодня делаем плечи вместо ног» — замена\n"
+        "• «добавь жим в план на четверг», «убери присед из вторника»\n"
+        "• «перенеси пятницу на среду»\n\n"
+        "🏋️ ЗАПИСЬ ТРЕНИРОВКИ:\n"
+        "• «запиши тренировку: жим 4×10 80кг, потом бицепс 25×15×4...»\n"
+        "• Можешь диктовать по одному подходу — я пойму, что это продолжение\n"
+        "• Поддерживаю суперсеты, дроп-сеты, RPE, AMRAP, пирамиды\n"
+        "• «закончил тренировку» — закрыть сессию\n\n"
+        "📊 АРХИВ И ПРОГРЕСС:\n"
+        "• «что я сделал сегодня/вчера/на этой неделе/за месяц»\n"
+        "• «последняя тренировка»\n"
+        "• «история жима», «прогресс по приседу»\n"
+        "• «мои рекорды», «ПР»\n\n"
+        "📏 ЗАМЕРЫ:\n"
+        "• «вес 80.5», «талия 82, грудь 100, % жира 15»\n\n"
+        "📤 ЭКСПОРТ:\n"
+        "• «выгрузи мои тренировки»"
+    )
+
+
+def _looks_like_fitness_text(text: str) -> bool:
+    """Heuristic: any obvious fitness markers in the message."""
+    t = text.lower().replace("ё", "е")
+    keywords = [
+        "тренировк", "упражнен", "подход", "повтор", "разминк",
+        "жим", "тяга", "присед", "становая", "бицепс", "трицепс",
+        "плечи", "грудь", "спина", "ноги", "ягодиц", "дельта",
+        "штанг", "гантел", "блок", "канат", "тренаж", "брус",
+        "подтяг", "отжим", "пресс", "икр",
+        "рпе", "rpe", "rir", "amrap", "дроп",
+        "суперсет", "пирамид", "тоннаж", "пр", "рекорд",
+        "вес тела", "талия", "замер", "% жира",
+        "сделал", "сделала", "записать", "запиши",
+        "план", "программа", "график",
+        "кг ", " кг", "×", "x ", " x", "повт",
+    ]
+    return any(k in t for k in keywords)

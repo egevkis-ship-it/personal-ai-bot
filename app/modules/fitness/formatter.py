@@ -395,6 +395,76 @@ def format_measurement(data: dict, measurement_id: int | None = None) -> str:
     return "\n".join(lines)
 
 
+def format_completed_period(workouts: list[dict], title: str) -> str:
+    """Format a list of completed workouts (each with .sets) as a period report."""
+    if not workouts:
+        return f"{title}:\n\nЗа этот период тренировок ещё не записано."
+
+    lines = [f"{title}:", ""]
+    total_sets = 0
+    total_tonnage = 0.0
+    by_focus: dict[str, int] = {}
+
+    for w in workouts:
+        date_str = format_human_date(w.get("workout_date"))
+        focus = w.get("focus_label") or w.get("focus") or "—"
+        sets = w.get("sets") or []
+        by_focus[focus] = by_focus.get(focus, 0) + 1
+
+        lines.append(f"📅 {date_str} — {focus}")
+        if w.get("bodyweight_kg"):
+            lines.append(f"   Вес тела: {format_number(w['bodyweight_kg'])} кг")
+
+        grouped: dict[str, list[dict]] = {}
+        for s in sets:
+            grouped.setdefault(s["exercise_name"], []).append(s)
+
+        for ex_name, ex_sets in grouped.items():
+            parts = []
+            for s in ex_sets:
+                weight = s.get("weight_kg")
+                reps = s.get("reps")
+                if weight is not None and reps is not None:
+                    parts.append(f"{format_number(weight)}×{reps}")
+                    try:
+                        total_tonnage += float(weight) * int(reps)
+                    except Exception:
+                        pass
+                elif reps is not None:
+                    parts.append(f"{reps} повт.")
+            total_sets += len(ex_sets)
+            lines.append(f"   • {ex_name}: {', '.join(parts) if parts else 'без данных'}")
+
+        if w.get("notes"):
+            lines.append(f"   📝 {w['notes']}")
+        lines.append("")
+
+    lines.append("─" * 30)
+    lines.append(f"Тренировок: {len(workouts)}")
+    lines.append(f"Подходов всего: {total_sets}")
+    if total_tonnage > 0:
+        lines.append(f"Общий тоннаж: {format_number(round(total_tonnage, 1))} кг")
+    if by_focus:
+        focus_summary = ", ".join(f"{k} ({v})" for k, v in sorted(by_focus.items(), key=lambda x: -x[1]))
+        lines.append(f"По фокусу: {focus_summary}")
+
+    return "\n".join(lines)
+
+
+def format_personal_records(records: list[dict]) -> str:
+    if not records:
+        return "Личных рекордов пока нет — запиши хотя бы несколько тренировок с весами."
+    lines = ["🏆 Личные рекорды (по максимальному весу):", ""]
+    for r in records:
+        name = r.get("exercise_name") or "—"
+        weight = r.get("max_weight")
+        reps = r.get("best_reps")
+        sessions = r.get("sessions") or 0
+        reps_str = f" × {reps}" if reps else ""
+        lines.append(f"• {name}: {format_number(weight)} кг{reps_str} ({sessions} тренировок)")
+    return "\n".join(lines)
+
+
 def format_last_workout(data: dict | None) -> str:
     if not data:
         return "Пока нет записанных тренировок."
