@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     telegram_bot_token: str
+    anthropic_api_key: str
     openai_api_key: str
     allowed_telegram_user_id: str | None = None
 
@@ -10,13 +11,14 @@ class Settings(BaseSettings):
     redis_url: str
 
     bot_env: str = "production"
-    ops_mode: str = "approval_required"
-    allow_server_executor: bool = False
 
     github_repo: str | None = None
     github_token: str | None = None
+
     coolify_url: str | None = None
     coolify_api_token: str | None = None
+    coolify_service_id: str | None = None
+    coolify_deploy_webhook: str | None = None
 
     class Config:
         env_file = ".env"

@@ -1,5 +1,5 @@
 async def handle(user_id: str, text: str, parsed: dict) -> str:
-    return "Фитнес-модуль в разработке."
+    return "Модуль в разработке."
 
 async def handle_pending(user_id: str, text: str, pending: dict) -> str:
-    return "Фитнес-модуль в разработке."
+    return "Модуль в разработке."
