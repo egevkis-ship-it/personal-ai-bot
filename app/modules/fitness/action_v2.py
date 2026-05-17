@@ -143,7 +143,7 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 
 Схема:
 {{
-  "action": "show_today_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | correct_previous_action | delete_last_set | edit_plan | show_progress | dangerous_delete | unknown | clarify",
+  "action": "show_today_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | correct_previous_action | delete_last_set | edit_plan | show_progress | add_note | import_program | export_workouts | dangerous_delete | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -156,7 +156,8 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
     "focus": null,
     "focus_label": null,
     "exercise_name": null,
-    "set_number": null
+    "set_number": null,
+    "note_text": null
   }},
   "workout": {{
     "title": null,
@@ -258,7 +259,24 @@ async def parse_fitness_action_v2(text: str, active_session: dict | None = None)
 - "мои рекорды", "последние тренировки", "статистика"
 => show_progress.
 
-9. Если смысл неясен => clarify или unknown.
+9. Заметки и комментарии:
+- "добавь заметку к тренировке: не забыть лямки"
+- "запиши комментарий: хорошо прошло, увеличить вес"
+- "заметка к жиму: локти ближе к телу"
+- "комментарий к плану на пятницу: принести резинки"
+=> add_note. Положи текст заметки в target.note_text, имя упражнения (если есть) в target.exercise_name.
+
+10. Импорт программы тренировок:
+- "вот моя программа: понедельник — грудь: жим 4x8..."
+- "загрузи программу тренировок" (если текст содержит структурированный план)
+- "запиши программу на 4 недели"
+=> import_program. Данные плана кладёшь в поле plan (как для create_plan).
+
+11. Экспорт тренировок:
+- "выгрузи мои тренировки", "экспортируй историю", "дай мне данные тренировок"
+=> export_workouts.
+
+12. Если смысл неясен => clarify или unknown.
 Если команда поддерживаемая, confidence >= 0.75.
 """
 
@@ -1022,6 +1040,138 @@ async def _show_progress(telegram_user_id: str | None, text: str, parsed: dict) 
     return "\n".join(lines)
 
 
+async def _add_note(telegram_user_id: str | None, text: str, parsed: dict) -> str:
+    from app.db import get_best_planned_workout_for_edit, get_last_workout
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    target = parsed.get("target") or {}
+    note_text = target.get("note_text") or text.strip()
+    exercise_name = target.get("exercise_name")
+    target_date = parsed.get("date")
+
+    # Try to add to planned workout first
+    planned = await get_best_planned_workout_for_edit(telegram_user_id, target_date=target_date)
+    if planned and planned.get("ok") if isinstance(planned, dict) else planned:
+        workout_id = planned.get("id") or planned.get("planned_workout_id")
+        if workout_id:
+            async with get_session() as session:
+                if exercise_name:
+                    # Note on specific exercise in plan
+                    await session.execute(sql_text("""
+                        UPDATE planned_exercises
+                        SET notes = :notes
+                        WHERE planned_workout_id = :workout_id
+                          AND lower(exercise_name) LIKE lower(:exercise_name)
+                    """), {"notes": note_text, "workout_id": workout_id,
+                           "exercise_name": f"%{exercise_name}%"})
+                    return f"Добавил заметку к упражнению «{exercise_name}»:\n📝 {note_text}"
+                else:
+                    # Note on whole planned workout
+                    await session.execute(sql_text("""
+                        UPDATE planned_workouts SET notes = :notes WHERE id = :workout_id
+                    """), {"notes": note_text, "workout_id": workout_id})
+                    return f"Добавил заметку к тренировке:\n📝 {note_text}"
+
+    # Fall back to last recorded workout
+    last = await get_last_workout(telegram_user_id)
+    if last:
+        async with get_session() as session:
+            await session.execute(sql_text("""
+                UPDATE fitness_workouts SET notes = :notes WHERE id = :workout_id
+            """), {"notes": note_text, "workout_id": last["id"]})
+            return f"Добавил заметку к последней тренировке ({str(last.get('workout_date', ''))[:10]}):\n📝 {note_text}"
+
+    return "Не нашёл тренировку для заметки. Укажи конкретную дату."
+
+
+async def _import_program(telegram_user_id: str | None, text: str, parsed: dict) -> str:
+    from app.db import save_training_plan
+    from app.modules.fitness.formatter import format_period_plan
+
+    plan_data = parsed.get("plan") or {}
+    planned_workouts = plan_data.get("planned_workouts") or []
+
+    if not planned_workouts:
+        return (
+            "Не смог разобрать программу тренировок из текста.\n\n"
+            "Отправь в формате:\n"
+            "Понедельник — грудь: жим 4×8, разводка 3×12\n"
+            "Среда — спина: тяга 4×8, подтягивания 3×10\n"
+            "Пятница — ноги: приседания 4×8, жим ногами 3×12"
+        )
+
+    workouts_normalized = _normalize_exercises_plan(planned_workouts)
+    result = await save_training_plan(
+        telegram_user_id=telegram_user_id,
+        plan_name=plan_data.get("plan_name") or "Импортированная программа",
+        period_type=plan_data.get("period_type") or "custom",
+        start_date=plan_data.get("start_date"),
+        end_date=plan_data.get("end_date"),
+        source_text=text,
+        notes=plan_data.get("notes"),
+        planned_workouts=workouts_normalized,
+    )
+
+    count = result.get("created_count", len(planned_workouts))
+    return f"Программа импортирована. Создано {count} тренировок."
+
+
+def _normalize_exercises_plan(planned_workouts: list[dict]) -> list[dict]:
+    result = []
+    for pw in planned_workouts:
+        exercises = _normalize_exercises(pw.get("exercises"))
+        result.append({**pw, "exercises": exercises})
+    return result
+
+
+async def _export_workouts(telegram_user_id: str | None) -> str:
+    from app.db import get_last_workout
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    async with get_session() as session:
+        result = await session.execute(sql_text("""
+            SELECT
+                w.workout_date,
+                w.focus_label,
+                w.notes AS workout_notes,
+                s.exercise_name,
+                s.set_number,
+                s.weight_kg,
+                s.reps,
+                s.rpe,
+                s.notes AS set_notes
+            FROM fitness_workouts w
+            JOIN fitness_exercise_sets s ON s.workout_id = w.id
+            WHERE w.telegram_user_id = :uid
+            ORDER BY w.workout_date DESC, w.id DESC, s.set_number ASC
+            LIMIT 500
+        """), {"uid": telegram_user_id})
+        rows = result.fetchall()
+
+    if not rows:
+        return "Нет записанных тренировок для экспорта."
+
+    lines = ["Дата | Фокус | Упражнение | Подход | Вес | Повторы | RPE | Заметка"]
+    lines.append("—" * 60)
+    for r in rows:
+        weight = f"{r.weight_kg} кг" if r.weight_kg is not None else "—"
+        rpe = str(r.rpe) if r.rpe else "—"
+        notes = r.set_notes or ""
+        lines.append(
+            f"{str(r.workout_date)[:10]} | {r.focus_label or '—'} | {r.exercise_name} | "
+            f"{r.set_number} | {weight} | {r.reps} | {rpe} | {notes}"
+        )
+
+    # Telegram message limit ~4096 chars
+    output = "\n".join(lines)
+    if len(output) > 3800:
+        output = output[:3800] + f"\n\n... (показаны первые {len(rows)} записей)"
+
+    return f"```\n{output}\n```"
+
+
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
@@ -1098,6 +1248,15 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
 
     if action == "show_progress":
         return await _show_progress(telegram_user_id, text, parsed)
+
+    if action == "add_note":
+        return await _add_note(telegram_user_id, text, parsed)
+
+    if action == "import_program":
+        return await _import_program(telegram_user_id, text, parsed)
+
+    if action == "export_workouts":
+        return await _export_workouts(telegram_user_id)
 
     if action == "dangerous_delete":
         return (

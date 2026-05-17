@@ -207,6 +207,9 @@ def format_planned_workout(data: dict | None, title_prefix: str = "Тренир�
     if workout.get("status"):
         lines.append(f"Статус: {status_label(workout.get('status'))}")
 
+    if workout.get("notes"):
+        lines.append(f"\n📝 {workout.get('notes')}")
+
     if exercises:
         lines.append("")
         lines.append("Упражнения:")
@@ -329,6 +332,14 @@ def format_completed_workout(parsed: dict, workout_id: int | None = None, linked
                 line += f" RPE {rpe}"
 
             lines.append(line)
+
+    if workout.get("notes"):
+        lines.append("")
+        lines.append(f"📝 {workout.get('notes')}")
+
+    for exercise in exercises:
+        if exercise.get("notes"):
+            lines.append(f"  💬 {exercise.get('exercise_name') or exercise.get('name')}: {exercise.get('notes')}")
 
     if tonnage > 0:
         lines.append("")
