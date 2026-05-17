@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     coolify_url: str | None = None
     coolify_api_token: str | None = None
     coolify_service_id: str | None = None
+    coolify_deploy_webhook: str | None = None
 
     class Config:
         env_file = ".env"

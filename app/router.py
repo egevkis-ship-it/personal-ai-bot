@@ -1,11 +1,11 @@
 import logging
 
 from app.ai import parse_message
+from app.bot_reply import BotReply
 from app.state.manager import SessionType, get_session
 
 logger = logging.getLogger(__name__)
 
-# Imported lazily to avoid circular imports at module level
 _FITNESS_INTENTS = {"fitness"}
 _FINANCE_INTENTS = {"finance_expense", "finance_income"}
 _TASK_INTENTS = {"task", "reminder"}
@@ -13,7 +13,7 @@ _NUTRITION_INTENTS = {"nutrition"}
 _OPS_INTENTS = {"ops"}
 
 
-async def route(user_id: str, text: str) -> str:
+async def route(user_id: str, text: str) -> BotReply | str:
     # 1. Active workout session — route directly without AI parsing
     workout_session = await get_session(user_id, SessionType.WORKOUT)
     if workout_session is not None:
