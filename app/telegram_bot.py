@@ -136,7 +136,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _post_init(application: Application) -> None:
+    from app.db.migrations.runner import run_migrations
     from app.modules.tasks.reminders import reminder_loop
+    await run_migrations()
     application.create_task(reminder_loop())
 
 
