@@ -131,6 +131,17 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
     return result
 
 
+_WEEKDAYS_RU = ["понедельник", "вторник", "среда", "среду", "четверг", "пятница", "пятницу", "суббота", "субботу", "воскресенье"]
+
+
+def _looks_like_weekly_plan(text: str) -> bool:
+    """Detect multi-day plan: several day-name headers with exercise lists."""
+    t = text.lower()
+    days_found = sum(1 for d in _WEEKDAYS_RU if d in t)
+    has_exercises = bool(re.search(r"^\s*\d+\.", text, re.MULTILINE))
+    return days_found >= 2 and has_exercises
+
+
 def _looks_like_complex_plan(text: str) -> bool:
     """Detect structured multi-exercise workout plan text."""
     t = text.lower()
@@ -211,6 +222,109 @@ async def parse_complex_workout_plan(text: str, target_date: str | None = None) 
         messages=[{"role": "user", "content": text}],
     )
     return _safe_json_loads(response.content[0].text if response.content else "{}")
+
+
+async def parse_weekly_plan(text: str) -> dict:
+    """Parse a multi-day weekly/monthly plan into multiple planned_workouts."""
+    today = date.today().isoformat()
+    week_start, week_end = week_bounds()
+    next_start, next_end = next_week_bounds()
+
+    system_prompt = f"""Ты парсер недельной/месячной программы тренировок. Сегодня: {today}.
+Текущая неделя: {week_start} — {week_end}. Следующая: {next_start} — {next_end}.
+
+Пользователь прислал расписание на несколько дней. Распарси КАЖДЫЙ день как отдельную тренировку.
+
+ПРАВИЛА:
+- Каждый заголовок дня (Понедельник, Вторник и т.д.) → отдельный объект в planned_workouts
+- Определи planned_date: если "на эту неделю" — ближайший такой день на текущей неделе
+- "90×8–12×4" → target_sets=4, weight=90, reps_min=8, reps_max=12
+- "65/70/70/65×10–12" → weight = первый вес (65), notes="прогрессия: 65/70/70/65"
+- "только если колени спокойны", "если плечи живые" → notes упражнения
+- Определи focus каждого дня: chest/back/legs/shoulders/arms/full_body
+- Тире в диапазоне весов "8–9 кг" → target_weight_kg = среднее (8.5)
+
+Верни JSON:
+{{
+  "action": "create_weekly_plan",
+  "confidence": 0.95,
+  "plan": {{
+    "plan_name": "Программа на неделю",
+    "period_type": "week",
+    "start_date": "{week_start}",
+    "end_date": "{week_end}",
+    "planned_workouts": [
+      {{
+        "planned_date": "YYYY-MM-DD",
+        "weekday": "monday",
+        "title": "Грудь + трицепс",
+        "focus": "chest",
+        "focus_label": "грудь + трицепс",
+        "notes": null,
+        "exercises": [
+          {{
+            "exercise_name": "Жим штанги лёжа",
+            "target_sets": 4,
+            "target_reps_min": 8,
+            "target_reps_max": 12,
+            "target_weight_kg": 90,
+            "notes": null
+          }}
+        ]
+      }}
+    ]
+  }},
+  "summary": "Недельная программа: 5 тренировок"
+}}
+
+Только JSON. Без markdown. Распарси ВСЕ дни и ВСЕ упражнения полностью."""
+
+    response = await claude_client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    return _safe_json_loads(response.content[0].text if response.content else "{}")
+
+
+async def _save_weekly_plan(telegram_user_id: str | None, text: str, parsed: dict) -> str:
+    plan_data = parsed.get("plan") or {}
+    planned_workouts_raw = plan_data.get("planned_workouts") or []
+
+    if not planned_workouts_raw:
+        return "Не смог распарсить расписание. Убедись что каждый день начинается с названия (Понедельник, Вторник и т.д.)."
+
+    planned_workouts = _normalize_exercises_plan(planned_workouts_raw)
+
+    plan_id = await save_training_plan(
+        telegram_user_id=telegram_user_id,
+        plan_name=plan_data.get("plan_name") or "Недельная программа",
+        period_type=plan_data.get("period_type") or "week",
+        start_date=plan_data.get("start_date"),
+        end_date=plan_data.get("end_date"),
+        source_text=text,
+        notes=plan_data.get("notes"),
+        planned_workouts=planned_workouts,
+    )
+
+    count = len(planned_workouts)
+    days_summary = []
+    for pw in planned_workouts[:5]:
+        date_str = pw.get("planned_date", "")[:10] if pw.get("planned_date") else pw.get("weekday", "—")
+        title = pw.get("title") or pw.get("focus_label") or "Тренировка"
+        ex_count = len(pw.get("exercises") or [])
+        days_summary.append(f"  • {date_str}: {title} ({ex_count} упр.)")
+
+    lines = [
+        f"✅ Записал программу на {count} тренировок. ID: {plan_id}",
+        "",
+    ] + days_summary
+
+    if count > 5:
+        lines.append(f"  ... и ещё {count - 5}")
+
+    return "\n".join(lines)
 
 
 async def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> dict:
@@ -1275,6 +1389,22 @@ async def _export_workouts(telegram_user_id: str | None) -> str:
     return f"```\n{output}\n```"
 
 
+async def _ask_clarification(text: str) -> str:
+    """Generate a helpful clarification question instead of going silent."""
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=256,
+        system=(
+            "Ты фитнес-ассистент. Пользователь написал что-то, но ты не уверен что именно нужно сделать. "
+            "Напиши ОДНО короткое уточняющее сообщение (1-3 предложения) на русском. "
+            "Скажи что ты понял и что именно непонятно. Предложи конкретные варианты что сделать. "
+            "Не используй markdown. Будь конкретным и дружелюбным."
+        ),
+        messages=[{"role": "user", "content": f"Пользователь написал: {text}"}],
+    )
+    return response.content[0].text if response.content else "Не совсем понял — уточни что сделать?"
+
+
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
@@ -1291,7 +1421,14 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     if history_reply is not None:
         return history_reply
 
-    # Detect structured multi-exercise plan BEFORE main parser
+    # Detect multi-day weekly/monthly plan BEFORE main parser
+    if _looks_like_weekly_plan(text) and not active_session:
+        weekly_parsed = await parse_weekly_plan(text)
+        if weekly_parsed.get("action") == "create_weekly_plan" and \
+                weekly_parsed.get("plan", {}).get("planned_workouts"):
+            return await _save_weekly_plan(telegram_user_id, text, weekly_parsed)
+
+    # Detect structured single-day complex plan
     if _looks_like_complex_plan(text) and not active_session:
         complex_parsed = await parse_complex_workout_plan(text)
         if complex_parsed.get("action") in ("add_custom_workout", "replace_today_workout") and \
@@ -1304,7 +1441,7 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     confidence = float(parsed.get("confidence") or 0)
 
     if not action or action in ("unknown", "clarify") or confidence < 0.55:
-        return None
+        return await _ask_clarification(text)
 
     if action == "show_today_workout":
         data = await get_today_planned_workout(telegram_user_id, date.today().isoformat())
