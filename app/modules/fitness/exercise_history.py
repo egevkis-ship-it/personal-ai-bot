@@ -50,7 +50,7 @@ def extract_limit(text: str) -> int:
     return 3
 
 
-def parse_exercise_history_request(text: str, active_session: dict | None = None) -> dict | None:
+async def parse_exercise_history_request(text: str, active_session: dict | None = None) -> dict | None:
     if not looks_like_history_request(text):
         return None
 
@@ -114,18 +114,16 @@ def parse_exercise_history_request(text: str, active_session: dict | None = None
 Ответ только JSON.
 """
 
-    from app.ai import client
+    from app.ai import claude_client
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
     )
 
-    parsed = safe_json_loads(response.choices[0].message.content or "{}")
+    parsed = safe_json_loads(response.content[0].text if response.content else "{}")
 
     if not parsed or parsed.get("action") == "unknown":
         return None
@@ -237,7 +235,7 @@ async def handle_exercise_history_request(
 ) -> str | None:
     from app.db import get_today_planned_workout, get_recent_exercise_history
 
-    parsed = parse_exercise_history_request(text, active_session=active_session)
+    parsed = await parse_exercise_history_request(text, active_session=active_session)
 
     if not parsed:
         return None

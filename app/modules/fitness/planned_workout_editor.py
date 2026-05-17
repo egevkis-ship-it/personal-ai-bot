@@ -383,7 +383,7 @@ async def parse_workout_edit_action(text: str, context: dict | None = None) -> d
     if not _looks_like_edit_request(text):
         return {"action": "unknown", "confidence": 0.0}
 
-    from app.ai import client
+    from app.ai import claude_client
 
     context = context or {}
 
@@ -485,16 +485,14 @@ anchor_exercise_name для before/after.
 - Ответ только JSON.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
     )
 
-    parsed = _safe_json_loads(response.choices[0].message.content or "{}")
+    parsed = _safe_json_loads(response.content[0].text if response.content else "{}")
 
     if parsed.get("target_date"):
         parsed["target_date"] = _parse_target_date(str(parsed.get("target_date"))) or parsed.get("target_date")

@@ -810,7 +810,7 @@ async def parse_planned_workout_action(text: str, context: dict | None = None) -
     if fast:
         return normalize_planning_action(fast)
 
-    from app.ai import client
+    from app.ai import claude_client
 
     context = context or {}
 
@@ -943,14 +943,12 @@ scope:
 - Ответ только JSON.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
     )
 
-    parsed = safe_json_loads(response.choices[0].message.content or "{}")
+    parsed = safe_json_loads(response.content[0].text if response.content else "{}")
     return normalize_planning_action(parsed)

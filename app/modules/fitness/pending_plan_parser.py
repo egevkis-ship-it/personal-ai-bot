@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 
-from app.ai import client
+from app.ai import claude_client
 
 
 def safe_json_loads(text: str) -> dict:
@@ -15,7 +15,7 @@ def safe_json_loads(text: str) -> dict:
         raise
 
 
-def parse_create_plan_conflict_response(text: str, context: dict) -> dict:
+async def parse_create_plan_conflict_response(text: str, context: dict) -> dict:
     """
     Parses a user's free-form response to a pending create_plan_conflict decision.
 
@@ -114,13 +114,11 @@ def parse_create_plan_conflict_response(text: str, context: dict) -> dict:
 Ответ только JSON. Без markdown.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
     )
 
-    return safe_json_loads(response.choices[0].message.content or "{}")
+    return safe_json_loads(response.content[0].text if response.content else "{}")

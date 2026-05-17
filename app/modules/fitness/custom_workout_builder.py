@@ -172,7 +172,7 @@ async def parse_custom_workout_details(text: str, target_date: str | None = None
     Parse a free-form text/voice workout plan into structured planned workout JSON.
     This is used when the bot has already asked: “Какие упражнения будем делать?”
     """
-    from app.ai import client
+    from app.ai import claude_client
 
     target_date = target_date or date.today().isoformat()
 
@@ -276,16 +276,14 @@ target_reps_text="до отказа".
 Ответ только JSON.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
     )
 
-    payload = safe_json_loads(response.choices[0].message.content or "{}")
+    payload = safe_json_loads(response.content[0].text if response.content else "{}")
     payload["target_date"] = target_date
     return payload
 
