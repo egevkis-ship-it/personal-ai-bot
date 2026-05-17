@@ -134,6 +134,24 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
 _WEEKDAYS_RU = ["понедельник", "вторник", "среда", "среду", "четверг", "пятница", "пятницу", "суббота", "субботу", "воскресенье"]
 
 
+def _looks_like_monthly_plan(text: str) -> bool:
+    """Detect a multi-week program: 2+ НЕДЕЛЯ headers."""
+    return len(re.findall(r"НЕДЕЛЯ\s+\d+", text, re.IGNORECASE)) >= 2
+
+
+def _split_weeks(text: str) -> list[tuple[str, str]]:
+    """Split text into (week_label, week_text) chunks by НЕДЕЛЯ N header."""
+    parts = re.split(r"(НЕДЕЛЯ\s+\d+[^\n]*)", text, flags=re.IGNORECASE)
+    weeks = []
+    i = 1
+    while i < len(parts) - 1:
+        label = parts[i].strip()
+        body = parts[i + 1] if i + 1 < len(parts) else ""
+        weeks.append((label, label + "\n" + body))
+        i += 2
+    return weeks
+
+
 def _looks_like_weekly_plan(text: str) -> bool:
     """Detect multi-day plan: several day-name headers with exercise lists."""
     t = text.lower()
@@ -230,26 +248,35 @@ async def parse_weekly_plan(text: str) -> dict:
     week_start, week_end = week_bounds()
     next_start, next_end = next_week_bounds()
 
-    system_prompt = f"""Ты парсер недельной/месячной программы тренировок. Сегодня: {today}.
+    system_prompt = f"""Ты парсер недельной программы тренировок. Сегодня: {today}.
 Текущая неделя: {week_start} — {week_end}. Следующая: {next_start} — {next_end}.
 
-Пользователь прислал расписание на несколько дней. Распарси КАЖДЫЙ день как отдельную тренировку.
+Распарси КАЖДЫЙ день как отдельную тренировку. Распарси ВСЕ упражнения полностью.
 
-ПРАВИЛА:
-- Каждый заголовок дня (Понедельник, Вторник и т.д.) → отдельный объект в planned_workouts
-- Определи planned_date: если "на эту неделю" — ближайший такой день на текущей неделе
-- "90×8–12×4" → target_sets=4, weight=90, reps_min=8, reps_max=12
-- "65/70/70/65×10–12" → weight = первый вес (65), notes="прогрессия: 65/70/70/65"
-- "только если колени спокойны", "если плечи живые" → notes упражнения
-- Определи focus каждого дня: chest/back/legs/shoulders/arms/full_body
-- Тире в диапазоне весов "8–9 кг" → target_weight_kg = среднее (8.5)
+ПРАВИЛА ПАРСИНГА:
+- Каждый заголовок дня (Понедельник, Вторник, Среда, Четверг, Пятница, Суббота) → отдельный объект
+- planned_date: вычисли ближайший такой день недели от сегодня (или используй указанную дату)
+- weekday: "monday"/"tuesday"/"wednesday"/"thursday"/"friday"/"saturday"/"sunday"
+- "90×8–12×4" или "90 кг × 8–12 × 4" → target_sets=4, weight=90, reps_min=8, reps_max=12
+- "65/70/70/65×10–12" → weight=65 (первый), notes="прогрессия: 65/70/70/65"
+- Перечисление подходов ("90×10–12 / 90×10–12 / 90×8–10 / 90×8–10") → target_sets=4, weight=90
+- Диапазон весов "8–9 кг" → target_weight_kg=8.5
+- "3 × 12–15" (без веса) → target_sets=3, reps_min=12, reps_max=15, target_weight_kg=null
+- "Разминка: ..." → сохрани в notes упражнения как "Разминка: 20×8-10, 50×8-10..."
+- "Рабочие:" → это основные подходы, используй их для target_sets/weight/reps
+- "Вариант А / Вариант Б" → используй Вариант А как основной, Вариант Б → notes
+- "Если X было легко" / "только если колени спокойны" / "если плечи живые" → notes
+- "Цель: ..." → notes упражнения
+- Настройки тренажёра ("сидушка — 2 дырки") → notes
+- "1. 5 кг" в контексте жима гантелей — это "17.5 кг" (артефакт форматирования)
+- Определи focus каждого дня: chest/back/legs/shoulders/arms/full_body/cardio
 
 Верни JSON:
 {{
   "action": "create_weekly_plan",
   "confidence": 0.95,
   "plan": {{
-    "plan_name": "Программа на неделю",
+    "plan_name": "Программа",
     "period_type": "week",
     "start_date": "{week_start}",
     "end_date": "{week_end}",
@@ -257,9 +284,9 @@ async def parse_weekly_plan(text: str) -> dict:
       {{
         "planned_date": "YYYY-MM-DD",
         "weekday": "monday",
-        "title": "Грудь + трицепс",
+        "title": "Грудь + дельта + трицепс",
         "focus": "chest",
-        "focus_label": "грудь + трицепс",
+        "focus_label": "грудь + дельта + трицепс",
         "notes": null,
         "exercises": [
           {{
@@ -268,16 +295,16 @@ async def parse_weekly_plan(text: str) -> dict:
             "target_reps_min": 8,
             "target_reps_max": 12,
             "target_weight_kg": 90,
-            "notes": null
+            "notes": "Разминка: 20×8-10, 50×8-10, 70×6-8, 80×3-5"
           }}
         ]
       }}
     ]
   }},
-  "summary": "Недельная программа: 5 тренировок"
+  "summary": "5 тренировок"
 }}
 
-Только JSON. Без markdown. Распарси ВСЕ дни и ВСЕ упражнения полностью."""
+Только JSON. Без markdown."""
 
     response = await claude_client.messages.create(
         model="claude-sonnet-4-6",
@@ -323,6 +350,69 @@ async def _save_weekly_plan(telegram_user_id: str | None, text: str, parsed: dic
 
     if count > 5:
         lines.append(f"  ... и ещё {count - 5}")
+
+    return "\n".join(lines)
+
+
+async def _save_monthly_plan(telegram_user_id: str | None, full_text: str) -> str:
+    """Parse each week separately and save all plans."""
+    weeks = _split_weeks(full_text)
+    if not weeks:
+        return "Не смог разбить программу по неделям. Убедись что каждая неделя начинается с 'НЕДЕЛЯ N'."
+
+    # Extract footer notes (Правила, restrictions etc.) — text after last week
+    last_week_end = full_text.rfind(weeks[-1][0])
+    footer_notes = full_text[last_week_end + len(weeks[-1][1]):].strip() if last_week_end >= 0 else ""
+
+    results = []
+    total_workouts = 0
+    errors = []
+
+    for i, (week_label, week_text) in enumerate(weeks, 1):
+        try:
+            parsed = await parse_weekly_plan(week_text)
+            plan_data = parsed.get("plan") or {}
+            planned_workouts_raw = plan_data.get("planned_workouts") or []
+
+            if not planned_workouts_raw:
+                errors.append(f"Неделя {i}: не удалось распарсить")
+                continue
+
+            planned_workouts = _normalize_exercises_plan(planned_workouts_raw)
+            count = len(planned_workouts)
+
+            plan_notes = plan_data.get("notes") or ""
+            if footer_notes and i == len(weeks):
+                plan_notes = (plan_notes + "\n\n" + footer_notes[:500]).strip()
+
+            plan_id = await save_training_plan(
+                telegram_user_id=telegram_user_id,
+                plan_name=week_label,
+                period_type="week",
+                start_date=plan_data.get("start_date"),
+                end_date=plan_data.get("end_date"),
+                source_text=week_text[:500],
+                notes=plan_notes or None,
+                planned_workouts=planned_workouts,
+            )
+
+            total_workouts += count
+            days = []
+            for pw in planned_workouts:
+                title = pw.get("title") or pw.get("focus_label") or "Тренировка"
+                ex_c = len(pw.get("exercises") or [])
+                days.append(f"{title} ({ex_c} упр.)")
+            results.append(f"  {week_label}: {', '.join(days)}")
+
+        except Exception as e:
+            errors.append(f"Неделя {i}: ошибка — {e}")
+
+    lines = [f"✅ Программа на {len(weeks)} недели сохранена. Всего тренировок: {total_workouts}", ""]
+    lines += results
+    if errors:
+        lines += ["", "⚠️ Проблемы:"] + errors
+    if footer_notes:
+        lines += ["", f"📋 Правила программы сохранены в заметках последней недели."]
 
     return "\n".join(lines)
 
@@ -1420,6 +1510,10 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     )
     if history_reply is not None:
         return history_reply
+
+    # Detect multi-week monthly program FIRST
+    if _looks_like_monthly_plan(text) and not active_session:
+        return await _save_monthly_plan(telegram_user_id, text)
 
     # Detect multi-day weekly/monthly plan BEFORE main parser
     if _looks_like_weekly_plan(text) and not active_session:
