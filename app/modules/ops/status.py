@@ -1,6 +1,5 @@
-from app.db import db_healthcheck
-from app.redis_client import redis_healthcheck
-from app.version import VERSION, BUILD_HASH
+from app.db.engine import db_healthcheck
+from app.state.manager import healthcheck as redis_healthcheck
 
 
 async def build_status_text() -> str:
@@ -8,9 +7,8 @@ async def build_status_text() -> str:
     redis_ok = await redis_healthcheck()
 
     return (
-        "System status:\n"
+        "Статус системы:\n"
         f"Bot: running\n"
-        f"PostgreSQL: {'healthy' if db_ok else 'error'}\n"
-        f"Redis: {'healthy' if redis_ok else 'error'}\n"
-        f"Version: {VERSION}\nBuild: {BUILD_HASH}"
+        f"PostgreSQL: {'ok' if db_ok else 'error'}\n"
+        f"Redis: {'ok' if redis_ok else 'error'}\n"
     )
