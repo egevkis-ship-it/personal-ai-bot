@@ -153,11 +153,21 @@ def _split_weeks(text: str) -> list[tuple[str, str]]:
 
 
 def _looks_like_weekly_plan(text: str) -> bool:
-    """Detect multi-day plan: several day-name headers with exercise lists."""
+    """Detect multi-day plan: several day-name headers with exercise content."""
     t = text.lower()
     days_found = sum(1 for d in _WEEKDAYS_RU if d in t)
-    has_exercises = bool(re.search(r"^\s*\d+\.", text, re.MULTILINE))
-    return days_found >= 2 and has_exercises
+    has_numbered = bool(re.search(r"^\s*\d+\.", text, re.MULTILINE))
+    has_sets_pattern = bool(re.search(r"\d+\s*[×x✕]\s*\d+", text))
+    has_kg = "кг" in t
+    has_reps_marker = any(x in t for x in ["повторен", "подход"])
+    has_exercises = has_numbered or has_sets_pattern or has_kg or has_reps_marker
+    # 3+ weekdays with any exercise marker = weekly plan
+    # 2 weekdays only if there's clear exercise structure
+    if days_found >= 3 and has_exercises:
+        return True
+    if days_found >= 2 and has_numbered:
+        return True
+    return False
 
 
 def _looks_like_complex_plan(text: str) -> bool:
@@ -1499,29 +1509,62 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
 
-    # ── Plan import detection BEFORE any session/hardening logic ──────────────
-    # Long text (>800 chars) is almost certainly a program import, not a workout log.
-    # Even for shorter text, check plan patterns first so we never misroute them.
-    if not active_session:
-        if _looks_like_monthly_plan(text):
+    # ── Plan import detection runs FIRST and overrides any stale pending/session ──
+    # A long plan-shaped message is never a set log, regardless of pending state.
+    is_long = len(text) > 800
+    is_monthly = _looks_like_monthly_plan(text)
+    is_weekly = _looks_like_weekly_plan(text)
+    is_complex = _looks_like_complex_plan(text)
+    has_plan_intent = any(x in text.lower() for x in [
+        "запланируй", "запланир", "план на неделю", "план на следующ",
+        "следующая неделя тренировок", "тренировки на неделю",
+        "программа тренировок", "программу тренировок",
+    ])
+
+    # If text looks like a plan or is clearly a long program dump,
+    # bypass the active_session check entirely.
+    if is_monthly or is_weekly or is_complex or (is_long and has_plan_intent):
+        # Clear any stale pending decision so the next short message doesn't
+        # get misrouted as continuation of a previous session.
+        if pending and pending.get("id"):
+            try:
+                await resolve_fitness_pending_decision(pending["id"], status="cancelled")
+            except Exception:
+                pass
+
+        if is_monthly:
             return await _save_monthly_plan(telegram_user_id, text)
 
-        if _looks_like_weekly_plan(text):
+        if is_weekly:
             weekly_parsed = await parse_weekly_plan(text)
             if weekly_parsed.get("action") == "create_weekly_plan" and \
                     weekly_parsed.get("plan", {}).get("planned_workouts"):
                 return await _save_weekly_plan(telegram_user_id, text, weekly_parsed)
+            # Fall through to free-form save if parser couldn't structure it
+            if is_long:
+                from app.db import save_training_plan
+                await save_training_plan(
+                    telegram_user_id=telegram_user_id,
+                    plan_name="Импортированная программа",
+                    period_type="custom",
+                    start_date=None,
+                    end_date=None,
+                    source_text=text,
+                    notes=None,
+                    planned_workouts=[],
+                )
+                return "Сохранил программу как свободный план (не смог разложить по дням автоматически). Если нужно — пришли её разбитой по дням, и я создам отдельные тренировки."
 
-        if _looks_like_complex_plan(text):
+        if is_complex:
             complex_parsed = await parse_complex_workout_plan(text)
             if complex_parsed.get("action") in ("add_custom_workout", "replace_today_workout") and \
                     complex_parsed.get("workout", {}).get("exercises"):
                 return await _add_custom_workout(telegram_user_id, text, complex_parsed)
 
-        # Very long text that didn't match structured patterns → save as free-form training plan
-        if len(text) > 800:
+        # Long plan-intent text but no structured match → save as free-form plan
+        if is_long and has_plan_intent:
             from app.db import save_training_plan
-            result = await save_training_plan(
+            await save_training_plan(
                 telegram_user_id=telegram_user_id,
                 plan_name="Импортированная программа",
                 period_type="custom",
@@ -1531,7 +1574,7 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
                 notes=None,
                 planned_workouts=[],
             )
-            return "Сохранил программу тренировок. Если хочешь — пришли её ещё раз в структурированном формате (понедельник/среда/пятница) и я разберу по дням."
+            return "Сохранил программу тренировок как свободный текст. Если хочешь, чтобы я разложил её по дням — пришли в более чётком формате."
 
     # ── Router hardening (handles set logging, confirmation flows, etc.) ───────
     hardening_reply = await handle_router_hardening(telegram_user_id, text)
