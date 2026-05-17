@@ -71,6 +71,17 @@ def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
         reps_max = ex.get("target_reps_max") or ex.get("reps_max")
         weight = ex.get("target_weight_kg") or ex.get("weight_kg")
 
+        # Merge warmup_sets into notes for storage
+        notes = ex.get("notes") or ""
+        warmup = ex.get("warmup_sets") or []
+        if warmup:
+            warmup_str = "Разминка: " + ", ".join(
+                f"{w.get('weight_kg')}×{w.get('reps_min', '')}-{w.get('reps_max', '')}"
+                if w.get('reps_max') else f"{w.get('weight_kg')}×{w.get('reps_min', '')}"
+                for w in warmup
+            )
+            notes = (notes + "\n" + warmup_str).strip() if notes else warmup_str
+
         result.append({
             "exercise_order": ex.get("exercise_order") or i,
             "exercise_name": name,
@@ -79,7 +90,7 @@ def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
             "target_reps_max": reps_max,
             "target_reps_text": reps_text,
             "target_weight_kg": weight,
-            "notes": ex.get("notes"),
+            "notes": notes or None,
         })
     return result
 
@@ -118,6 +129,88 @@ def _normalize_logged_exercises(raw_exercises: list[dict] | None) -> list[dict]:
             })
 
     return result
+
+
+def _looks_like_complex_plan(text: str) -> bool:
+    """Detect structured multi-exercise workout plan text."""
+    t = text.lower()
+    has_numbered = bool(re.search(r"^\s*\d+\.", text, re.MULTILINE))
+    has_sets_pattern = bool(re.search(r"\d+\s*[×x×]\s*\d+", text))
+    has_kg = "кг" in t
+    has_warmup = any(x in t for x in ["разминка", "рабочие подходы", "разминочн"])
+    has_many_exercises = len(re.findall(r"^\s*\d+\.", text, re.MULTILINE)) >= 3
+    return (has_numbered and has_sets_pattern and has_kg) or (has_warmup and has_sets_pattern) or has_many_exercises
+
+
+async def parse_complex_workout_plan(text: str, target_date: str | None = None) -> dict:
+    """
+    Parse a rich multi-exercise workout plan with warm-up sets, working sets,
+    equipment notes, and rep ranges. Returns dict compatible with add_custom_workout.
+    """
+    today = target_date or date.today().isoformat()
+
+    system_prompt = f"""Ты парсер структурированной программы тренировки. Сегодня: {today}.
+
+Пользователь описал детальную тренировку. Распарси её ПОЛНОСТЬЮ в JSON.
+
+ПРАВИЛА ПАРСИНГА:
+- Разминочные подходы (секция "Разминка:") → sets с пометкой "is_warmup": true
+- Рабочие подходы (секция "Рабочие подходы:" или без метки) → is_warmup: false
+- Диапазон повторений "10–12" или "10-12" → target_reps_min=10, target_reps_max=12
+- "90 кг × 10–12 × 4 подхода" → target_sets=4, weight=90, reps_min=10, reps_max=12
+- "25 кг × 10–12 × 4 подхода" → target_sets=4, weight=25, reps_min=10, reps_max=12
+- Настройки тренажёра, пометки ("не до отказа", "сидушка — 2 дырки") → notes упражнения
+- Запятая или тире в весе: "8–9 кг" → weight_min=8, weight_max=9, target_weight_kg=8.5
+- Если дата явно указана ("завтра", "понедельник", конкретное число) — вычисли planned_date
+
+Верни JSON строго:
+{{
+  "action": "add_custom_workout",
+  "confidence": 0.95,
+  "date": "{today}",
+  "workout": {{
+    "title": "Грудь силовая + дельта + трицепс",
+    "focus": "chest",
+    "focus_label": "грудь",
+    "notes": null,
+    "exercises": [
+      {{
+        "exercise_name": "Жим штанги лёжа",
+        "target_sets": 4,
+        "target_reps_min": 10,
+        "target_reps_max": 12,
+        "target_weight_kg": 90,
+        "notes": "Разминка: 20×8, 50×8, 70×6, 80×3",
+        "warmup_sets": [
+          {{"weight_kg": 20, "reps_min": 8, "reps_max": 10}},
+          {{"weight_kg": 50, "reps_min": 8, "reps_max": 10}},
+          {{"weight_kg": 70, "reps_min": 6, "reps_max": 8}},
+          {{"weight_kg": 80, "reps_min": 3, "reps_max": 5}}
+        ]
+      }},
+      {{
+        "exercise_name": "Жим гантелей под углом",
+        "target_sets": 4,
+        "target_reps_min": 10,
+        "target_reps_max": 12,
+        "target_weight_kg": 25,
+        "notes": null,
+        "warmup_sets": []
+      }}
+    ]
+  }},
+  "summary": "Тренировка грудь + дельта + трицепс на {today}"
+}}
+
+Только JSON. Без markdown. Распарси ВСЕ упражнения из текста."""
+
+    response = await claude_client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2048,
+        system=system_prompt,
+        messages=[{"role": "user", "content": text}],
+    )
+    return _safe_json_loads(response.content[0].text if response.content else "{}")
 
 
 async def parse_fitness_action_v2(text: str, active_session: dict | None = None) -> dict:
@@ -430,10 +523,20 @@ async def _add_custom_workout(telegram_user_id: str | None, text: str, parsed: d
         }],
     )
 
-    return (
-        f"Добавил тренировку на {format_human_date(target_date)}.\n"
-        f"ID плана: {plan_id}"
-    )
+    ex_count = len(exercises)
+    ex_names = ", ".join(e["exercise_name"] for e in exercises[:4])
+    if ex_count > 4:
+        ex_names += f" и ещё {ex_count - 4}"
+
+    lines = [
+        f"Записал тренировку на {format_human_date(target_date)}.",
+        f"ID плана: {plan_id}",
+        f"Упражнений: {ex_count} — {ex_names}",
+    ]
+    if workout.get("notes"):
+        lines.append(f"📝 {workout.get('notes')}")
+
+    return "\n".join(lines)
 
 
 async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dict, active_session: dict | None) -> str:
@@ -1187,6 +1290,13 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     )
     if history_reply is not None:
         return history_reply
+
+    # Detect structured multi-exercise plan BEFORE main parser
+    if _looks_like_complex_plan(text) and not active_session:
+        complex_parsed = await parse_complex_workout_plan(text)
+        if complex_parsed.get("action") in ("add_custom_workout", "replace_today_workout") and \
+                complex_parsed.get("workout", {}).get("exercises"):
+            return await _add_custom_workout(telegram_user_id, text, complex_parsed)
 
     parsed = await parse_fitness_action_v2(text, active_session=active_session)
 
