@@ -9,3 +9,4 @@ asyncpg>=0.29.0
 redis>=5.0.7
 python-dotenv>=1.0.1
 greenlet
+apscheduler>=3.10
