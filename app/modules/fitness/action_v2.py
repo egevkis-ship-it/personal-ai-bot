@@ -217,18 +217,27 @@ def _split_weeks(text: str) -> list[tuple[str, str]]:
 
 
 def _looks_like_weekly_plan(text: str) -> bool:
-    """Detect multi-day plan: several day-name headers with exercise content."""
+    """Detect multi-day plan: several day-name headers OR explicit dates."""
     t = text.lower()
     days_found = sum(1 for d in _WEEKDAYS_RU if d in t)
+    # Явные даты вида "25-05-2026", "25/05/2026", "25.05.2026"
+    explicit_dates = len(re.findall(r"\b\d{1,2}[-./]\d{1,2}[-./]\d{2,4}\b", text))
+    # ISO: 2026-05-25
+    iso_dates = len(re.findall(r"\b20\d{2}-\d{2}-\d{2}\b", text))
+
     has_numbered = bool(re.search(r"^\s*\d+\.", text, re.MULTILINE))
     has_sets_pattern = bool(re.search(r"\d+\s*[×x✕]\s*\d+", text))
     has_kg = "кг" in t
     has_reps_marker = any(x in t for x in ["повторен", "подход"])
     has_exercises = has_numbered or has_sets_pattern or has_kg or has_reps_marker
-    # 3+ weekdays with any exercise marker = weekly plan
-    # 2 weekdays only if there's clear exercise structure
+
+    # 3+ weekdays with exercises
     if days_found >= 3 and has_exercises:
         return True
+    # 3+ explicit dates with exercises
+    if (explicit_dates + iso_dates) >= 3 and has_exercises:
+        return True
+    # 2 weekdays + numbered exercises
     if days_found >= 2 and has_numbered:
         return True
     return False
@@ -332,13 +341,25 @@ async def parse_complex_workout_plan(text: str, target_date: str | None = None) 
 
 Только JSON. Без markdown. Распарси ВСЕ упражнения из текста. Не теряй ни одного."""
 
-    response = await claude_client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=system_prompt,
-        messages=[{"role": "user", "content": text}],
-    )
-    return _safe_json_loads(response.content[0].text if response.content else "{}")
+    try:
+        response = await claude_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": text}],
+        )
+        raw = response.content[0].text if response.content else "{}"
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).exception("parse_complex_workout_plan claude call failed: %s", e)
+        return {"action": "unknown", "error": str(e)[:200], "workout": {"exercises": []}}
+
+    try:
+        return _safe_json_loads(raw)
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).exception("parse_complex_workout_plan JSON decode failed: %s", e)
+        return {"action": "unknown", "error": f"json decode: {e}", "workout": {"exercises": []}}
 
 
 async def parse_weekly_plan(text: str) -> dict:
@@ -353,11 +374,15 @@ async def parse_weekly_plan(text: str) -> dict:
 Распарси КАЖДЫЙ день как отдельную тренировку. Распарси ВСЕ упражнения. Ничего не теряй.
 
 ═══ ДАТЫ И ДНИ ═══
-- Заголовки: "Понедельник"/"Пн"/"ПН", "Вторник"/"Вт", "Среда"/"Ср", "Четверг"/"Чт", "Пятница"/"Пт", "Суббота"/"Сб", "Воскресенье"/"Вс"
+- ЯВНЫЕ ДАТЫ в шапках дней — ИМЕЮТ ПРИОРИТЕТ над названиями дней недели:
+  • "25-05-2026 — понедельник" → planned_date="2026-05-25", weekday="monday"
+  • "25.05.2026" / "25/05/2026" / "2026-05-25" → используй как planned_date в ISO формате
+  • Парси формат дд-мм-гггг или дд.мм.гггг или дд/мм/гггг → ISO YYYY-MM-DD
+- Заголовки БЕЗ дат: "Понедельник"/"Пн"/"ПН", "Вторник"/"Вт", "Среда"/"Ср", "Четверг"/"Чт", "Пятница"/"Пт", "Суббота"/"Сб", "Воскресенье"/"Вс"
 - "День 1" / "Day 1" / "A" (в ABC/PPL/AB схемах) → если пользователь сказал "со следующего понедельника", раскладывай по порядку начиная с понедельника
 - "Push / Pull / Legs" (PPL) → 3 тренировки, не привязаны к датам (planned_date=null, weekday=null), если не сказано иначе
-- Если сказано "на следующую неделю" → planned_date в диапазоне {next_start} — {next_end}
-- Если сказано "на этой неделе" → planned_date в диапазоне {week_start} — {week_end}
+- Если сказано "на следующую неделю" БЕЗ явных дат → planned_date в диапазоне {next_start} — {next_end}
+- Если сказано "на этой неделе" БЕЗ явных дат → planned_date в диапазоне {week_start} — {week_end}
 - "Отдых" / "rest day" / "восстановление" → создай день с title="Отдых", exercises=[]
 - weekday: "monday"/"tuesday"/"wednesday"/"thursday"/"friday"/"saturday"/"sunday" или null
 
@@ -439,13 +464,25 @@ chest / back / legs / shoulders / arms / full_body / push / pull / cardio / abs 
 
 Только JSON. Без markdown. Распарси ВСЕ упражнения. Не пропускай дни."""
 
-    response = await claude_client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        system=system_prompt,
-        messages=[{"role": "user", "content": text}],
-    )
-    return _safe_json_loads(response.content[0].text if response.content else "{}")
+    try:
+        response = await claude_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,  # длинные планы режутся на 4096
+            system=system_prompt,
+            messages=[{"role": "user", "content": text}],
+        )
+        raw = response.content[0].text if response.content else "{}"
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).exception("parse_weekly_plan claude call failed: %s", e)
+        return {"action": "unknown", "error": str(e)[:200], "plan": {"planned_workouts": []}}
+
+    try:
+        return _safe_json_loads(raw)
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).exception("parse_weekly_plan JSON decode failed: %s, raw=%r", e, raw[:500])
+        return {"action": "unknown", "error": f"json decode: {e}", "plan": {"planned_workouts": []}}
 
 
 async def _save_weekly_plan(telegram_user_id: str | None, text: str, parsed: dict) -> str:
@@ -453,7 +490,22 @@ async def _save_weekly_plan(telegram_user_id: str | None, text: str, parsed: dic
     planned_workouts_raw = plan_data.get("planned_workouts") or []
 
     if not planned_workouts_raw:
-        return "Не смог распарсить расписание. Убедись что каждый день начинается с названия (Понедельник, Вторник и т.д.)."
+        # Fallback: сохраним как свободный план чтобы пользователь не остался без ответа
+        plan_id = await save_training_plan(
+            telegram_user_id=telegram_user_id,
+            plan_name="Недельная программа (сырой текст)",
+            period_type="week",
+            start_date=None,
+            end_date=None,
+            source_text=text,
+            notes="Авто-парсер не разложил по дням — сохранено как сырой текст",
+            planned_workouts=[],
+        )
+        return (
+            f"⚠️ Не смог автоматически разложить программу по дням (ID плана: {plan_id}).\n"
+            f"Сохранил полный текст. Если хочешь — пришли план по одному дню за раз "
+            f"(«Понедельник: жим 4×10 80кг, разводка 3×12...»), я создам структурированные тренировки."
+        )
 
     planned_workouts = _normalize_exercises_plan(planned_workouts_raw)
 
@@ -798,14 +850,25 @@ async def parse_fitness_action_v2(
     model = "claude-sonnet-4-6" if use_sonnet else "claude-haiku-4-5"
     max_tokens = 3072 if use_sonnet else 1024
 
-    response = await claude_client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=system_prompt,
-        messages=[{"role": "user", "content": text}],
-    )
+    try:
+        response = await claude_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": text}],
+        )
+        raw = response.content[0].text if response.content else "{}"
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).exception("parse_fitness_action_v2 claude call failed: %s", e)
+        return {"action": "unknown", "confidence": 0.0, "error": str(e)[:200]}
 
-    return _safe_json_loads(response.content[0].text if response.content else "{}")
+    try:
+        return _safe_json_loads(raw)
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).exception("parse_fitness_action_v2 JSON decode failed: %s", e)
+        return {"action": "unknown", "confidence": 0.0, "error": f"json: {e}"}
 
 
 async def _parse_finish_confirmation_with_ai_async(text: str, active_session: dict | None) -> dict:
@@ -2149,7 +2212,11 @@ async def _handle_fitness_action_v2_inner(
         from app.ai import generate_general_answer
         return await generate_general_answer(text)
 
-    return None
+    # Никогда не возвращаем None молча — пусть юзер видит что бот не справился
+    return (
+        f"Я разобрал твой запрос как action='{action}' (confidence={confidence:.2f}), "
+        f"но у меня нет обработчика для этого. Скажи проще или пришли /help."
+    )
 
 
 def _shift_date(d: date, days: int) -> date:
