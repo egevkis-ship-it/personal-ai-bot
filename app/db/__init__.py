@@ -782,6 +782,209 @@ async def get_last_workout(telegram_user_id: str | None) -> dict | None:
         }
 
 
+async def add_training_constraint(
+    telegram_user_id: str | None,
+    body_part: str,
+    severity: str | None = None,
+    note: str | None = None,
+    constraint_date: str | None = None,
+    source_text: str | None = None,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO training_constraints
+              (telegram_user_id, constraint_date, body_part, severity, note, source_text, status)
+            VALUES (:uid, :d, :bp, :sev, :n, :src, 'active')
+            RETURNING id
+            """),
+            {
+                "uid": telegram_user_id,
+                "d": constraint_date or None,
+                "bp": body_part,
+                "sev": severity,
+                "n": note,
+                "src": source_text,
+            },
+        )
+        cid = result.scalar()
+        await session.commit()
+        return cid
+
+
+async def list_active_constraints(telegram_user_id: str | None) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, body_part, severity, note, constraint_date, created_at
+            FROM training_constraints
+            WHERE telegram_user_id = :uid AND status = 'active'
+            ORDER BY created_at DESC
+            """),
+            {"uid": telegram_user_id},
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def resolve_constraint(constraint_id: int, status: str = "resolved") -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE training_constraints SET status = :s WHERE id = :id"),
+            {"s": status, "id": constraint_id},
+        )
+        await session.commit()
+
+
+async def skip_planned_workout(
+    telegram_user_id: str | None,
+    planned_date: str,
+    reason: str | None = None,
+) -> int:
+    """Mark a planned workout on a specific date as skipped."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET status = 'skipped',
+                notes = COALESCE(notes, '') || CASE WHEN :reason IS NULL THEN '' ELSE E'\nSkip reason: ' || :reason END
+            WHERE telegram_user_id = :uid AND planned_date = :d AND status = 'planned'
+            RETURNING id
+            """),
+            {"uid": telegram_user_id, "d": planned_date, "reason": reason},
+        )
+        ids = [r[0] for r in result.fetchall()]
+        await session.commit()
+        return len(ids)
+
+
+async def shift_planned_workouts(
+    telegram_user_id: str | None,
+    from_date: str,
+    days: int,
+) -> int:
+    """Shift all planned workouts from `from_date` onwards by `days` days."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET planned_date = planned_date + (:days || ' days')::interval
+            WHERE telegram_user_id = :uid
+              AND planned_date >= :from_d
+              AND status = 'planned'
+            RETURNING id
+            """),
+            {"uid": telegram_user_id, "from_d": from_date, "days": days},
+        )
+        n = len(result.fetchall())
+        await session.commit()
+        return n
+
+
+async def cancel_plan_period(
+    telegram_user_id: str | None,
+    start_date: str,
+    end_date: str,
+) -> int:
+    """Mark planned workouts in [start, end] as cancelled."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            UPDATE planned_workouts
+            SET status = 'cancelled'
+            WHERE telegram_user_id = :uid
+              AND planned_date BETWEEN :s AND :e
+              AND status = 'planned'
+            RETURNING id
+            """),
+            {"uid": telegram_user_id, "s": start_date, "e": end_date},
+        )
+        n = len(result.fetchall())
+        await session.commit()
+        return n
+
+
+async def delete_last_n_sets(workout_id: int, n: int = 1) -> int:
+    """Delete the last N sets from a workout. Returns count deleted."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            DELETE FROM fitness_exercise_sets
+            WHERE id IN (
+                SELECT id FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                ORDER BY id DESC LIMIT :n
+            )
+            RETURNING id
+            """),
+            {"wid": workout_id, "n": n},
+        )
+        deleted = len(result.fetchall())
+        await session.commit()
+        return deleted
+
+
+async def delete_last_exercise_from_workout(workout_id: int) -> tuple[str | None, int]:
+    """Delete all sets of the most recently logged exercise. Returns (exercise_name, count)."""
+    async with AsyncSessionLocal() as session:
+        last = await session.execute(
+            text("""
+            SELECT exercise_name
+            FROM fitness_exercise_sets
+            WHERE workout_id = :wid
+            ORDER BY id DESC LIMIT 1
+            """),
+            {"wid": workout_id},
+        )
+        row = last.first()
+        if not row:
+            return None, 0
+        name = row[0]
+        result = await session.execute(
+            text("""
+            DELETE FROM fitness_exercise_sets
+            WHERE workout_id = :wid AND exercise_name = :name
+            RETURNING id
+            """),
+            {"wid": workout_id, "name": name},
+        )
+        n = len(result.fetchall())
+        await session.commit()
+        return name, n
+
+
+async def delete_workout(workout_id: int) -> int:
+    """Delete a workout and all its sets (cascade). Returns 1 if deleted, 0 if not found."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("DELETE FROM fitness_workouts WHERE id = :wid RETURNING id"),
+            {"wid": workout_id},
+        )
+        n = len(result.fetchall())
+        await session.commit()
+        return n
+
+
+async def rename_exercise_in_workout(
+    workout_id: int,
+    old_name: str,
+    new_name: str,
+) -> int:
+    """Rename all sets matching old_name (fuzzy) within a workout."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            UPDATE fitness_exercise_sets
+            SET exercise_name = :new_name
+            WHERE workout_id = :wid AND lower(exercise_name) LIKE lower(:old_pat)
+            RETURNING id
+            """),
+            {"wid": workout_id, "new_name": new_name, "old_pat": f"%{old_name}%"},
+        )
+        n = len(result.fetchall())
+        await session.commit()
+        return n
+
+
 async def save_last_interaction(
     telegram_user_id: str | None,
     input_text: str,
