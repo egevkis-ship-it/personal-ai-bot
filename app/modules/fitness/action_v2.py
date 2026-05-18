@@ -47,6 +47,8 @@ from app.db import (
     log_pain, get_pain_journal,
     bulk_update_planned_exercises, find_workouts_by_exercise,
     copy_planned_period,
+    schedule_reminder, list_pending_reminders, cancel_reminder,
+    get_exercise_weight_stats, get_measurements_period,
 )
 from app.modules.fitness.muscle_groups import (
     classify_exercise, aggregate_by_group, estimate_1rm,
@@ -711,7 +713,7 @@ async def parse_fitness_action_v2(
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_volume_by_group | show_lagging_group | show_streak | find_workout_by_exercise | show_trend | show_1rm | log_pain_action | sick_leave | show_plateau | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | copy_week_to_next | copy_period_to_period | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_volume_by_group | show_lagging_group | show_streak | find_workout_by_exercise | show_trend | show_1rm | log_pain_action | sick_leave | show_plateau | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | copy_week_to_next | copy_period_to_period | schedule_reminder_action | list_reminders | cancel_reminder_action | show_measurements_trend | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -743,7 +745,9 @@ async def parse_fitness_action_v2(
     "sets_set_to": null,
     "pain_severity": null,
     "days": null,
-    "muscle_group": null
+    "muscle_group": null,
+    "time_hh_mm": null,
+    "recurrence": null
   }},
   "workout": {{
     "title": null,
@@ -987,6 +991,21 @@ async def parse_fitness_action_v2(
   period.start_date / end_date (по умолчанию неделя)
 - "сводка недели", "weekly", "weekly summary" → weekly_summary
 
+14m. НАПОМИНАНИЯ:
+- "напомни про тренировку в 7 утра", "ставь напоминание на 18:00 сегодня",
+  "разбуди в 9", "напомни через час позвонить" → schedule_reminder_action
+  target.note_text="текст напоминания", date=YYYY-MM-DD, target.time_hh_mm="HH:MM"
+- "напоминай каждый день в 8 пить воду" → recurrence="daily", target.time_hh_mm="08:00"
+- "напоминай по пн/ср/пт в 7 о тренировке" → recurrence="weekly:mon,wed,fri"
+- "напомни про сегодняшнюю тренировку в 6 вечера" → kind="workout_today"
+- "мои напоминания", "что у меня запланировано напомнить" → list_reminders
+- "отмени напоминание #5" → cancel_reminder_action, target.constraint_id=5 (reusing field)
+
+14n. ЗАМЕРЫ ТЕЛА (тренд):
+- "график веса", "как меняется вес", "замеры за месяц", "тренд талии",
+  "динамика веса", "вес за 90 дней" → show_measurements_trend
+  target.days=N (по умолчанию 90)
+
 14l. КОПИРОВАНИЕ ПЕРИОДОВ:
 - "скопируй неделю на следующую", "копируй тренировки этой недели на след",
   "перенеси все тренировки этой недели в следующую", "продублируй неделю",
@@ -1206,6 +1225,45 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
 
     if not logged_exercises:
         return "Я понял, что ты записываешь тренировку, но не смог уверенно выделить подходы."
+
+    # ── Sanity check на сильные отклонения от обычных весов ──
+    warnings = []
+    skip_sanity = "проверено" in text.lower() or "точно" in text.lower()
+    if not skip_sanity:
+        for ex in logged_exercises:
+            ex_name = ex.get("exercise_name") or ""
+            for s in ex.get("sets") or []:
+                w = s.get("weight_kg")
+                if w is None:
+                    continue
+                try:
+                    w = float(w)
+                except Exception:
+                    continue
+                if w > 500 or w < 0:
+                    warnings.append(f"⚠️ {ex_name}: вес {w} кг — нереалистично, проверь.")
+                    continue
+                stats = await get_exercise_weight_stats(telegram_user_id, ex_name, limit=10)
+                avg = stats.get("avg_w")
+                max_w = stats.get("max_w")
+                n = stats.get("n") or 0
+                if n >= 3 and avg and max_w:
+                    avg_f = float(avg)
+                    max_f = float(max_w)
+                    # outlier: > 2× max или < 0.3× avg при достаточной истории
+                    if w > max_f * 2:
+                        warnings.append(
+                            f"⚠️ {ex_name}: вес {w} кг, но твой максимум был {format_number(max_f)} кг. "
+                            f"Возможно опечатка? Скажи «проверено» или повтори с правильным."
+                        )
+                    elif w < avg_f * 0.3:
+                        warnings.append(
+                            f"ℹ️ {ex_name}: вес {w} кг гораздо ниже обычного ({format_number(avg_f)} кг). "
+                            f"Если разминка — это нормально, отметь как разминочный после записи."
+                        )
+        if any(w.startswith("⚠️") and "нереалистично" in w or "опечатка" in w for w in warnings):
+            # Hard warning — don't save, ask for confirmation
+            return "\n".join(warnings) + "\n\nЕсли всё верно — повтори: «проверено» в начале сообщения."
 
     # ── SMART CONTINUATION ─────────────────────────────────────────────────
     # Если есть активная сессия на ту же дату — НЕ создаём новую тренировку,
@@ -2787,6 +2845,42 @@ async def _handle_fitness_action_v2_inner(
             + (f"\nПропущено (уже было запланировано): {result['skipped']}." if result['skipped'] else "")
         )
 
+    # ─── Напоминания ───────────────────────────────────────────────
+    if action == "schedule_reminder_action":
+        return await _schedule_reminder_action(telegram_user_id, parsed, text)
+
+    if action == "list_reminders":
+        rems = await list_pending_reminders(telegram_user_id, limit=20)
+        if not rems:
+            return "Активных напоминаний нет."
+        lines = [f"⏰ Активные напоминания ({len(rems)}):", ""]
+        for r in rems:
+            payload = r.get("payload_json") or {}
+            if isinstance(payload, str):
+                import json as _j
+                try:
+                    payload = _j.loads(payload)
+                except Exception:
+                    payload = {}
+            txt = payload.get("text") or r.get("kind") or "напоминание"
+            fire = r.get("fire_at")
+            fire_str = str(fire)[:16]
+            rec = r.get("recurrence")
+            rec_str = f" [{rec}]" if rec else ""
+            lines.append(f"  #{r['id']} {fire_str}{rec_str}: {txt}")
+        return "\n".join(lines)
+
+    if action == "cancel_reminder_action":
+        target = parsed.get("target") or {}
+        rid = target.get("constraint_id") or target.get("set_number")
+        if not rid:
+            return "Уточни ID: «отмени напоминание #5»."
+        await cancel_reminder(int(rid))
+        return f"❌ Напоминание #{rid} отменено."
+
+    if action == "show_measurements_trend":
+        return await _show_measurements_trend(telegram_user_id, parsed)
+
     if action == "copy_period_to_period":
         period = parsed.get("period") or {}
         target = parsed.get("target") or {}
@@ -3062,9 +3156,13 @@ async def _export_csv(telegram_user_id: str | None, parsed: dict) -> str:
     body = "\n".join(body_lines)
     if len(body) <= 3800:
         return f"```\n{body}\n```\n\n{len(rows)} строк, {len(workouts)} тренировок."
-    return (
-        f"⚠️ CSV получился {len(body)} символов ({len(rows)} строк) — больше лимита Telegram. "
-        f"Попроси более узкий период или текстовый формат."
+
+    # Big — send as document
+    return BotReply(
+        text=f"📎 Экспорт CSV: {len(rows)} подходов, {len(workouts)} тренировок за {s} — {e}",
+        document_bytes=body.encode("utf-8"),
+        document_filename=f"workouts_{s}_to_{e}.csv",
+        document_caption=f"Тренировки {s} — {e}: {len(rows)} подходов в {len(workouts)} тренировках",
     )
 
 
@@ -3635,6 +3733,119 @@ async def _show_goals(telegram_user_id: str | None) -> str:
 # ═══════════════════════════════════════════════════════════════════════
 # Пакет 5: Отчёты
 # ═══════════════════════════════════════════════════════════════════════
+
+
+async def _schedule_reminder_action(
+    telegram_user_id: str | None,
+    parsed: dict,
+    text: str,
+) -> str:
+    target = parsed.get("target") or {}
+    note = target.get("note_text") or text[:200]
+    target_date = parsed.get("date") or date.today().isoformat()
+    time_hm = target.get("time_hh_mm")
+    recurrence = target.get("recurrence")
+
+    if not time_hm:
+        # Try regex from text
+        m = re.search(r"\b(\d{1,2})[:.](\d{2})\b", text)
+        if m:
+            time_hm = f"{int(m.group(1)):02d}:{m.group(2)}"
+        else:
+            # word forms: "в 7 утра", "в 18", "в 9 вечера"
+            m2 = re.search(r"\bв\s+(\d{1,2})(?:\s+(утра|вечера|ночи|дня))?", text.lower())
+            if m2:
+                h = int(m2.group(1))
+                part = m2.group(2)
+                if part == "вечера" and h < 12:
+                    h += 12
+                if part == "ночи" and h < 6:
+                    h += 0  # 1 ночи = 1:00
+                if part == "утра" and h >= 12:
+                    h -= 12
+                time_hm = f"{h:02d}:00"
+
+    if not time_hm:
+        return "Уточни время: «напомни в 7:00» или «в 18:30»."
+
+    # Build fire_at in UTC
+    from datetime import timezone as tz
+    try:
+        d = datetime.strptime(target_date, "%Y-%m-%d").date()
+    except Exception:
+        d = date.today()
+    hh, mm = [int(x) for x in time_hm.split(":")]
+    # Assume user's local = UTC for now (bot is single-user). Could be improved.
+    fire_dt = datetime(d.year, d.month, d.day, hh, mm, tzinfo=tz.utc)
+
+    # if past — push to tomorrow
+    now = datetime.now(tz.utc)
+    if fire_dt <= now:
+        from datetime import timedelta as _td
+        fire_dt = fire_dt + _td(days=1)
+
+    kind = "custom"
+    if any(x in text.lower() for x in ["тренировк", "трен ", "трене", "workout"]):
+        kind = "workout_today"
+
+    rid = await schedule_reminder(
+        telegram_user_id=telegram_user_id,
+        fire_at=fire_dt.isoformat(),
+        kind=kind,
+        payload={"text": note[:300]},
+        recurrence=recurrence,
+    )
+    rec_str = f" ({recurrence})" if recurrence else ""
+    return (
+        f"⏰ Напоминание #{rid} на {format_human_date(fire_dt.date().isoformat())} {time_hm}{rec_str}.\n"
+        f"Текст: {note[:100]}"
+    )
+
+
+async def _show_measurements_trend(telegram_user_id: str | None, parsed: dict) -> str:
+    target = parsed.get("target") or {}
+    days = int(target.get("days") or 90)
+    rows = await get_measurements_period(telegram_user_id, days)
+    if not rows:
+        return f"Замеров за последние {days} дней нет. Запиши: «вес 80», «талия 82»."
+
+    lines = [f"📊 Замеры за последние {days} дней:", ""]
+    fields = [
+        ("weight_kg", "Вес", "кг"),
+        ("waist_cm", "Талия", "см"),
+        ("chest_cm", "Грудь", "см"),
+        ("hips_cm", "Бёдра", "см"),
+        ("arm_cm", "Рука", "см"),
+        ("thigh_cm", "Бедро", "см"),
+        ("neck_cm", "Шея", "см"),
+        ("bodyfat_pct", "% жира", "%"),
+    ]
+    for key, label, unit in fields:
+        values = [(r["measurement_date"], r[key]) for r in rows if r.get(key) is not None]
+        if not values:
+            continue
+        first_d, first_v = values[0]
+        last_d, last_v = values[-1]
+        delta = float(last_v) - float(first_v)
+        sign = "▲" if delta > 0 else ("▼" if delta < 0 else "≈")
+        lines.append(
+            f"  {label}: {format_number(first_v)}{unit} → {format_number(last_v)}{unit} "
+            f"({sign} {delta:+g}{unit}, {len(values)} замеров)"
+        )
+
+        # mini ASCII trend (только если 4+ замера)
+        if len(values) >= 4:
+            recent = values[-8:]
+            vs = [float(v) for _, v in recent]
+            vmax = max(vs)
+            vmin = min(vs)
+            rng = vmax - vmin if vmax > vmin else 1
+            for d, v in recent:
+                bar = int((float(v) - vmin) / rng * 15)
+                lines.append(f"    {str(d)[:10]} {format_number(v):>6} {'█' * bar}")
+            lines.append("")
+
+    return "\n".join(lines)
 
 
 async def _coach_report(telegram_user_id: str | None, parsed: dict) -> str:

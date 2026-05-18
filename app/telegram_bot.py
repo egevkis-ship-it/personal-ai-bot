@@ -30,6 +30,16 @@ def _user_id(update: Update) -> str:
 
 async def _send_reply(update: Update, reply: BotReply | str) -> None:
     if isinstance(reply, BotReply):
+        if reply.document_bytes:
+            import io
+            buf = io.BytesIO(reply.document_bytes)
+            buf.name = reply.document_filename or "export.txt"
+            await update.message.reply_document(
+                document=buf,
+                filename=reply.document_filename or "export.txt",
+                caption=(reply.document_caption or reply.text or "")[:1024],
+            )
+            return
         await update.message.reply_text(reply.text, reply_markup=reply.keyboard)
     else:
         await update.message.reply_text(reply)
@@ -58,14 +68,74 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(
         "Я понимаю свободный текст и голосовые сообщения.\n\n"
-        "Примеры:\n"
+        "Быстрые команды (фитнес):\n"
+        "/today — что сегодня по плану\n"
+        "/next — следующая тренировка\n"
+        "/week — план недели\n"
+        "/last — последняя записанная\n"
+        "/finished — закончил тренировку\n"
+        "/stats — быстрая сводка\n"
+        "/pr — личные рекорды\n"
+        "/reminders — мои напоминания\n"
+        "/rules — выученные правила\n\n"
+        "Примеры свободного текста:\n"
         "— Сделал жим 100кг 3x8\n"
-        "— Потратил 500р на продукты\n"
-        "— Напомни завтра в 10 позвонить врачу\n"
-        "— Съел 200г куриной грудки\n"
-        "— Установи apscheduler\n"
-        "— Добавь трекинг сна\n"
+        "— Покажи тренировку в пятницу\n"
+        "— Поменяй жим на тягу, 4×10 70кг\n"
+        "— Что я сделал на этой неделе\n"
+        "— Напомни в 7 утра про тренировку\n"
     )
+
+
+async def _route_text_as(update: Update, text: str) -> None:
+    user_id = _user_id(update)
+    reply = await route(user_id, text)
+    await _send_reply(update, reply)
+
+
+async def cmd_today(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Что сегодня по плану")
+
+
+async def cmd_next(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Следующая тренировка")
+
+
+async def cmd_week(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "План на неделю")
+
+
+async def cmd_last(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Последняя тренировка")
+
+
+async def cmd_finished(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Закончил тренировку")
+
+
+async def cmd_stats(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Быстрая сводка")
+
+
+async def cmd_pr(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Мои рекорды")
+
+
+async def cmd_reminders(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Мои напоминания")
+
+
+async def cmd_rules(update, context):
+    if not _is_allowed(update): return
+    await _route_text_as(update, "Покажи выученные правила")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -143,9 +213,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def _post_init(application: Application) -> None:
     from app.db.migrations.runner import run_migrations
-    from app.modules.tasks.reminders import reminder_loop
+    from app.modules.fitness.reminders import reminder_loop as fitness_reminder_loop
     await run_migrations()
-    application.create_task(reminder_loop())
+    application.create_task(fitness_reminder_loop(bot=application.bot))
 
 
 def build_application() -> Application:
@@ -159,6 +229,16 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("help", cmd_help))
+    # Slash-команды быстрого доступа
+    app.add_handler(CommandHandler("today", cmd_today))
+    app.add_handler(CommandHandler("next", cmd_next))
+    app.add_handler(CommandHandler("week", cmd_week))
+    app.add_handler(CommandHandler("last", cmd_last))
+    app.add_handler(CommandHandler("finished", cmd_finished))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("pr", cmd_pr))
+    app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

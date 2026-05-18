@@ -347,6 +347,25 @@ async def init_db() -> None:
         ON pain_journal (telegram_user_id, log_date DESC);
         """))
 
+        # ═══ Напоминания ═══
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS scheduled_reminders (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_user_id TEXT,
+            fire_at TIMESTAMPTZ NOT NULL,
+            kind TEXT,            -- workout_today | custom | recurring_daily | recurring_weekly
+            payload_json JSONB,
+            status TEXT DEFAULT 'pending', -- pending | sent | cancelled
+            fired_at TIMESTAMPTZ,
+            recurrence TEXT,      -- null | daily | weekly:mon,wed,fri
+            created_at TIMESTAMPTZ DEFAULT now()
+        );
+        """))
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_reminders_fire
+        ON scheduled_reminders (status, fire_at) WHERE status = 'pending';
+        """))
+
         # Helpful indexes
         await conn.execute(text("""
         CREATE INDEX IF NOT EXISTS idx_training_plans_user_status
@@ -1051,6 +1070,143 @@ async def bulk_update_planned_exercises(
         n = len(result.fetchall())
         await session.commit()
         return n
+
+
+async def schedule_reminder(
+    telegram_user_id: str | None,
+    fire_at: str,
+    kind: str = "custom",
+    payload: dict | None = None,
+    recurrence: str | None = None,
+) -> int:
+    """fire_at: ISO datetime UTC."""
+    import json as _j
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO scheduled_reminders
+              (telegram_user_id, fire_at, kind, payload_json, recurrence)
+            VALUES (:uid, :fire, :k, CAST(:p AS JSONB), :rec)
+            RETURNING id
+            """),
+            {
+                "uid": telegram_user_id,
+                "fire": fire_at,
+                "k": kind,
+                "p": _j.dumps(payload or {}, ensure_ascii=False),
+                "rec": recurrence,
+            },
+        )
+        rid = result.scalar()
+        await session.commit()
+        return rid
+
+
+async def get_due_reminders() -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, telegram_user_id, fire_at, kind, payload_json, recurrence
+            FROM scheduled_reminders
+            WHERE status = 'pending' AND fire_at <= now()
+            ORDER BY fire_at ASC
+            LIMIT 100
+            """)
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def mark_reminder_sent(reminder_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE scheduled_reminders SET status='sent', fired_at=now() WHERE id = :id"),
+            {"id": reminder_id},
+        )
+        await session.commit()
+
+
+async def reschedule_recurring(reminder_id: int, next_fire_at: str) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""
+            UPDATE scheduled_reminders
+            SET fire_at = :next, status = 'pending', fired_at = NULL
+            WHERE id = :id
+            """),
+            {"next": next_fire_at, "id": reminder_id},
+        )
+        await session.commit()
+
+
+async def list_pending_reminders(telegram_user_id: str | None, limit: int = 20) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, fire_at, kind, payload_json, recurrence
+            FROM scheduled_reminders
+            WHERE telegram_user_id = :uid AND status = 'pending'
+            ORDER BY fire_at ASC LIMIT :lim
+            """),
+            {"uid": telegram_user_id, "lim": limit},
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def cancel_reminder(reminder_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE scheduled_reminders SET status='cancelled' WHERE id = :id"),
+            {"id": reminder_id},
+        )
+        await session.commit()
+
+
+async def get_exercise_weight_stats(
+    telegram_user_id: str | None,
+    exercise_name: str,
+    limit: int = 20,
+) -> dict:
+    """For sanity checks: typical weight range for this exercise."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT
+                AVG(s.weight_kg) AS avg_w,
+                MIN(s.weight_kg) AS min_w,
+                MAX(s.weight_kg) AS max_w,
+                COUNT(*) AS n
+            FROM (
+                SELECT s2.weight_kg
+                FROM fitness_exercise_sets s2
+                JOIN fitness_workouts w ON w.id = s2.workout_id
+                WHERE w.telegram_user_id = :uid
+                  AND lower(s2.exercise_name) LIKE lower(:pat)
+                  AND s2.weight_kg IS NOT NULL
+                ORDER BY w.id DESC LIMIT :lim
+            ) s
+            """),
+            {"uid": telegram_user_id, "pat": f"%{exercise_name}%", "lim": limit},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else {"avg_w": None, "min_w": None, "max_w": None, "n": 0}
+
+
+async def get_measurements_period(
+    telegram_user_id: str | None,
+    days: int = 90,
+) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT measurement_date, weight_kg, waist_cm, chest_cm, hips_cm, arm_cm, thigh_cm, neck_cm, bodyfat_pct
+            FROM body_measurements
+            WHERE telegram_user_id = :uid
+              AND measurement_date >= CURRENT_DATE - (:days || ' days')::interval
+            ORDER BY measurement_date ASC
+            """),
+            {"uid": telegram_user_id, "days": days},
+        )
+        return [dict(r) for r in result.mappings().all()]
 
 
 async def copy_planned_period(
