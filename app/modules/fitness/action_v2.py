@@ -24,6 +24,8 @@ from app.db import (
     get_last_workout,
     get_last_measurement,
 )
+from app.bot_reply import BotReply
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.modules.fitness.exercise_history import handle_exercise_history_request
 from app.modules.fitness.router_hardening import handle_router_hardening
 from app.modules.fitness.self_learning import (
@@ -68,12 +70,34 @@ def _safe_json_loads(text: str) -> dict:
         raise
 
 
+SESSION_TIMEOUT_HOURS = 6
+
+
 def _active_session_context_from_pending(pending: dict | None) -> dict | None:
+    """Return active session context if recent, None if stale (>6h)."""
     if not pending:
         return None
     if pending.get("decision_type") != "active_workout_session":
         return None
-    return pending.get("context_json") or {}
+    ctx = pending.get("context_json") or {}
+
+    # Check freshness
+    last_act = ctx.get("last_activity_at") or ctx.get("last_training_activity_at")
+    if last_act:
+        try:
+            ts = datetime.fromisoformat(last_act.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            age_hours = (now - ts).total_seconds() / 3600
+            if age_hours > SESSION_TIMEOUT_HOURS:
+                ctx["_dormant"] = True
+                ctx["_age_hours"] = round(age_hours, 1)
+        except Exception:
+            pass
+    return ctx
+
+
+def _is_dormant(session: dict | None) -> bool:
+    return bool(session and session.get("_dormant"))
 
 
 def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
@@ -672,7 +696,7 @@ async def parse_fitness_action_v2(
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -693,7 +717,8 @@ async def parse_fitness_action_v2(
     "severity": null,
     "constraint_id": null,
     "constraint_until": null,
-    "export_format": null
+    "export_format": null,
+    "feeling": null
   }},
   "workout": {{
     "title": null,
@@ -880,6 +905,18 @@ async def parse_fitness_action_v2(
   target.new_exercise_name="X"
 - "это была разминка", "первый подход — разминка" → mark_last_as_warmup
   target.set_number=null или N
+
+14g. КАЧЕСТВО ЖИЗНИ (show_last_recorded / undo_last / add_set_note / resume_session / tag_feeling):
+- "что я только что записал", "покажи последнее", "повтори ответ", "что ты записал" → show_last_recorded
+- "отмени последнее действие", "верни как было", "отмена", "undo" → undo_last
+  Применяется ТОЛЬКО когда последний action писал в базу (log_workout_sets, edit_*, delete_*).
+- "к подходу 3 заметка: помог напарник", "к последнему сету: спина устала",
+  "пометь второй: с другим хватом" → add_set_note
+  target.set_number=N, target.note_text="..."
+- "продолжаю вчерашнюю тренировку", "продолжаю прерванную", "оживи сессию" → resume_session
+- "сегодня сильный", "слабый день", "болело плечо после жима", "энергия 7/10",
+  "общее состояние: устал", "сила 9/10", "форма норм" → tag_feeling
+  target.feeling="сильный/слабый/болело/норм/устал" + опциональный numeric (7/10)
 
 14f. ЭКСПОРТ В ФАЙЛ (export_csv):
 - "выгрузи в CSV", "экспортируй в файл", "дай таблицу"
@@ -1202,9 +1239,12 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
 
     lines.append(f"Всего записано подходов: {total_sets}")
     lines.append(f"Текущее упражнение: {current_exercise}")
-    lines.append("Скажи «закончил тренировку», когда всё, или продолжай диктовать.")
+    lines.append("Продолжай диктовать, или жми кнопку чтобы завершить.")
 
-    return "\n".join(lines).strip()
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Закончить тренировку", callback_data=f"fit:finish_workout:{workout_id}"),
+    ]])
+    return BotReply(text="\n".join(lines).strip(), keyboard=kb)
 
 
 async def _continue_current_exercise(telegram_user_id: str | None, text: str, parsed: dict, active_session: dict | None) -> str:
@@ -1919,7 +1959,7 @@ async def _ask_clarification(text: str) -> str:
     return response.content[0].text if response.content else "Не совсем понял — уточни что сделать?"
 
 
-async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
+async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> "str | BotReply | None":
     """Public entry. Wraps the inner handler with self-learning hooks + conversation context."""
 
     forget_reply = await handle_forget_request(telegram_user_id, text)
@@ -1937,16 +1977,43 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     except Exception:
         prev = None
 
-    response = await _handle_fitness_action_v2_inner(telegram_user_id, text, prev_context=prev)
+    # ── Dormant session auto-close ────────────────────────────────────────
+    dormant_notice = ""
+    t_low = text.lower()
+    is_resume_phrase = any(p in t_low for p in [
+        "продолжаю прерван", "продолжаю вчерашн", "возобнов", "оживи",
+        "продолжаю #", "resume",
+    ])
+    if not is_resume_phrase:
+        try:
+            pending_pre = await get_latest_fitness_pending_decision(telegram_user_id)
+            sess_pre = _active_session_context_from_pending(pending_pre)
+            if _is_dormant(sess_pre):
+                age = sess_pre.get("_age_hours")
+                old_wid = sess_pre.get("workout_id")
+                if pending_pre and pending_pre.get("id"):
+                    await resolve_fitness_pending_decision(pending_pre["id"], status="resolved")
+                dormant_notice = (
+                    f"ℹ️ Прошлая сессия #{old_wid} ({age:.1f}ч назад) автоматически закрыта. "
+                    f"Если хотел продолжить — скажи «продолжаю прерванную».\n\n"
+                )
+        except Exception:
+            pass
 
-    # Handlers that touch a specific date save their own context via save_last_interaction.
-    # This wrapper updates input/response/timestamp only (preserves date context via COALESCE).
+    response = await _handle_fitness_action_v2_inner(telegram_user_id, text, prev_context=prev)
+    if dormant_notice:
+        if isinstance(response, str):
+            response = dormant_notice + response
+        elif isinstance(response, BotReply):
+            response = BotReply(text=dormant_notice + response.text, keyboard=response.keyboard)
+
     if response and telegram_user_id:
         try:
+            text_for_log = response.text if isinstance(response, BotReply) else response
             await save_last_interaction(
                 telegram_user_id=telegram_user_id,
                 input_text=text,
-                bot_response=response,
+                bot_response=text_for_log,
             )
         except Exception:
             pass
@@ -1958,11 +2025,9 @@ async def _handle_fitness_action_v2_inner(
     telegram_user_id: str | None,
     text: str,
     prev_context: dict | None = None,
-) -> str | None:
+) -> "str | BotReply | None":
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
-    # prev_context: previous conversation context (current_workout_date etc.)
-    # Stored separately by handlers via save_last_interaction()
     _PREV = prev_context or {}
 
     # ── Plan import detection runs FIRST and overrides any stale pending/session ──
@@ -2232,11 +2297,8 @@ async def _handle_fitness_action_v2_inner(
 
     if action == "finish_workout":
         if active_session and active_session.get("workout_id"):
-            pending = await get_latest_fitness_pending_decision(telegram_user_id)
-            if pending and pending.get("id"):
-                await resolve_fitness_pending_decision(pending["id"], status="resolved")
-            wid = active_session["workout_id"]
-            return f"✅ Тренировка завершена (ID: {wid}). Можешь посмотреть отчёт командой «что я сделал сегодня»."
+            wid = int(active_session["workout_id"])
+            return await _finish_workout_with_summary(telegram_user_id, wid)
         return "Активная тренировочная сессия не найдена. Возможно, она уже завершена."
 
     if action == "record_measurement":
@@ -2374,13 +2436,16 @@ async def _handle_fitness_action_v2_inner(
                 wid = last["workout"]["id"]
         if not wid:
             return "Не нашёл тренировку для удаления."
-        n = await delete_workout(int(wid))
-        # also clear pending session
-        if active_session and active_session.get("workout_id") == wid:
-            pend = await get_latest_fitness_pending_decision(telegram_user_id)
-            if pend and pend.get("id"):
-                await resolve_fitness_pending_decision(pend["id"], status="cancelled")
-        return f"🗑 Удалил тренировку #{wid}." if n else "Не удалось удалить."
+
+        # Confirmation prompt with inline buttons (destructive)
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Удалить", callback_data=f"fit:confirm_delete_workout:{wid}"),
+            InlineKeyboardButton("✖ Отмена", callback_data="fit:cancel:_"),
+        ]])
+        return BotReply(
+            text=f"⚠️ Точно удалить тренировку #{wid}? Это снесёт все её подходы.",
+            keyboard=kb,
+        )
 
     if action == "rename_last_exercise":
         target = parsed.get("target") or {}
@@ -2433,6 +2498,41 @@ async def _handle_fitness_action_v2_inner(
 
     if action == "export_csv":
         return await _export_csv(telegram_user_id, parsed)
+
+    # ─── Качество жизни (UX) ─────────────────────────────────────────────
+    if action == "show_last_recorded":
+        last = await get_last_interaction(telegram_user_id)
+        if not last or not last.get("bot_response"):
+            return "Не помню что записал в последний раз."
+        prev = last.get("bot_response") or ""
+        return f"📋 Мой последний ответ:\n\n{prev}"
+
+    if action == "undo_last":
+        return await _undo_last_action(telegram_user_id)
+
+    if action == "add_set_note":
+        return await _add_set_note(telegram_user_id, parsed, active_session)
+
+    if action == "resume_session":
+        if active_session and active_session.get("workout_id"):
+            pending = await get_latest_fitness_pending_decision(telegram_user_id)
+            if pending:
+                ctx = pending.get("context_json") or {}
+                ctx["session_status"] = "active"
+                ctx["last_activity_at"] = _now_iso()
+                ctx["last_training_activity_at"] = _now_iso()
+                ctx.pop("_dormant", None)
+                await update_fitness_pending_decision_context(pending["id"], ctx)
+            return f"▶️ Возобновил сессию #{active_session['workout_id']}. Продолжай диктовать подходы."
+        # Try to revive the latest workout
+        last = await get_last_workout(telegram_user_id)
+        if not last:
+            return "Не нашёл прошлой тренировки для возобновления."
+        wd = str(last["workout"].get("workout_date"))[:10]
+        return f"Последняя тренировка: {format_human_date(wd)} (ID #{last['workout']['id']}). Активной сессии нет — диктуй новые подходы, они уйдут в новую."
+
+    if action == "tag_feeling":
+        return await _tag_feeling(telegram_user_id, text, parsed, active_session)
 
     if action == "non_fitness":
         # Делегируем общему AI-ответчику, не ломая активную сессию
@@ -2692,6 +2792,215 @@ async def _export_csv(telegram_user_id: str | None, parsed: dict) -> str:
         f"⚠️ CSV получился {len(body)} символов ({len(rows)} строк) — больше лимита Telegram. "
         f"Попроси более узкий период или текстовый формат."
     )
+
+
+async def _finish_workout_with_summary(telegram_user_id: str | None, workout_id: int) -> str:
+    """Закрыть сессию + богатое резюме: подходы, тоннаж, длительность, новые PR."""
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+    from datetime import timedelta
+
+    async with get_session() as s:
+        w = await s.execute(sql_text("""
+            SELECT id, workout_date, focus_label, focus, created_at, notes
+            FROM fitness_workouts WHERE id = :id
+        """), {"id": workout_id})
+        wrow = w.mappings().first()
+        if not wrow:
+            return f"Тренировка #{workout_id} не найдена."
+
+        sets = await s.execute(sql_text("""
+            SELECT exercise_name, set_number, weight_kg, reps, notes
+            FROM fitness_exercise_sets
+            WHERE workout_id = :id ORDER BY id ASC
+        """), {"id": workout_id})
+        all_sets = [dict(r) for r in sets.mappings().all()]
+
+    # Resolve pending session
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    started_iso = None
+    if pending:
+        ctx = pending.get("context_json") or {}
+        started_iso = ctx.get("started_at")
+        if pending.get("id"):
+            await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+    # Aggregate
+    total_sets = len(all_sets)
+    by_ex: dict[str, list[dict]] = {}
+    total_tonnage = 0.0
+    max_per_ex: dict[str, float] = {}
+    for st in all_sets:
+        ex = st.get("exercise_name") or "—"
+        by_ex.setdefault(ex, []).append(st)
+        if st.get("weight_kg") and st.get("reps"):
+            try:
+                total_tonnage += float(st["weight_kg"]) * int(st["reps"])
+            except Exception:
+                pass
+            try:
+                w = float(st["weight_kg"])
+                if w > max_per_ex.get(ex, 0):
+                    max_per_ex[ex] = w
+            except Exception:
+                pass
+
+    # Detect new PRs (max weight in this workout > max weight before this workout)
+    new_prs: list[str] = []
+    if max_per_ex:
+        from app.db.engine import get_session as gs
+        async with gs() as s2:
+            for ex_name, this_max in max_per_ex.items():
+                prev = await s2.execute(sql_text("""
+                    SELECT MAX(s.weight_kg) FROM fitness_exercise_sets s
+                    JOIN fitness_workouts w ON w.id = s.workout_id
+                    WHERE w.telegram_user_id = :uid
+                      AND s.exercise_name = :ex
+                      AND w.id < :wid
+                      AND s.weight_kg IS NOT NULL
+                """), {"uid": telegram_user_id, "ex": ex_name, "wid": workout_id})
+                prev_max = prev.scalar() or 0
+                if this_max > float(prev_max):
+                    new_prs.append(f"{ex_name}: {format_number(this_max)} кг (было {format_number(prev_max)})")
+
+    # Duration
+    duration_str = ""
+    if started_iso:
+        try:
+            started = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
+            dur = datetime.now(timezone.utc) - started
+            total_min = int(dur.total_seconds() // 60)
+            h, m = divmod(total_min, 60)
+            duration_str = f"{h} ч {m} мин" if h else f"{m} мин"
+        except Exception:
+            pass
+
+    lines = [
+        f"✅ Тренировка завершена! ID: #{workout_id}",
+        "",
+        f"📅 Дата: {format_human_date(wrow.get('workout_date'))}",
+    ]
+    if wrow.get("focus_label"):
+        lines.append(f"🎯 Фокус: {wrow['focus_label']}")
+    if duration_str:
+        lines.append(f"⏱ Длительность: {duration_str}")
+    lines.append(f"💪 Упражнений: {len(by_ex)}, подходов: {total_sets}")
+    if total_tonnage > 0:
+        lines.append(f"📊 Тоннаж: {format_number(round(total_tonnage, 1))} кг")
+    if new_prs:
+        lines.append("")
+        lines.append("🏆 НОВЫЕ ЛИЧНЫЕ РЕКОРДЫ:")
+        for pr in new_prs:
+            lines.append(f"  • {pr}")
+    if wrow.get("notes"):
+        lines.append("")
+        lines.append(f"📝 {wrow['notes']}")
+
+    return "\n".join(lines)
+
+
+async def _undo_last_action(telegram_user_id: str | None) -> str:
+    """Reverse the last write action, if possible."""
+    last = await get_last_interaction(telegram_user_id)
+    if not last:
+        return "Нечего отменять — нет истории."
+    action = (last.get("action") or "").lower()
+
+    if action in ("log_workout_sets", "continue_current_exercise", "log_workout_sets_append"):
+        # Reverse: delete last set
+        pending = await get_latest_fitness_pending_decision(telegram_user_id)
+        if not pending:
+            return "Не нашёл активную сессию для undo."
+        wid = (pending.get("context_json") or {}).get("workout_id")
+        if not wid:
+            return "Нет workout_id для undo."
+        n = await delete_last_n_sets(int(wid), 1)
+        return f"↩️ Отменил — удалил последний подход ({n})."
+
+    return (
+        "Undo пока умею только для записи подходов. Для других правок скажи явно: "
+        "«удали последний подход», «не 80 а 85», «удали всю тренировку»."
+    )
+
+
+async def _add_set_note(
+    telegram_user_id: str | None,
+    parsed: dict,
+    active_session: dict | None,
+) -> str:
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    target = parsed.get("target") or {}
+    note_text = target.get("note_text")
+    set_number = target.get("set_number")
+
+    if not note_text:
+        return "Текст заметки пуст."
+    if not active_session or not active_session.get("workout_id"):
+        last = await get_last_workout(telegram_user_id)
+        if not last:
+            return "Нет активной сессии и записанных тренировок."
+        wid = last["workout"]["id"]
+    else:
+        wid = int(active_session["workout_id"])
+
+    async with get_session() as s:
+        if set_number:
+            res = await s.execute(sql_text("""
+                UPDATE fitness_exercise_sets
+                SET notes = COALESCE(notes || ' | ', '') || :n
+                WHERE workout_id = :w AND set_number = :sn
+                RETURNING id, exercise_name
+            """), {"w": wid, "sn": int(set_number), "n": note_text})
+        else:
+            # last set
+            res = await s.execute(sql_text("""
+                UPDATE fitness_exercise_sets
+                SET notes = COALESCE(notes || ' | ', '') || :n
+                WHERE id = (
+                    SELECT id FROM fitness_exercise_sets
+                    WHERE workout_id = :w ORDER BY id DESC LIMIT 1
+                )
+                RETURNING id, exercise_name
+            """), {"w": wid, "n": note_text})
+        row = res.mappings().first()
+        await s.commit()
+    if not row:
+        return "Не нашёл подход для заметки."
+    return f"📝 Заметка к подходу ({row['exercise_name']}): {note_text}"
+
+
+async def _tag_feeling(
+    telegram_user_id: str | None,
+    text: str,
+    parsed: dict,
+    active_session: dict | None,
+) -> str:
+    """Tag current/last workout with how user felt."""
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+
+    target = parsed.get("target") or {}
+    feeling = target.get("feeling") or text.strip()
+    tag_line = f"#feeling: {feeling}"
+
+    if active_session and active_session.get("workout_id"):
+        wid = int(active_session["workout_id"])
+    else:
+        last = await get_last_workout(telegram_user_id)
+        if not last:
+            return f"Запомнил: {feeling}. Записать к какой тренировке — не нашёл."
+        wid = last["workout"]["id"]
+
+    async with get_session() as s:
+        await s.execute(sql_text("""
+            UPDATE fitness_workouts
+            SET notes = COALESCE(notes || E'\n', '') || :tag
+            WHERE id = :id
+        """), {"id": wid, "tag": tag_line})
+        await s.commit()
+    return f"📌 Записал к тренировке #{wid}: {tag_line}"
 
 
 async def _show_learned_rules(telegram_user_id: str | None) -> str:

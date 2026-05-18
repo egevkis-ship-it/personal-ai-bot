@@ -132,6 +132,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(result)
         return
 
+    if data.startswith("fit:"):
+        from app.modules.fitness.callbacks import handle_fitness_callback
+        result = await handle_fitness_callback(user_id, data)
+        await query.edit_message_text(result)
+        return
+
     await query.edit_message_text("Неизвестное действие.")
 
 
