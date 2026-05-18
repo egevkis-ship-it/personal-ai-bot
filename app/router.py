@@ -37,6 +37,27 @@ def _has_hard_fitness_signal(text: str) -> bool:
     return hits >= 2  # минимум 2 сигнала чтобы исключить случайности
 
 
+# Жёсткие ops-сигналы. БЕЗ них — ops НЕ запускается, даже если intent=ops.
+_HARD_OPS_PATTERNS = [
+    r"\bзадеплой", r"\bдеплой\b", r"\bdeploy\b",
+    r"\bустанови.*(pip|пакет|библиотек|зависимост)",
+    r"\bpip install\b", r"\buv add\b", r"\bpoetry add\b",
+    r"\bнапиши код", r"\bдобавь модуль", r"\bдобавь файл",
+    r"\bсделай (миграцию|migration)", r"\bcommit\b", r"\bgit (commit|push|pull)",
+    r"\bpush в (main|master|origin)", r"\bпуш в (main|master|origin)",
+    r"\bcreate pr\b", r"\bсоздай pr\b",
+    r"\bнапиши функцию", r"\bдобавь функцию.*в код",
+    r"\bкласс\s+[A-Z]", r"\bимпорт\b",
+    r"\bпропиши\b.*\b(в код|функцию|роут|hand)",
+    r"\bв коде\b", r"\bв файле\b.*\.py",
+]
+
+
+def _has_hard_ops_signal(text: str) -> bool:
+    t = (text or "").lower().replace("ё", "е")
+    return any(re.search(p, t) for p in _HARD_OPS_PATTERNS)
+
+
 async def route(user_id: str, text: str) -> BotReply | str:
     try:
         # 1. Active workout session — route directly without AI parsing
@@ -98,6 +119,16 @@ async def _dispatch_intent(user_id: str, text: str, intent: str, parsed: dict) -
         return await handle(user_id, text, parsed)
 
     if intent in _OPS_INTENTS:
+        # Двойная защита: classifier мог ошибочно поставить ops на
+        # "удали данные / копируй тренировки / почисти историю" — это НЕ ops.
+        # ops запускаем только при явных code/deploy маркерах.
+        if not _has_hard_ops_signal(text):
+            logger.warning(f"intent=ops but no hard ops signal in: {text[:120]!r}")
+            if _has_hard_fitness_signal(text):
+                from app.modules.fitness.handler import handle
+                return await handle(user_id, text, parsed)
+            from app.ai import generate_general_answer
+            return await generate_general_answer(text)
         from app.modules.ops.handler import handle
         return await handle(user_id, text, parsed)
 
