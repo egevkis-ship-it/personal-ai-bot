@@ -293,6 +293,60 @@ async def init_db() -> None:
         ON learning_corrections (telegram_user_id, status, created_at DESC);
         """))
 
+        # ═══ Шаблоны тренировок (для Пакет 4) ═══
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS workout_templates (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_user_id TEXT,
+            name TEXT,
+            focus TEXT,
+            focus_label TEXT,
+            exercises_json JSONB,
+            notes TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            last_used_at TIMESTAMPTZ
+        );
+        """))
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_templates_user_name
+        ON workout_templates (telegram_user_id, name);
+        """))
+
+        # ═══ Цели ═══
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fitness_goals (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_user_id TEXT,
+            goal_type TEXT,           -- exercise_max | bodyweight | bodyfat | frequency
+            target_exercise TEXT,
+            target_value NUMERIC,
+            target_unit TEXT,         -- kg | %
+            target_deadline DATE,
+            status TEXT DEFAULT 'active', -- active | achieved | abandoned
+            notes TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            achieved_at TIMESTAMPTZ
+        );
+        """))
+
+        # ═══ Журнал боли ═══
+        await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS pain_journal (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_user_id TEXT,
+            log_date DATE DEFAULT CURRENT_DATE,
+            body_part TEXT,
+            severity NUMERIC,         -- 1..10
+            note TEXT,
+            source_text TEXT,
+            created_at TIMESTAMPTZ DEFAULT now()
+        );
+        """))
+        await conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_pain_user_date
+        ON pain_journal (telegram_user_id, log_date DESC);
+        """))
+
         # Helpful indexes
         await conn.execute(text("""
         CREATE INDEX IF NOT EXISTS idx_training_plans_user_status
@@ -780,6 +834,249 @@ async def get_last_workout(telegram_user_id: str | None) -> dict | None:
             "workout": dict(workout),
             "sets": [dict(row) for row in sets_result.mappings().all()],
         }
+
+
+async def save_workout_template(
+    telegram_user_id: str | None,
+    name: str,
+    focus: str | None,
+    focus_label: str | None,
+    exercises: list[dict],
+    notes: str | None = None,
+) -> int:
+    import json as _j
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO workout_templates
+              (telegram_user_id, name, focus, focus_label, exercises_json, notes)
+            VALUES (:uid, :n, :f, :fl, CAST(:ex AS JSONB), :nt)
+            RETURNING id
+            """),
+            {
+                "uid": telegram_user_id, "n": name, "f": focus, "fl": focus_label,
+                "ex": _j.dumps(exercises, ensure_ascii=False), "nt": notes,
+            },
+        )
+        tid = result.scalar()
+        await session.commit()
+        return tid
+
+
+async def list_workout_templates(telegram_user_id: str | None) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, name, focus, focus_label, exercises_json, last_used_at, created_at
+            FROM workout_templates
+            WHERE telegram_user_id = :uid
+            ORDER BY COALESCE(last_used_at, created_at) DESC
+            """),
+            {"uid": telegram_user_id},
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def get_workout_template_by_name(
+    telegram_user_id: str | None,
+    name: str,
+) -> dict | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, name, focus, focus_label, exercises_json
+            FROM workout_templates
+            WHERE telegram_user_id = :uid AND lower(name) LIKE lower(:pat)
+            ORDER BY last_used_at DESC NULLS LAST LIMIT 1
+            """),
+            {"uid": telegram_user_id, "pat": f"%{name}%"},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
+async def mark_template_used(template_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE workout_templates SET last_used_at = now() WHERE id = :id"),
+            {"id": template_id},
+        )
+        await session.commit()
+
+
+async def add_fitness_goal(
+    telegram_user_id: str | None,
+    goal_type: str,
+    target_exercise: str | None = None,
+    target_value: float | None = None,
+    target_unit: str = "kg",
+    target_deadline: str | None = None,
+    notes: str | None = None,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO fitness_goals
+              (telegram_user_id, goal_type, target_exercise, target_value, target_unit, target_deadline, notes)
+            VALUES (:uid, :gt, :te, :tv, :tu, :td, :n)
+            RETURNING id
+            """),
+            {
+                "uid": telegram_user_id, "gt": goal_type, "te": target_exercise,
+                "tv": target_value, "tu": target_unit, "td": target_deadline, "n": notes,
+            },
+        )
+        gid = result.scalar()
+        await session.commit()
+        return gid
+
+
+async def list_active_goals(telegram_user_id: str | None) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, goal_type, target_exercise, target_value, target_unit,
+                   target_deadline, notes, created_at
+            FROM fitness_goals
+            WHERE telegram_user_id = :uid AND status = 'active'
+            ORDER BY target_deadline ASC NULLS LAST
+            """),
+            {"uid": telegram_user_id},
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def mark_goal_achieved(goal_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE fitness_goals SET status='achieved', achieved_at=now() WHERE id = :id"),
+            {"id": goal_id},
+        )
+        await session.commit()
+
+
+async def log_pain(
+    telegram_user_id: str | None,
+    body_part: str,
+    severity: float | None = None,
+    note: str | None = None,
+    log_date: str | None = None,
+    source_text: str | None = None,
+) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            INSERT INTO pain_journal
+              (telegram_user_id, log_date, body_part, severity, note, source_text)
+            VALUES (:uid, COALESCE(:d, CURRENT_DATE), :bp, :sev, :n, :src)
+            RETURNING id
+            """),
+            {"uid": telegram_user_id, "d": log_date, "bp": body_part,
+             "sev": severity, "n": note, "src": source_text},
+        )
+        pid = result.scalar()
+        await session.commit()
+        return pid
+
+
+async def get_pain_journal(
+    telegram_user_id: str | None,
+    days: int = 30,
+) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT id, log_date, body_part, severity, note
+            FROM pain_journal
+            WHERE telegram_user_id = :uid AND log_date >= CURRENT_DATE - (:days || ' days')::interval
+            ORDER BY log_date DESC, id DESC
+            """),
+            {"uid": telegram_user_id, "days": days},
+        )
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def bulk_update_planned_exercises(
+    telegram_user_id: str | None,
+    exercise_name_pattern: str,
+    weight_delta: float | None = None,
+    weight_set: float | None = None,
+    sets_set: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> int:
+    """Bulk update planned exercises matching a name pattern within optional date range.
+    Returns count updated."""
+    async with AsyncSessionLocal() as session:
+        # Build WHERE
+        conditions = [
+            "pw.telegram_user_id = :uid",
+            "pw.status = 'planned'",
+            "lower(pe.exercise_name) LIKE lower(:pat)",
+        ]
+        params = {
+            "uid": telegram_user_id,
+            "pat": f"%{exercise_name_pattern}%",
+        }
+        if start_date:
+            conditions.append("pw.planned_date >= :sd")
+            params["sd"] = start_date
+        if end_date:
+            conditions.append("pw.planned_date <= :ed")
+            params["ed"] = end_date
+
+        # Determine SET clause
+        set_parts = []
+        if weight_delta is not None:
+            set_parts.append("target_weight_kg = COALESCE(target_weight_kg, 0) + :wd")
+            params["wd"] = weight_delta
+        if weight_set is not None:
+            set_parts.append("target_weight_kg = :ws")
+            params["ws"] = weight_set
+        if sets_set is not None:
+            set_parts.append("target_sets = :ss")
+            params["ss"] = sets_set
+        if not set_parts:
+            return 0
+
+        sql = f"""
+            UPDATE planned_exercises pe
+            SET {', '.join(set_parts)}
+            FROM planned_workouts pw
+            WHERE pe.planned_workout_id = pw.id
+              AND {' AND '.join(conditions)}
+            RETURNING pe.id
+        """
+        result = await session.execute(text(sql), params)
+        n = len(result.fetchall())
+        await session.commit()
+        return n
+
+
+async def find_workouts_by_exercise(
+    telegram_user_id: str | None,
+    exercise_pattern: str,
+    min_weight: float | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT DISTINCT ON (w.id) w.id, w.workout_date, w.focus_label,
+                   s.exercise_name, MAX(s.weight_kg) OVER (PARTITION BY w.id) AS max_w,
+                   COUNT(*) OVER (PARTITION BY w.id) AS set_count
+            FROM fitness_exercise_sets s
+            JOIN fitness_workouts w ON w.id = s.workout_id
+            WHERE w.telegram_user_id = :uid
+              AND lower(s.exercise_name) LIKE lower(:pat)
+              AND (:min_w IS NULL OR s.weight_kg >= :min_w)
+            ORDER BY w.id DESC, s.id ASC
+            LIMIT :lim
+            """),
+            {"uid": telegram_user_id, "pat": f"%{exercise_pattern}%",
+             "min_w": min_weight, "lim": limit},
+        )
+        return [dict(r) for r in result.mappings().all()]
 
 
 async def add_training_constraint(

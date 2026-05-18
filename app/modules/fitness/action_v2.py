@@ -41,6 +41,14 @@ from app.db import (
     skip_planned_workout, shift_planned_workouts, cancel_plan_period,
     delete_last_n_sets, delete_last_exercise_from_workout, delete_workout,
     rename_exercise_in_workout,
+    save_workout_template, list_workout_templates, get_workout_template_by_name,
+    mark_template_used,
+    add_fitness_goal, list_active_goals, mark_goal_achieved,
+    log_pain, get_pain_journal,
+    bulk_update_planned_exercises, find_workouts_by_exercise,
+)
+from app.modules.fitness.muscle_groups import (
+    classify_exercise, aggregate_by_group, estimate_1rm,
 )
 from app.modules.fitness.formatter import (
     format_planned_workout,
@@ -696,7 +704,7 @@ async def parse_fitness_action_v2(
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_volume_by_group | show_lagging_group | show_streak | find_workout_by_exercise | show_trend | show_1rm | log_pain_action | sick_leave | show_plateau | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -718,7 +726,17 @@ async def parse_fitness_action_v2(
     "constraint_id": null,
     "constraint_until": null,
     "export_format": null,
-    "feeling": null
+    "feeling": null,
+    "template_name": null,
+    "goal_value": null,
+    "goal_deadline": null,
+    "goal_type": null,
+    "weight_delta": null,
+    "weight_set_to": null,
+    "sets_set_to": null,
+    "pain_severity": null,
+    "days": null,
+    "muscle_group": null
   }},
   "workout": {{
     "title": null,
@@ -923,6 +941,44 @@ async def parse_fitness_action_v2(
 - "csv за май", "экспорт за период" → export_csv с period
 - "json" → target.export_format="json"
 - target.export_format = "csv" | "json" | "txt", по умолчанию csv
+
+14h. АНАЛИТИКА (Пакет 2):
+- "volume по группам", "сколько объёма груди в мае", "тоннаж по мышцам" → show_volume_by_group + period
+- "какая группа отстаёт", "что недогружено", "слабое место" → show_lagging_group
+- "сколько дней подряд", "стрик", "frequency", "сколько тренировок в этом месяце" → show_streak
+- "когда я делал жим 100", "найди тренировку с приседом 120", "история тяги" → find_workout_by_exercise
+  target.exercise_name="жим/тяга/...", target.weight_set_to=100 (если есть минимум)
+- "тренд по жиму", "как растёт жим", "прогресс по приседу за 3 месяца" → show_trend
+  target.exercise_name, target.days=90
+- "мой 1ПМ жима", "посчитай 1RM", "максимум по приседу" → show_1rm
+  target.exercise_name
+
+14i. ЗДОРОВЬЕ (Пакет 3):
+- "плечо болит на 4", "колено 6 из 10", "сегодня поясница 3/10" → log_pain_action
+  target.body_part="плечо/колено/поясница", target.pain_severity=4
+- "заболел отмени неделю", "простуда, неделю отдых", "слёг на 3 дня" → sick_leave
+  target.days=7 (или сколько сказано)
+- "где я застрял", "плато по жиму", "застрял на 80", "какие упражнения стоят" → show_plateau
+  target.exercise_name (опционально)
+
+14j. ШАБЛОНЫ И ПРОГРАММИРОВАНИЕ (Пакет 4):
+- "сохрани как шаблон 'грудь A'", "запомни эту как шаблон X" → save_template
+  target.template_name="имя"
+- "примени шаблон 'грудь A' на завтра", "тренировка по шаблону 'ноги' сегодня" → apply_template
+  target.template_name, parsed.date=когда
+- "покажи шаблоны", "мои шаблоны", "список шаблонов" → list_templates
+- "+5 кг ко всем жимам", "увеличь все приседы на 2.5кг" → bulk_edit_exercises
+  target.exercise_name="жим/присед", target.weight_delta=5
+- "сократи все жимы до 3 подходов" → bulk_edit_exercises, target.sets_set_to=3
+- "поставь все жимы на 80кг" → bulk_edit_exercises, target.weight_set_to=80
+- "цель: жим 100 кг к декабрю", "хочу присед 150 к лету" → set_goal
+  target.exercise_name, target.goal_value=100, target.goal_deadline="2026-12-01"
+- "мои цели", "прогресс к цели" → show_goals
+
+14k. ОТЧЁТЫ (Пакет 5):
+- "сделай отчёт тренеру", "текст для тренера", "отчёт за неделю красиво" → coach_report
+  period.start_date / end_date (по умолчанию неделя)
+- "сводка недели", "weekly", "weekly summary" → weekly_summary
 
 15. НЕ-ФИТНЕС сообщения → non_fitness:
 - "какая сегодня погода", "сколько времени", "найди ресторан", "напомни купить молоко", "что такое X"
@@ -2534,6 +2590,88 @@ async def _handle_fitness_action_v2_inner(
     if action == "tag_feeling":
         return await _tag_feeling(telegram_user_id, text, parsed, active_session)
 
+    # ═══ Пакет 2: Аналитика ═══
+    if action == "show_volume_by_group":
+        return await _show_volume_by_group(telegram_user_id, parsed)
+
+    if action == "show_lagging_group":
+        return await _show_lagging_group(telegram_user_id, parsed)
+
+    if action == "show_streak":
+        return await _show_streak(telegram_user_id)
+
+    if action == "find_workout_by_exercise":
+        return await _find_workout_by_exercise(telegram_user_id, parsed)
+
+    if action == "show_trend":
+        return await _show_trend(telegram_user_id, parsed)
+
+    if action == "show_1rm":
+        return await _show_1rm(telegram_user_id, parsed)
+
+    # ═══ Пакет 3: Здоровье ═══
+    if action == "log_pain_action":
+        target = parsed.get("target") or {}
+        bp = target.get("body_part") or "—"
+        sev = target.get("pain_severity")
+        pid = await log_pain(
+            telegram_user_id=telegram_user_id,
+            body_part=bp,
+            severity=float(sev) if sev else None,
+            note=target.get("note_text") or text[:200],
+            source_text=text,
+        )
+        sev_str = f" ({sev}/10)" if sev else ""
+        return f"🩹 Записал боль #{pid}: {bp}{sev_str}. Учту в плане."
+
+    if action == "sick_leave":
+        target = parsed.get("target") or {}
+        days = int(target.get("days") or 7)
+        from datetime import timedelta
+        today = date.today()
+        end_d = (today + timedelta(days=days - 1)).isoformat()
+        n = await cancel_plan_period(telegram_user_id, today.isoformat(), end_d)
+        cid = await add_training_constraint(
+            telegram_user_id=telegram_user_id,
+            body_part="общее (болезнь)",
+            severity="active",
+            note=f"Sick leave {days} дней, до {end_d}",
+            source_text=text,
+        )
+        return (
+            f"🤒 Записал болезнь #{cid}, отменил {n} тренировок до {format_human_date(end_d)}.\n"
+            f"Скажи «выздоровел» или «закрой ограничение #{cid}» когда вернёшься."
+        )
+
+    if action == "show_plateau":
+        return await _show_plateau(telegram_user_id, parsed)
+
+    # ═══ Пакет 4: Шаблоны и программирование ═══
+    if action == "save_template":
+        return await _save_template(telegram_user_id, parsed, active_session)
+
+    if action == "apply_template":
+        return await _apply_template(telegram_user_id, parsed)
+
+    if action == "list_templates":
+        return await _list_templates_handler(telegram_user_id)
+
+    if action == "bulk_edit_exercises":
+        return await _bulk_edit_exercises(telegram_user_id, parsed)
+
+    if action == "set_goal":
+        return await _set_goal(telegram_user_id, parsed, text)
+
+    if action == "show_goals":
+        return await _show_goals(telegram_user_id)
+
+    # ═══ Пакет 5: Отчёты ═══
+    if action == "coach_report":
+        return await _coach_report(telegram_user_id, parsed)
+
+    if action == "weekly_summary":
+        return await _weekly_summary(telegram_user_id)
+
     if action == "non_fitness":
         # Делегируем общему AI-ответчику, не ломая активную сессию
         from app.ai import generate_general_answer
@@ -2792,6 +2930,692 @@ async def _export_csv(telegram_user_id: str | None, parsed: dict) -> str:
         f"⚠️ CSV получился {len(body)} символов ({len(rows)} строк) — больше лимита Telegram. "
         f"Попроси более узкий период или текстовый формат."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Пакет 2: Аналитика
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def _resolve_period(parsed: dict, default_days: int = 30) -> tuple[str, str]:
+    """Resolve period from parsed.period.{start,end} or default to last N days."""
+    from datetime import timedelta
+    period = parsed.get("period") or {}
+    s = period.get("start_date")
+    e = period.get("end_date")
+    if not s:
+        s = (date.today() - timedelta(days=default_days - 1)).isoformat()
+    if not e:
+        e = date.today().isoformat()
+    return s, e
+
+
+async def _show_volume_by_group(telegram_user_id: str | None, parsed: dict) -> str:
+    s, e = await _resolve_period(parsed, default_days=7)
+    workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
+    if not workouts:
+        return f"За {format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)} тренировок нет."
+
+    all_sets = []
+    for w in workouts:
+        for st in (w.get("sets") or []):
+            all_sets.append(st)
+    agg = aggregate_by_group(all_sets)
+
+    sorted_groups = sorted(agg.items(), key=lambda x: -x[1]["tonnage"])
+    lines = [f"📊 Объём по группам, {format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)}:", ""]
+    for g, st in sorted_groups:
+        tonnage = round(st["tonnage"], 0)
+        lines.append(f"  {g}: {st['sets']} подх. · {st['exercises_count']} упр. · {format_number(tonnage)} кг")
+    lines.append("")
+    lines.append(f"Тренировок: {len(workouts)}")
+    return "\n".join(lines)
+
+
+async def _show_lagging_group(telegram_user_id: str | None, parsed: dict) -> str:
+    """Сравниваем volume по группам за период; топ-3 минимума = отстающие."""
+    s, e = await _resolve_period(parsed, default_days=30)
+    workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
+    if not workouts:
+        return f"Нет тренировок за период {s} — {e} для анализа."
+
+    all_sets = []
+    for w in workouts:
+        for st in (w.get("sets") or []):
+            all_sets.append(st)
+    agg = aggregate_by_group(all_sets)
+
+    # Exclude кардио and "другое" from lagging analysis
+    significant = {g: st for g, st in agg.items() if g not in ("кардио", "другое")}
+    if not significant:
+        return "Не нашёл силовых упражнений для анализа."
+
+    sorted_low = sorted(significant.items(), key=lambda x: x[1]["sets"])[:3]
+    total_sets = sum(st["sets"] for st in significant.values())
+
+    lines = [f"📉 Что отстаёт (за {format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)}):", ""]
+    for g, st in sorted_low:
+        pct = round(st["sets"] / total_sets * 100, 1) if total_sets else 0
+        lines.append(f"  {g}: {st['sets']} подходов ({pct}% от объёма) · {format_number(round(st['tonnage'], 0))} кг")
+    lines.append("")
+    lines.append("Рекомендация: добавь упражнения на отстающие группы в план.")
+    return "\n".join(lines)
+
+
+async def _show_streak(telegram_user_id: str | None) -> str:
+    """Серия подряд активных дней + сводка за месяц."""
+    from datetime import timedelta
+    today = date.today()
+    # Get unique workout dates in last 365 days
+    workouts = await get_completed_workouts_in_period(
+        telegram_user_id,
+        (today - timedelta(days=365)).isoformat(),
+        today.isoformat(),
+    )
+    if not workouts:
+        return "Тренировок ещё не записано. Запиши первую — и начнём считать стрик."
+
+    dates_set = set()
+    for w in workouts:
+        d = str(w.get("workout_date"))[:10]
+        try:
+            dates_set.add(datetime.strptime(d, "%Y-%m-%d").date())
+        except Exception:
+            pass
+
+    # Current streak: count back from today
+    streak = 0
+    cur = today
+    while cur in dates_set:
+        streak += 1
+        cur -= timedelta(days=1)
+
+    # Allow "yesterday-only" partial streak
+    if streak == 0 and (today - timedelta(days=1)) in dates_set:
+        cur = today - timedelta(days=1)
+        while cur in dates_set:
+            streak += 1
+            cur -= timedelta(days=1)
+        streak_label = f"{streak} (с перерывом сегодня)"
+    else:
+        streak_label = str(streak)
+
+    # Counts
+    last_7 = sum(1 for d in dates_set if (today - d).days < 7)
+    last_30 = sum(1 for d in dates_set if (today - d).days < 30)
+    last_90 = sum(1 for d in dates_set if (today - d).days < 90)
+
+    lines = [
+        "🔥 Серия и частота:",
+        "",
+        f"  Текущий стрик: {streak_label} дней подряд",
+        f"  За 7 дней: {last_7} тренировок",
+        f"  За 30 дней: {last_30} тренировок",
+        f"  За 90 дней: {last_90} тренировок",
+    ]
+    if last_7 >= 3:
+        lines.append("\n💪 Стабильный график.")
+    elif last_7 >= 1:
+        lines.append("\n⚠️ Можно чаще — целься на 3+ в неделю.")
+    else:
+        lines.append("\n⚠️ За последнюю неделю не тренировался.")
+    return "\n".join(lines)
+
+
+async def _find_workout_by_exercise(telegram_user_id: str | None, parsed: dict) -> str:
+    target = parsed.get("target") or {}
+    ex_pat = target.get("exercise_name")
+    if not ex_pat:
+        return "Уточни упражнение: «когда я делал жим на 100»."
+    min_w = target.get("weight_set_to")
+    rows = await find_workouts_by_exercise(
+        telegram_user_id, ex_pat,
+        min_weight=float(min_w) if min_w else None,
+        limit=15,
+    )
+    if not rows:
+        cond = f" с весом >= {min_w} кг" if min_w else ""
+        return f"Не нашёл тренировок с «{ex_pat}»{cond}."
+
+    lines = [f"🔍 Тренировки с «{ex_pat}»" + (f" (≥ {min_w} кг)" if min_w else "") + ":", ""]
+    for r in rows[:12]:
+        d = str(r.get("workout_date"))[:10]
+        lines.append(
+            f"  {format_human_date(d)}: {r.get('exercise_name')} — "
+            f"max {format_number(r.get('max_w'))} кг ({r.get('set_count')} подх.) {r.get('focus_label') or ''}"
+        )
+    return "\n".join(lines)
+
+
+async def _show_trend(telegram_user_id: str | None, parsed: dict) -> str:
+    target = parsed.get("target") or {}
+    ex = target.get("exercise_name")
+    if not ex:
+        return "Уточни упражнение: «тренд по жиму»."
+    days = int(target.get("days") or 90)
+    rows = await find_workouts_by_exercise(telegram_user_id, ex, limit=50)
+    if not rows:
+        return f"Нет истории по «{ex}»."
+
+    from datetime import timedelta
+    today = date.today()
+    cutoff = today - timedelta(days=days)
+
+    filtered = []
+    for r in rows:
+        try:
+            d = datetime.strptime(str(r["workout_date"])[:10], "%Y-%m-%d").date()
+            if d >= cutoff and r.get("max_w"):
+                filtered.append((d, float(r["max_w"])))
+        except Exception:
+            pass
+    filtered.sort(key=lambda x: x[0])
+
+    if len(filtered) < 2:
+        return f"Мало данных по «{ex}» за {days} дней (нужно минимум 2 точки)."
+
+    first_d, first_w = filtered[0]
+    last_d, last_w = filtered[-1]
+    delta = last_w - first_w
+    pct = round(delta / first_w * 100, 1) if first_w else 0
+
+    direction = "▲ растёт" if delta > 0 else ("▼ падает" if delta < 0 else "≈ стоит")
+
+    lines = [
+        f"📈 Тренд: {ex} за {days} дней",
+        "",
+        f"  Точек данных: {len(filtered)}",
+        f"  Первое: {format_human_date(first_d.isoformat(), include_weekday=False)} — {format_number(first_w)} кг",
+        f"  Последнее: {format_human_date(last_d.isoformat(), include_weekday=False)} — {format_number(last_w)} кг",
+        f"  Дельта: {delta:+g} кг ({pct:+}%) {direction}",
+    ]
+    if len(filtered) >= 4:
+        # Mini ASCII график (последние 8 точек)
+        recent = filtered[-8:]
+        max_w = max(p[1] for p in recent)
+        min_w = min(p[1] for p in recent)
+        rng = max_w - min_w if max_w > min_w else 1
+        lines.append("")
+        lines.append("  Последние:")
+        for d, w in recent:
+            bar_len = int((w - min_w) / rng * 20)
+            lines.append(f"    {d.strftime('%d.%m')} {format_number(w):>5} {'█' * bar_len}")
+    return "\n".join(lines)
+
+
+async def _show_1rm(telegram_user_id: str | None, parsed: dict) -> str:
+    target = parsed.get("target") or {}
+    ex = target.get("exercise_name")
+    if not ex:
+        return "Уточни упражнение: «1ПМ жима лёжа»."
+    rows = await find_workouts_by_exercise(telegram_user_id, ex, limit=10)
+    if not rows:
+        return f"Нет истории по «{ex}»."
+
+    # Get best 1RM estimate across all sets of this exercise
+    from app.db.engine import get_session as gs
+    from sqlalchemy import text as sql_text
+    async with gs() as s:
+        result = await s.execute(sql_text("""
+            SELECT s.weight_kg, s.reps, w.workout_date
+            FROM fitness_exercise_sets s
+            JOIN fitness_workouts w ON w.id = s.workout_id
+            WHERE w.telegram_user_id = :uid
+              AND lower(s.exercise_name) LIKE lower(:pat)
+              AND s.weight_kg IS NOT NULL AND s.reps IS NOT NULL
+            ORDER BY w.id DESC LIMIT 50
+        """), {"uid": telegram_user_id, "pat": f"%{ex}%"})
+        rows_db = result.mappings().all()
+
+    if not rows_db:
+        return f"Нет подходов с весом+повторами по «{ex}»."
+
+    best = None
+    for r in rows_db:
+        est = estimate_1rm(r["weight_kg"], r["reps"])
+        if not best or est > best[0]:
+            best = (est, r["weight_kg"], r["reps"], r["workout_date"])
+    if not best:
+        return "Не удалось посчитать."
+
+    est, w, r, d = best
+    return (
+        f"💪 Estimated 1RM для «{ex}»:\n\n"
+        f"  ≈ {format_number(est)} кг (формула Epley)\n"
+        f"  Основано на: {format_number(w)} кг × {r} ({format_human_date(str(d)[:10], include_weekday=False)})\n\n"
+        f"Это оценка — реальный максимум проверяется в зале."
+    )
+
+
+async def _show_plateau(telegram_user_id: str | None, parsed: dict) -> str:
+    """Find exercises that haven't progressed in N weeks."""
+    target = parsed.get("target") or {}
+    only_ex = target.get("exercise_name")
+
+    from app.db.engine import get_session as gs
+    from sqlalchemy import text as sql_text
+    async with gs() as s:
+        if only_ex:
+            res = await s.execute(sql_text("""
+                SELECT s.exercise_name,
+                       MAX(s.weight_kg) AS max_w,
+                       MAX(w.workout_date) AS last_at,
+                       COUNT(DISTINCT w.id) AS sessions
+                FROM fitness_exercise_sets s
+                JOIN fitness_workouts w ON w.id = s.workout_id
+                WHERE w.telegram_user_id = :uid
+                  AND lower(s.exercise_name) LIKE lower(:pat)
+                  AND s.weight_kg IS NOT NULL
+                GROUP BY s.exercise_name
+            """), {"uid": telegram_user_id, "pat": f"%{only_ex}%"})
+        else:
+            res = await s.execute(sql_text("""
+                SELECT s.exercise_name,
+                       MAX(s.weight_kg) AS max_w,
+                       MAX(w.workout_date) AS last_at,
+                       COUNT(DISTINCT w.id) AS sessions
+                FROM fitness_exercise_sets s
+                JOIN fitness_workouts w ON w.id = s.workout_id
+                WHERE w.telegram_user_id = :uid
+                  AND s.weight_kg IS NOT NULL
+                  AND w.workout_date >= CURRENT_DATE - INTERVAL '60 days'
+                GROUP BY s.exercise_name
+                HAVING COUNT(DISTINCT w.id) >= 3
+            """), {"uid": telegram_user_id})
+        rows = [dict(r) for r in res.mappings().all()]
+
+    if not rows:
+        return "Недостаточно данных для plateau-анализа (нужно ≥3 тренировки на упражнение за 60 дней)."
+
+    # For each, check if max weight was hit only in recent half (still progressing) or in old half (plateau)
+    from datetime import timedelta
+    today = date.today()
+
+    plateau: list[dict] = []
+    progressing: list[dict] = []
+    for r in rows:
+        ex_name = r["exercise_name"]
+        max_w = r["max_w"]
+        last_at = r["last_at"]
+        sessions = r["sessions"]
+        # Check: when was the max_w first reached?
+        async with gs() as s2:
+            first_max = await s2.execute(sql_text("""
+                SELECT MIN(w.workout_date) AS first_d
+                FROM fitness_exercise_sets s
+                JOIN fitness_workouts w ON w.id = s.workout_id
+                WHERE w.telegram_user_id = :uid
+                  AND s.exercise_name = :ex
+                  AND s.weight_kg = :w
+            """), {"uid": telegram_user_id, "ex": ex_name, "w": max_w})
+            first_d_row = first_max.first()
+            first_d = first_d_row[0] if first_d_row else None
+        if first_d:
+            try:
+                fd = first_d if hasattr(first_d, "isoformat") else datetime.strptime(str(first_d)[:10], "%Y-%m-%d").date()
+                days_since = (today - fd).days
+                if days_since >= 21:  # 3+ weeks без прогресса
+                    plateau.append({"name": ex_name, "max_w": float(max_w), "days_since_pr": days_since, "sessions": sessions})
+                else:
+                    progressing.append({"name": ex_name, "max_w": float(max_w), "days_since_pr": days_since})
+            except Exception:
+                pass
+
+    if not plateau:
+        return "🟢 Плато не обнаружено — ты прогрессируешь по основным упражнениям!"
+
+    plateau.sort(key=lambda x: -x["days_since_pr"])
+    lines = ["⚠️ Плато (нет PR ≥ 3 недель):", ""]
+    for p in plateau[:8]:
+        lines.append(f"  • {p['name']}: {format_number(p['max_w'])} кг, без рекорда {p['days_since_pr']} дней ({p['sessions']} тренировок)")
+    lines.append("")
+    lines.append("💡 Попробуй: смена схемы (5×5 / 3×8 / drop set), deload-неделю, проверь технику.")
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Пакет 4: Шаблоны и программирование
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def _save_template(
+    telegram_user_id: str | None,
+    parsed: dict,
+    active_session: dict | None,
+) -> str:
+    target = parsed.get("target") or {}
+    name = target.get("template_name")
+    if not name:
+        return "Уточни имя шаблона: «сохрани как шаблон 'грудь A'»."
+
+    # Source: active workout or last workout
+    workout_id = None
+    if active_session and active_session.get("workout_id"):
+        workout_id = int(active_session["workout_id"])
+    else:
+        last = await get_last_workout(telegram_user_id)
+        if last:
+            workout_id = last["workout"]["id"]
+    if not workout_id:
+        return "Нет тренировки для сохранения как шаблон."
+
+    from app.db.engine import get_session as gs
+    from sqlalchemy import text as sql_text
+    async with gs() as s:
+        w_res = await s.execute(sql_text("""
+            SELECT focus, focus_label FROM fitness_workouts WHERE id = :id
+        """), {"id": workout_id})
+        w_row = w_res.mappings().first()
+        sets_res = await s.execute(sql_text("""
+            SELECT exercise_name, set_number, weight_kg, reps, notes
+            FROM fitness_exercise_sets
+            WHERE workout_id = :id ORDER BY id ASC
+        """), {"id": workout_id})
+        all_sets = [dict(r) for r in sets_res.mappings().all()]
+
+    # Group sets into exercise targets
+    by_ex: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for st in all_sets:
+        ex = st.get("exercise_name")
+        if not ex:
+            continue
+        if ex not in by_ex:
+            by_ex[ex] = []
+            order.append(ex)
+        by_ex[ex].append(st)
+
+    exercises = []
+    for i, ex in enumerate(order, start=1):
+        sts = by_ex[ex]
+        weights = [float(s["weight_kg"]) for s in sts if s.get("weight_kg")]
+        reps = [int(s["reps"]) for s in sts if s.get("reps")]
+        exercises.append({
+            "exercise_order": i,
+            "exercise_name": ex,
+            "target_sets": len(sts),
+            "target_reps_min": min(reps) if reps else None,
+            "target_reps_max": max(reps) if reps else None,
+            "target_weight_kg": max(weights) if weights else None,
+        })
+
+    tid = await save_workout_template(
+        telegram_user_id=telegram_user_id,
+        name=name,
+        focus=(w_row or {}).get("focus") if w_row else None,
+        focus_label=(w_row or {}).get("focus_label") if w_row else None,
+        exercises=exercises,
+        notes=f"Создан из тренировки #{workout_id}",
+    )
+    return f"💾 Сохранил шаблон '{name}' (ID #{tid}) с {len(exercises)} упражнениями."
+
+
+async def _apply_template(telegram_user_id: str | None, parsed: dict) -> str:
+    target = parsed.get("target") or {}
+    name = target.get("template_name")
+    if not name:
+        return "Уточни имя шаблона: «примени шаблон 'грудь A' на завтра»."
+
+    tpl = await get_workout_template_by_name(telegram_user_id, name)
+    if not tpl:
+        return f"Шаблон '{name}' не найден. Скажи «покажи шаблоны»."
+
+    target_date = parsed.get("date") or date.today().isoformat()
+    exercises = tpl.get("exercises_json") or []
+
+    # Save as planned workout
+    plan_id = await save_training_plan(
+        telegram_user_id=telegram_user_id,
+        plan_name=f"Шаблон: {tpl['name']}",
+        period_type="day",
+        start_date=target_date,
+        end_date=target_date,
+        source_text=f"Apply template #{tpl['id']}",
+        notes=None,
+        planned_workouts=[{
+            "planned_date": target_date,
+            "weekday": None,
+            "sequence_number": 1,
+            "is_floating": False,
+            "title": tpl.get("focus_label") or tpl["name"],
+            "focus": tpl.get("focus"),
+            "focus_label": tpl.get("focus_label"),
+            "workout_type": "custom",
+            "status": "planned",
+            "notes": None,
+            "exercises": exercises,
+        }],
+    )
+    await mark_template_used(tpl["id"])
+    return f"📋 Применил шаблон '{tpl['name']}' на {format_human_date(target_date)} (план #{plan_id}, {len(exercises)} упр.)"
+
+
+async def _list_templates_handler(telegram_user_id: str | None) -> str:
+    tpls = await list_workout_templates(telegram_user_id)
+    if not tpls:
+        return "Шаблонов нет. Скажи «сохрани как шаблон 'имя'» после тренировки."
+    lines = [f"📂 Шаблоны ({len(tpls)}):", ""]
+    for t in tpls:
+        ex_count = len(t.get("exercises_json") or [])
+        last = t.get("last_used_at")
+        last_str = f" · последний раз {str(last)[:10]}" if last else ""
+        lines.append(f"  #{t['id']} '{t['name']}' — {t.get('focus_label') or '—'}, {ex_count} упр.{last_str}")
+    return "\n".join(lines)
+
+
+async def _bulk_edit_exercises(telegram_user_id: str | None, parsed: dict) -> str:
+    target = parsed.get("target") or {}
+    pat = target.get("exercise_name")
+    if not pat:
+        return "Уточни какие упражнения: «+5 кг ко всем жимам»."
+
+    period = parsed.get("period") or {}
+    s_d = period.get("start_date") or date.today().isoformat()
+    e_d = period.get("end_date")  # may be None → no upper bound
+
+    delta = target.get("weight_delta")
+    w_set = target.get("weight_set_to")
+    sets_to = target.get("sets_set_to")
+
+    if all(x is None for x in (delta, w_set, sets_to)):
+        return "Не понял что менять: вес/+/− или количество подходов."
+
+    n = await bulk_update_planned_exercises(
+        telegram_user_id=telegram_user_id,
+        exercise_name_pattern=pat,
+        weight_delta=float(delta) if delta is not None else None,
+        weight_set=float(w_set) if w_set is not None else None,
+        sets_set=int(sets_to) if sets_to is not None else None,
+        start_date=s_d,
+        end_date=e_d,
+    )
+    op = []
+    if delta is not None:
+        op.append(f"вес {delta:+g} кг")
+    if w_set is not None:
+        op.append(f"вес = {w_set} кг")
+    if sets_to is not None:
+        op.append(f"подходов = {sets_to}")
+    return f"✏️ Обновил {n} упражнений «{pat}»: {', '.join(op)}."
+
+
+async def _set_goal(telegram_user_id: str | None, parsed: dict, text: str) -> str:
+    target = parsed.get("target") or {}
+    ex = target.get("exercise_name")
+    val = target.get("goal_value")
+    deadline = target.get("goal_deadline")
+    goal_type = target.get("goal_type") or ("exercise_max" if ex and val else "custom")
+
+    if not val and not ex:
+        return "Сформулируй цель чётче: «цель: жим 100 кг к декабрю»."
+
+    gid = await add_fitness_goal(
+        telegram_user_id=telegram_user_id,
+        goal_type=goal_type,
+        target_exercise=ex,
+        target_value=float(val) if val else None,
+        target_unit="kg",
+        target_deadline=deadline,
+        notes=text[:300],
+    )
+    dl_str = f" к {format_human_date(deadline)}" if deadline else ""
+    target_str = f"{ex} {val} кг" if ex and val else (ex or f"{val} {goal_type}")
+    return f"🎯 Цель #{gid}: {target_str}{dl_str}. Запомнил."
+
+
+async def _show_goals(telegram_user_id: str | None) -> str:
+    goals = await list_active_goals(telegram_user_id)
+    if not goals:
+        return "Активных целей нет. Поставь: «цель: жим 100 кг к декабрю»."
+
+    lines = [f"🎯 Активные цели ({len(goals)}):", ""]
+    for g in goals:
+        target_v = g.get("target_value")
+        ex = g.get("target_exercise") or "—"
+        dl = g.get("target_deadline")
+        # Check current best
+        cur_best = None
+        if ex and ex != "—":
+            from app.db.engine import get_session as gs
+            from sqlalchemy import text as sql_text
+            async with gs() as s:
+                r = await s.execute(sql_text("""
+                    SELECT MAX(s.weight_kg) FROM fitness_exercise_sets s
+                    JOIN fitness_workouts w ON w.id = s.workout_id
+                    WHERE w.telegram_user_id = :uid AND lower(s.exercise_name) LIKE lower(:pat)
+                """), {"uid": telegram_user_id, "pat": f"%{ex}%"})
+                cur_best = r.scalar()
+
+        progress_str = ""
+        if target_v and cur_best:
+            pct = min(100, round(float(cur_best) / float(target_v) * 100, 1))
+            progress_str = f" · текущий max {format_number(cur_best)} ({pct}%)"
+        dl_str = f" → к {format_human_date(dl)}" if dl else ""
+
+        lines.append(f"  #{g['id']} {ex}: {format_number(target_v) if target_v else '?'} кг{dl_str}{progress_str}")
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Пакет 5: Отчёты
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def _coach_report(telegram_user_id: str | None, parsed: dict) -> str:
+    """Красивый отчёт для тренера: недельная сводка + ключевые цифры."""
+    s, e = await _resolve_period(parsed, default_days=7)
+    workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
+
+    if not workouts:
+        return f"За {s} — {e} тренировок не записано. Нечего отправлять тренеру."
+
+    all_sets = []
+    for w in workouts:
+        for st in (w.get("sets") or []):
+            all_sets.append(st)
+    by_group = aggregate_by_group(all_sets)
+
+    total_tonnage = sum(g["tonnage"] for g in by_group.values())
+    total_sets = sum(g["sets"] for g in by_group.values())
+
+    lines = [
+        f"📋 ОТЧЁТ ТРЕНЕРУ",
+        f"Период: {format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)}",
+        "=" * 40,
+        "",
+        f"Тренировок: {len(workouts)}",
+        f"Всего подходов: {total_sets}",
+        f"Общий тоннаж: {format_number(round(total_tonnage, 0))} кг",
+        "",
+        "Объём по группам:",
+    ]
+    for g, st in sorted(by_group.items(), key=lambda x: -x[1]["tonnage"]):
+        lines.append(f"  {g}: {st['sets']} подх. · {format_number(round(st['tonnage'], 0))} кг")
+    lines.append("")
+    lines.append("Тренировки:")
+    for w in workouts:
+        d = format_human_date(w.get("workout_date"))
+        focus = w.get("focus_label") or "—"
+        n_sets = len(w.get("sets") or [])
+        lines.append(f"  · {d}: {focus} ({n_sets} подходов)")
+        if w.get("notes"):
+            lines.append(f"      📝 {w['notes'][:100]}")
+
+    # Recent PRs
+    from app.db.engine import get_session as gs
+    from sqlalchemy import text as sql_text
+    async with gs() as ss:
+        prs = await ss.execute(sql_text("""
+            SELECT s.exercise_name, MAX(s.weight_kg) AS w
+            FROM fitness_exercise_sets s
+            JOIN fitness_workouts w ON w.id = s.workout_id
+            WHERE w.telegram_user_id = :uid
+              AND w.workout_date BETWEEN :s AND :e
+              AND s.weight_kg IS NOT NULL
+            GROUP BY s.exercise_name
+            ORDER BY MAX(s.weight_kg) DESC LIMIT 8
+        """), {"uid": telegram_user_id, "s": s, "e": e})
+        pr_rows = [dict(r) for r in prs.mappings().all()]
+    if pr_rows:
+        lines.append("")
+        lines.append("Лучшие веса:")
+        for r in pr_rows:
+            lines.append(f"  · {r['exercise_name']}: {format_number(r['w'])} кг")
+
+    lines.append("")
+    lines.append("— конец отчёта —")
+    return "\n".join(lines)
+
+
+async def _weekly_summary(telegram_user_id: str | None) -> str:
+    """Сводка текущей недели + сравнение с прошлой."""
+    from datetime import timedelta
+    cur_s, cur_e = week_bounds()
+    cur_s_d = datetime.strptime(cur_s, "%Y-%m-%d").date()
+    prev_s = (cur_s_d - timedelta(days=7)).isoformat()
+    prev_e = (cur_s_d - timedelta(days=1)).isoformat()
+
+    cur = await get_completed_workouts_in_period(telegram_user_id, cur_s, cur_e)
+    prev = await get_completed_workouts_in_period(telegram_user_id, prev_s, prev_e)
+
+    def stats(workouts):
+        ts = 0
+        tg = 0.0
+        ex_set = set()
+        for w in workouts:
+            for st in (w.get("sets") or []):
+                ts += 1
+                ex_set.add(st.get("exercise_name"))
+                try:
+                    if st.get("weight_kg") and st.get("reps"):
+                        tg += float(st["weight_kg"]) * int(st["reps"])
+                except Exception:
+                    pass
+        return len(workouts), ts, round(tg, 0), len(ex_set)
+
+    cw, cs, ct, ce = stats(cur)
+    pw, ps, pt, pe = stats(prev)
+
+    def diff(a, b):
+        d = a - b
+        sign = "▲" if d > 0 else ("▼" if d < 0 else "≈")
+        return f"{a} ({sign} {d:+})"
+
+    lines = [
+        f"📅 Сводка недели {format_human_date(cur_s, include_weekday=False)} — {format_human_date(cur_e, include_weekday=False)}",
+        "",
+        f"  Тренировок: {diff(cw, pw)}",
+        f"  Подходов: {diff(cs, ps)}",
+        f"  Тоннаж: {diff(ct, pt)} кг",
+        f"  Упражнений уникальных: {ce}",
+    ]
+    if cw == 0:
+        lines.append("\n⚠️ На этой неделе ещё не тренировался.")
+    elif cw >= pw:
+        lines.append("\n💪 Стабильная неделя.")
+    else:
+        lines.append("\n⚠️ Меньше тренировок чем прошлая неделя.")
+    return "\n".join(lines)
 
 
 async def _finish_workout_with_summary(telegram_user_id: str | None, workout_id: int) -> str:
