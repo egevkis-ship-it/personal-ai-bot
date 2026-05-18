@@ -127,6 +127,12 @@ def _normalize_exercises(raw_exercises: list[dict] | None) -> list[dict]:
         reps_max = ex.get("target_reps_max") or ex.get("reps_max")
         weight = ex.get("target_weight_kg") or ex.get("weight_kg")
 
+        # Если есть numeric reps_min/max, очищаем дублирующий reps_text типа "4 по 10"
+        if reps_text and (reps_min is not None or reps_max is not None):
+            t_lower = str(reps_text).lower()
+            if re.search(r"\d+\s*(по|на|x|×)\s*\d+", t_lower):
+                reps_text = None
+
         # Merge warmup_sets into notes for storage
         notes_parts = []
         if ex.get("notes"):
@@ -1762,18 +1768,30 @@ async def _edit_plan(
 
 Полный план: {json.dumps(workout, ensure_ascii=False, default=str)[:2000]}
 
-ВАЖНО:
-- exercise_name ОБЯЗАТЕЛЬНО должно совпадать с одним из существующих названий ВЫШЕ (буква в букву).
-- Пользователь может назвать упражнение неточно ("трицепс канат" вместо "Трицепс с блока / канат" или "разводка" вместо "Pec deck / сведения"). Найди ближайшее совпадение из списка и используй ПОЛНОЕ название из списка.
-- Если упражнения нет в списке и operation=remove/replace — operation="unknown".
-- Для add — exercise_name может быть новым названием.
+ПРАВИЛА:
+- exercise_name ОБЯЗАТЕЛЬНО ТОЧНОЕ совпадение из списка ВЫШЕ (буква в букву).
+- Пользователь может назвать неточно — найди ближайшее и используй ПОЛНОЕ название из списка.
+- Если упражнения нет в списке и operation=remove/replace/update → operation="unknown".
+- Для add — новое название.
+
+DIFF operation vs update vs replace:
+- "поменяй жим на тягу" → REPLACE (другое упражнение). new_exercise_name="тяга".
+- "увеличь вес жима до 90" / "сделай 4 по 8 в жиме" / "поставь 90 кг в жиме" → UPDATE.
+  Только параметры меняются, упражнение остаётся.
+- "замени жим на тягу 4 по 10 80 кг" → REPLACE с параметрами (заполни sets/reps/weight).
+
+Парсинг "4 по 10" / "4 на 10" / "4×10": sets=4, reps_min=10 (НЕ reps_text).
+"3 по 8-10" → sets=3, reps_min=8, reps_max=10.
+"4 подхода 80 кг 10 раз" → sets=4, weight_kg=80, reps_min=10.
+"без веса" / "своим весом" → weight_kg=0 (не null).
 
 Верни JSON:
 {{
   "operation": "add | remove | replace | update | unknown",
-  "exercise_name": "<точное название из списка для remove/replace/update, или новое для add>",
-  "new_exercise_name": "<новое название для replace>",
-  "sets": null, "reps_min": null, "reps_max": null, "weight_kg": null
+  "exercise_name": "<точное из списка>",
+  "new_exercise_name": "<для replace>",
+  "sets": null, "reps_min": null, "reps_max": null, "weight_kg": null,
+  "notes": null
 }}
 Только JSON.
 """
@@ -1824,12 +1842,82 @@ async def _edit_plan(
             old_exercise_name=ex_name,
             new_exercise_name=new_name,
             source_text=text,
+            new_sets=edit_parsed.get("sets"),
+            new_reps_min=edit_parsed.get("reps_min"),
+            new_reps_max=edit_parsed.get("reps_max"),
+            new_weight_kg=edit_parsed.get("weight_kg"),
+            reset_params=True,
         )
         if result.get("ok"):
-            return f"Заменил {ex_name} на {new_name}."
-        return result.get("message") or f"Упражнение {ex_name!r} не найдено."
+            lines = [f"Заменил «{ex_name}» на «{new_name}»."]
+            if result.get("applied_params"):
+                p = result["applied_params"]
+                detail = []
+                if p.get("sets") and (p.get("reps_min") or p.get("reps_max")):
+                    rep = p.get("reps_min")
+                    if p.get("reps_max") and p["reps_max"] != p["reps_min"]:
+                        rep = f"{p['reps_min']}-{p['reps_max']}"
+                    detail.append(f"{p['sets']}×{rep}")
+                if p.get("weight_kg"):
+                    detail.append(f"{p['weight_kg']} кг")
+                if detail:
+                    lines.append(f"Параметры: {', '.join(detail)}")
+            if result.get("asked_for_params"):
+                lines.append("")
+                lines.append("⚠️ Параметры (подходы, повторы, вес, заметки) сброшены — старые от другого упражнения.")
+                lines.append("Скажи новые: например «4×10 80 кг» или «3 по 8-10, без веса».")
+            return "\n".join(lines)
+        return result.get("message") or f"Упражнение «{ex_name}» не найдено."
 
-    return f"Уточни что изменить: добавить, убрать или заменить упражнение?\n\nТекущий план: {workout.get('title', 'без названия')}"
+    if operation == "update" and ex_name:
+        from app.db.engine import get_session
+        from sqlalchemy import text as sql_text
+        sets_v = edit_parsed.get("sets")
+        rmin = edit_parsed.get("reps_min")
+        rmax = edit_parsed.get("reps_max")
+        w = edit_parsed.get("weight_kg")
+        if all(v is None for v in (sets_v, rmin, rmax, w)):
+            return "Не понял что менять. Скажи: «вес 80», «4 по 10», «3×8-10»."
+
+        # build SET clause
+        sets_parts = []
+        params = {"wid": workout_id, "pat": f"%{ex_name}%"}
+        if sets_v is not None:
+            sets_parts.append("target_sets = :s")
+            params["s"] = int(sets_v)
+        if rmin is not None:
+            sets_parts.append("target_reps_min = :rmin")
+            params["rmin"] = int(rmin)
+        if rmax is not None:
+            sets_parts.append("target_reps_max = :rmax")
+            params["rmax"] = int(rmax)
+        if w is not None:
+            sets_parts.append("target_weight_kg = :w")
+            params["w"] = float(w)
+        # if numeric provided, also clear reps_text
+        if rmin is not None or rmax is not None:
+            sets_parts.append("target_reps_text = NULL")
+
+        async with get_session() as s:
+            res = await s.execute(sql_text(f"""
+                UPDATE planned_exercises
+                SET {', '.join(sets_parts)}
+                WHERE planned_workout_id = :wid AND lower(exercise_name) LIKE lower(:pat)
+                RETURNING exercise_name, target_sets, target_reps_min, target_reps_max, target_weight_kg
+            """), params)
+            rows = res.mappings().all()
+            await s.commit()
+        if not rows:
+            return f"Не нашёл «{ex_name}» в плане."
+        row = rows[0]
+        return (
+            f"✏️ Обновил «{row['exercise_name']}»: "
+            f"{row.get('target_sets') or '-'}×{row.get('target_reps_min') or '-'}"
+            + (f"-{row.get('target_reps_max')}" if row.get('target_reps_max') and row.get('target_reps_max') != row.get('target_reps_min') else "")
+            + (f", {format_number(row.get('target_weight_kg'))} кг" if row.get('target_weight_kg') is not None else "")
+        )
+
+    return f"Уточни что изменить: добавить, убрать, заменить или обновить параметры упражнения?\n\nТекущий план: {workout.get('title', 'без названия')}"
 
 
 async def _show_progress(telegram_user_id: str | None, text: str, parsed: dict) -> str:
@@ -3779,7 +3867,6 @@ async def _undo_last_action(telegram_user_id: str | None) -> str:
     action = (last.get("action") or "").lower()
 
     if action in ("log_workout_sets", "continue_current_exercise", "log_workout_sets_append"):
-        # Reverse: delete last set
         pending = await get_latest_fitness_pending_decision(telegram_user_id)
         if not pending:
             return "Не нашёл активную сессию для undo."
@@ -3789,9 +3876,56 @@ async def _undo_last_action(telegram_user_id: str | None) -> str:
         n = await delete_last_n_sets(int(wid), 1)
         return f"↩️ Отменил — удалил последний подход ({n})."
 
+    # Plan-edit undo: ищем последнее событие в planned_workout_events
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+    target_date = last.get("current_workout_date")
+
+    async with get_session() as s:
+        if target_date:
+            ev = await s.execute(sql_text("""
+                SELECT e.id, e.planned_workout_id, e.event_type, e.old_value_json, e.new_value_json
+                FROM planned_workout_events e
+                JOIN planned_workouts pw ON pw.id = e.planned_workout_id
+                WHERE pw.telegram_user_id = :uid AND pw.planned_date = :d
+                ORDER BY e.created_at DESC LIMIT 1
+            """), {"uid": telegram_user_id, "d": target_date})
+        else:
+            ev = await s.execute(sql_text("""
+                SELECT e.id, e.planned_workout_id, e.event_type, e.old_value_json, e.new_value_json
+                FROM planned_workout_events e
+                ORDER BY e.created_at DESC LIMIT 1
+            """))
+        event = ev.mappings().first()
+        if not event:
+            return "Не нашёл последнее изменение плана для отката."
+
+        et = event["event_type"]
+        old = event.get("old_value_json") or {}
+        if isinstance(old, str):
+            import json as _j
+            try:
+                old = _j.loads(old)
+            except Exception:
+                old = {}
+
+        if et == "exercise_replaced":
+            # Откатить: вернуть old_exercise_name + старые параметры (если в old_value есть)
+            ex_id = old.get("exercise_id")
+            old_name = old.get("exercise_name")
+            if not ex_id or not old_name:
+                return "Не смог откатить замену — данных недостаточно."
+            await s.execute(sql_text("""
+                UPDATE planned_exercises
+                SET exercise_name = :n
+                WHERE id = :id
+            """), {"n": old_name, "id": ex_id})
+            await s.commit()
+            return f"↩️ Откатил замену: вернул «{old_name}»."
+
     return (
-        "Undo пока умею только для записи подходов. Для других правок скажи явно: "
-        "«удали последний подход», «не 80 а 85», «удали всю тренировку»."
+        "Undo пока умею только для записи подходов и замены упражнений. "
+        "Для остального скажи явно: «удали последний подход», «не 80 а 85»."
     )
 
 

@@ -3401,14 +3401,22 @@ async def replace_exercise_in_planned_workout(
     old_exercise_name: str,
     new_exercise_name: str,
     source_text: str | None = None,
+    new_sets: int | None = None,
+    new_reps_min: int | None = None,
+    new_reps_max: int | None = None,
+    new_reps_text: str | None = None,
+    new_weight_kg: float | None = None,
+    new_notes: str | None = None,
+    reset_params: bool = True,
 ) -> dict:
     """
     Replace one exercise inside the best matching active planned workout on target_date.
 
-    Safety:
-    - Does NOT replace whole workout.
-    - Preserves sets/reps/weight/notes/order.
-    - If old exercise is not found, returns available exercises.
+    Behavior:
+    - Если reset_params=True (по умолчанию) и new_* НЕ переданы — обнуляем все параметры
+      (sets/reps/weight/notes становятся NULL). Возвращаем asked_for_params=True.
+    - Если new_* переданы — используем их.
+    - Если reset_params=False — сохраняем старые параметры (старое поведение).
     """
     from app.modules.fitness.exercise_normalizer import normalize_exercise_name
 
@@ -3499,18 +3507,66 @@ async def replace_exercise_in_planned_workout(
 
             old_name = target_exercise.get("exercise_name")
 
-            await session.execute(
-                text("""
-                UPDATE planned_exercises
-                SET exercise_name = :new_exercise_name,
-                    notes = COALESCE(notes, '')
-                WHERE id = :exercise_id
-                """),
-                {
-                    "exercise_id": target_exercise["id"],
-                    "new_exercise_name": new_title,
-                },
-            )
+            has_new_params = any(p is not None for p in (
+                new_sets, new_reps_min, new_reps_max, new_reps_text, new_weight_kg, new_notes
+            ))
+
+            if reset_params and not has_new_params:
+                # Full reset
+                await session.execute(
+                    text("""
+                    UPDATE planned_exercises
+                    SET exercise_name = :new_exercise_name,
+                        target_sets = NULL,
+                        target_reps_min = NULL,
+                        target_reps_max = NULL,
+                        target_reps_text = NULL,
+                        target_weight_kg = NULL,
+                        notes = NULL
+                    WHERE id = :exercise_id
+                    """),
+                    {"exercise_id": target_exercise["id"], "new_exercise_name": new_title},
+                )
+            elif has_new_params:
+                # Apply new params, but preserve unspecified ones if reset_params=False
+                # If reset_params=True, NULL out unspecified params explicitly.
+                if reset_params:
+                    sets_v = new_sets
+                    reps_min_v = new_reps_min
+                    reps_max_v = new_reps_max
+                    reps_text_v = new_reps_text
+                    weight_v = new_weight_kg
+                    notes_v = new_notes
+                else:
+                    sets_v = new_sets if new_sets is not None else target_exercise.get("target_sets")
+                    reps_min_v = new_reps_min if new_reps_min is not None else target_exercise.get("target_reps_min")
+                    reps_max_v = new_reps_max if new_reps_max is not None else target_exercise.get("target_reps_max")
+                    reps_text_v = new_reps_text if new_reps_text is not None else target_exercise.get("target_reps_text")
+                    weight_v = new_weight_kg if new_weight_kg is not None else target_exercise.get("target_weight_kg")
+                    notes_v = new_notes if new_notes is not None else target_exercise.get("notes")
+                await session.execute(
+                    text("""
+                    UPDATE planned_exercises
+                    SET exercise_name = :new_exercise_name,
+                        target_sets = :s, target_reps_min = :rmin, target_reps_max = :rmax,
+                        target_reps_text = :rt, target_weight_kg = :w, notes = :n
+                    WHERE id = :exercise_id
+                    """),
+                    {"exercise_id": target_exercise["id"], "new_exercise_name": new_title,
+                     "s": sets_v, "rmin": reps_min_v, "rmax": reps_max_v,
+                     "rt": reps_text_v, "w": weight_v, "n": notes_v},
+                )
+            else:
+                # Legacy: preserve all old params
+                await session.execute(
+                    text("""
+                    UPDATE planned_exercises
+                    SET exercise_name = :new_exercise_name,
+                        notes = COALESCE(notes, '')
+                    WHERE id = :exercise_id
+                    """),
+                    {"exercise_id": target_exercise["id"], "new_exercise_name": new_title},
+                )
 
             await session.execute(
                 text("""
@@ -3549,6 +3605,11 @@ async def replace_exercise_in_planned_workout(
                 "exercise_id": target_exercise["id"],
                 "old_exercise_name": old_name,
                 "new_exercise_name": new_title,
+                "asked_for_params": reset_params and not has_new_params,
+                "applied_params": {
+                    "sets": new_sets, "reps_min": new_reps_min, "reps_max": new_reps_max,
+                    "weight_kg": new_weight_kg, "notes": new_notes,
+                } if has_new_params else None,
             }
 
         return {

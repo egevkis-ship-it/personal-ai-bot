@@ -278,13 +278,26 @@ async def _replace_exercise(
     action: dict,
     source_text: str,
 ) -> str:
-    from app.db import replace_exercise_in_planned_workout
+    from app.db import replace_exercise_in_planned_workout, get_last_interaction
+    from app.modules.fitness.formatter import format_human_date
 
-    target_date = action.get("target_date") or _today_iso()
+    target_date = action.get("target_date")
+
+    # Fallback: если дата не пришла — используем последнюю обсуждаемую
+    if not target_date and telegram_user_id:
+        last = await get_last_interaction(telegram_user_id)
+        if last and last.get("current_workout_date"):
+            target_date = str(last["current_workout_date"])[:10]
+
+    if not target_date:
+        target_date = _today_iso()
+
     old_name, new_name = _extract_exercise_names_for_replace(action)
-
     if not old_name or not new_name:
         return "Понял, что нужно заменить упражнение, но не понял что на что менять."
+
+    # Extract new params if mentioned (parser may put them in action.new_*)
+    new_params = action.get("new_params") or {}
 
     result = await replace_exercise_in_planned_workout(
         telegram_user_id=telegram_user_id,
@@ -292,32 +305,42 @@ async def _replace_exercise(
         old_exercise_name=old_name,
         new_exercise_name=new_name,
         source_text=source_text,
+        new_sets=new_params.get("sets"),
+        new_reps_min=new_params.get("reps_min"),
+        new_reps_max=new_params.get("reps_max"),
+        new_weight_kg=new_params.get("weight_kg"),
+        reset_params=True,
     )
 
     if not result.get("ok"):
         exercises = result.get("available_exercises") or []
         if exercises:
             lines = [
-                f"Не нашёл “{old_name}” в тренировке на {target_date}.",
+                f"Не нашёл «{old_name}» в тренировке на {format_human_date(target_date)}.",
                 "",
                 "Сейчас в тренировке:",
             ]
             for i, name in enumerate(exercises, start=1):
                 lines.append(f"{i}. {name}")
             return "\n".join(lines)
-
         return result.get("message") or "Не смог заменить упражнение."
 
-    prefix = (
-        f"Заменил упражнение в тренировке на {target_date}.\n\n"
-        f"Было: {result.get('old_exercise_name')}\n"
-        f"Стало: {result.get('new_exercise_name')}\n"
-        "Подходы, повторы, вес и заметки сохранил."
-    )
+    prefix_parts = [
+        f"Заменил упражнение в тренировке на {format_human_date(target_date)}.",
+        "",
+        f"Было: {result.get('old_exercise_name')}",
+        f"Стало: {result.get('new_exercise_name')}",
+    ]
+    if result.get("asked_for_params"):
+        prefix_parts.append("")
+        prefix_parts.append("⚠️ Подходы/повторы/вес/заметки сброшены (они были от старого упражнения).")
+        prefix_parts.append("Скажи параметры: «4×10 80 кг» или «3 по 8-10, без веса».")
+    elif result.get("applied_params"):
+        prefix_parts.append("Параметры применил из твоего запроса.")
 
     return await _format_updated_workout_after_edit(
         planned_workout_id=result.get("planned_workout_id"),
-        prefix=prefix,
+        prefix="\n".join(prefix_parts),
     )
 
 
