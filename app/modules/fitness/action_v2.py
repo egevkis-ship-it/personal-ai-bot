@@ -33,7 +33,7 @@ from app.modules.fitness.self_learning import (
     is_correction_message,
     is_forget_message,
 )
-from app.db import save_last_interaction
+from app.db import save_last_interaction, get_last_interaction
 from app.modules.fitness.formatter import (
     format_planned_workout,
     format_period_plan,
@@ -555,6 +555,7 @@ async def parse_fitness_action_v2(
     text: str,
     active_session: dict | None = None,
     telegram_user_id: str | None = None,
+    prev_context: dict | None = None,
 ) -> dict:
     today = date.today().isoformat()
     current_week_start, current_week_end = week_bounds()
@@ -562,13 +563,30 @@ async def parse_fitness_action_v2(
     month_start, month_end = month_bounds()
     next_month_start, next_month_end = next_month_bounds()
 
-    # ── Self-learning: inject active corrections from this user ──
     corrections_block = ""
     if telegram_user_id:
         try:
             corrections_block = await build_corrections_context(telegram_user_id)
         except Exception:
             corrections_block = ""
+
+    # Previous conversation context — критично для разрешения "её", "оттуда", "там"
+    prev_block = ""
+    if prev_context:
+        prev_date = prev_context.get("current_workout_date")
+        prev_focus = prev_context.get("current_focus")
+        prev_action = prev_context.get("action")
+        prev_input = (prev_context.get("input_text") or "")[:200]
+        if prev_date or prev_focus or prev_action:
+            prev_block = (
+                f"\n═══ Контекст предыдущего сообщения (используй для разрешения 'её/оттуда/там/эту') ═══\n"
+                f"- Предыдущий вопрос пользователя: {prev_input!r}\n"
+                f"- Обсуждаемая дата тренировки: {prev_date or '—'}\n"
+                f"- Обсуждаемый фокус: {prev_focus or '—'}\n"
+                f"- Предыдущий action: {prev_action or '—'}\n"
+                f"ВАЖНО: если пользователь говорит 'её', 'эту', 'оттуда', 'там', 'меняем X на Y' "
+                f"БЕЗ явной даты — используй дату из этого контекста, НЕ today.\n"
+            )
 
     system_prompt = f"""
 Ты главный parser фитнес-ассистента. Возвращай СТРОГО JSON без markdown.
@@ -580,7 +598,7 @@ async def parse_fitness_action_v2(
 - Текущий месяц: {month_start} — {month_end}
 - Следующий месяц: {next_month_start} — {next_month_end}
 - Активная сессия: {json.dumps(active_session or {}, ensure_ascii=False)}
-
+{prev_block}
 {corrections_block}
 
 ═══ JSON-СХЕМА ═══
@@ -708,12 +726,19 @@ async def parse_fitness_action_v2(
 - "скопируй понедельник на четверг", "продублируй вторник"
 → move_workout / copy_workout. target.from_date, target.to_date.
 
-7. РЕДАКТИРОВАНИЕ ПЛАНА (edit_plan):
+7. РЕДАКТИРОВАНИЕ ПЛАНА (edit_plan) — confidence >= 0.8 даже если детали не извлечены:
 - "добавь жим в сегодняшнюю", "вставь тягу в план на четверг"
 - "убери присед из вторника", "удали жим из плана"
 - "замени жим лёжа на жим гантелей", "поменяй штангу на гантели"
 - "увеличь вес в жиме до 90", "поставь 4 подхода вместо 3"
-- "измени план", "давай поправим"
+- "измени план", "давай поправим", "давай её изменим", "хочу поменять",
+  "хочу убрать оттуда", "оттуда убери", "из неё убери", "там вместо X сделаем Y"
+- "поменяй трицепс канат на трицепс прямым грифом" — replace
+- "убери трицепс из пятничной" — remove
+- ВАЖНО: если в тексте есть глагол "поменять/изменить/убрать/добавить/заменить" в адрес тренировки —
+  это edit_plan, даже если дата только что обсуждалась (используй prev_context).
+  ВСЕГДА предпочитай edit_plan, а не clarify, для таких глаголов.
+- Дату НЕ оставляй null: возьми из prev_context.current_workout_date если в тексте даты нет.
 
 8. ПРОГРЕСС:
 - "покажи прогресс", "результаты", "как я расту"
@@ -1459,7 +1484,12 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
     return None
 
 
-async def _edit_plan(telegram_user_id: str | None, text: str, parsed: dict) -> str:
+async def _edit_plan(
+    telegram_user_id: str | None,
+    text: str,
+    parsed: dict,
+    prev_context: dict | None = None,
+) -> str:
     from app.db import (
         get_best_planned_workout_for_edit,
         add_exercise_to_planned_workout,
@@ -1470,35 +1500,55 @@ async def _edit_plan(telegram_user_id: str | None, text: str, parsed: dict) -> s
     exercise_name = target.get("exercise_name")
     target_date = parsed.get("date")
 
+    # Если парсер не извлёк дату — fallback на последнюю обсуждаемую тренировку
+    if not target_date and prev_context:
+        ctx_date = prev_context.get("current_workout_date")
+        if ctx_date:
+            target_date = str(ctx_date)[:10]
+
     workout = await get_best_planned_workout_for_edit(telegram_user_id, target_date=target_date)
     if not workout:
-        return "Не нашёл активный план для редактирования. Сначала создай план."
+        if target_date:
+            return f"Не нашёл активную плановую тренировку на {target_date}. Создай её или уточни дату."
+        return "Не нашёл активный план для редактирования. Сначала создай план или уточни дату."
 
     workout_id = workout.get("id")
     summary = parsed.get("summary") or ""
 
-    # Ask Claude to figure out exact edit intent
+    # Список упражнений в плане — для fuzzy match
+    existing_names = []
+    for ex in (workout.get("exercises") or []):
+        nm = ex.get("exercise_name")
+        if nm:
+            existing_names.append(nm)
+
     edit_prompt = f"""
 Пользователь хочет изменить план тренировки (ID {workout_id}).
 
 Запрос: {text}
-Текущий план: {json.dumps(workout, ensure_ascii=False, default=str)}
+Существующие упражнения в плане:
+{chr(10).join(f"- {n}" for n in existing_names) if existing_names else "(нет)"}
+
+Полный план: {json.dumps(workout, ensure_ascii=False, default=str)[:2000]}
+
+ВАЖНО:
+- exercise_name ОБЯЗАТЕЛЬНО должно совпадать с одним из существующих названий ВЫШЕ (буква в букву).
+- Пользователь может назвать упражнение неточно ("трицепс канат" вместо "Трицепс с блока / канат" или "разводка" вместо "Pec deck / сведения"). Найди ближайшее совпадение из списка и используй ПОЛНОЕ название из списка.
+- Если упражнения нет в списке и operation=remove/replace — operation="unknown".
+- Для add — exercise_name может быть новым названием.
 
 Верни JSON:
 {{
-  "operation": "add | remove | replace | unknown",
-  "exercise_name": "название упражнения",
-  "new_exercise_name": "новое название (только для replace)",
-  "sets": null,
-  "reps_min": null,
-  "reps_max": null,
-  "weight_kg": null
+  "operation": "add | remove | replace | update | unknown",
+  "exercise_name": "<точное название из списка для remove/replace/update, или новое для add>",
+  "new_exercise_name": "<новое название для replace>",
+  "sets": null, "reps_min": null, "reps_max": null, "weight_kg": null
 }}
 Только JSON.
 """
     response = await claude_client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=256,
+        max_tokens=512,
         system="Ты parser команд редактирования фитнес-плана. Ответ только JSON.",
         messages=[{"role": "user", "content": edit_prompt}],
     )
@@ -1744,9 +1794,8 @@ async def _ask_clarification(text: str) -> str:
 
 
 async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> str | None:
-    """Public entry. Wraps the inner handler with self-learning hooks."""
+    """Public entry. Wraps the inner handler with self-learning hooks + conversation context."""
 
-    # ── Self-learning gate: feedback / forget messages bypass normal flow ──
     forget_reply = await handle_forget_request(telegram_user_id, text)
     if forget_reply:
         return forget_reply
@@ -1755,18 +1804,23 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     if correction_reply:
         return correction_reply
 
-    # ── Normal flow ──
-    response = await _handle_fitness_action_v2_inner(telegram_user_id, text)
+    # Load previous conversation context (what date/workout we were just discussing)
+    prev = None
+    try:
+        prev = await get_last_interaction(telegram_user_id) if telegram_user_id else None
+    except Exception:
+        prev = None
 
-    # Save last interaction for future self-corrections (fire & forget)
+    response = await _handle_fitness_action_v2_inner(telegram_user_id, text, prev_context=prev)
+
+    # Handlers that touch a specific date save their own context via save_last_interaction.
+    # This wrapper updates input/response/timestamp only (preserves date context via COALESCE).
     if response and telegram_user_id:
         try:
             await save_last_interaction(
                 telegram_user_id=telegram_user_id,
                 input_text=text,
                 bot_response=response,
-                action=None,
-                parsed=None,
             )
         except Exception:
             pass
@@ -1774,9 +1828,16 @@ async def handle_fitness_action_v2(telegram_user_id: str | None, text: str) -> s
     return response
 
 
-async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: str) -> str | None:
+async def _handle_fitness_action_v2_inner(
+    telegram_user_id: str | None,
+    text: str,
+    prev_context: dict | None = None,
+) -> str | None:
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
     active_session = _active_session_context_from_pending(pending)
+    # prev_context: previous conversation context (current_workout_date etc.)
+    # Stored separately by handlers via save_last_interaction()
+    _PREV = prev_context or {}
 
     # ── Plan import detection runs FIRST and overrides any stale pending/session ──
     # A long plan-shaped message is never a set log, regardless of pending state.
@@ -1889,7 +1950,7 @@ async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: st
     )
 
     if is_multi_exercise_record and not active_session:
-        parsed_multi = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id)
+        parsed_multi = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id, prev_context=_PREV)
         if parsed_multi.get("action") == "log_workout_sets" and parsed_multi.get("logged_exercises"):
             return await _log_workout_sets(telegram_user_id, text, parsed_multi, active_session)
 
@@ -1906,7 +1967,7 @@ async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: st
     if history_reply is not None:
         return history_reply
 
-    parsed = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id)
+    parsed = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id, prev_context=_PREV)
 
     action = parsed.get("action")
     confidence = float(parsed.get("confidence") or 0)
@@ -1919,9 +1980,11 @@ async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: st
         return await _ask_clarification(text)
 
     if action == "show_today_workout":
-        data = await get_today_planned_workout(telegram_user_id, date.today().isoformat())
+        today_iso = date.today().isoformat()
+        data = await get_today_planned_workout(telegram_user_id, today_iso)
         if not data:
             return "На сегодня активная плановая тренировка не найдена."
+        await _remember_workout_context(telegram_user_id, today_iso, data)
         return "Сегодня по плану:\n\n" + format_planned_workout(data)
 
     if action == "show_week_plan":
@@ -1945,6 +2008,7 @@ async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: st
         data = await get_today_planned_workout(telegram_user_id, target_date)
         if not data:
             return f"На {format_human_date(target_date)} активная плановая тренировка не найдена."
+        await _remember_workout_context(telegram_user_id, target_date, data)
         return f"Тренировка на {format_human_date(target_date)}:\n\n" + format_planned_workout(data)
 
     if action == "replace_today_workout":
@@ -1966,7 +2030,7 @@ async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: st
         return await _correct_previous_action(telegram_user_id, text, parsed, active_session)
 
     if action == "edit_plan":
-        return await _edit_plan(telegram_user_id, text, parsed)
+        return await _edit_plan(telegram_user_id, text, parsed, prev_context=_PREV)
 
     if action == "show_progress":
         return await _show_progress(telegram_user_id, text, parsed)
@@ -2091,6 +2155,28 @@ async def _handle_fitness_action_v2_inner(telegram_user_id: str | None, text: st
 def _shift_date(d: date, days: int) -> date:
     from datetime import timedelta
     return d + timedelta(days=days)
+
+
+async def _remember_workout_context(
+    telegram_user_id: str | None,
+    target_date: str | None,
+    data: dict | None,
+) -> None:
+    """Запоминаем какую тренировку юзер только что обсудил — для разрешения 'её'/'оттуда'."""
+    if not telegram_user_id or not data:
+        return
+    try:
+        w = data.get("workout") or {}
+        await save_last_interaction(
+            telegram_user_id=telegram_user_id,
+            input_text="",  # обновляется обёрткой
+            bot_response="",
+            current_workout_date=target_date,
+            current_planned_workout_id=w.get("id"),
+            current_focus=w.get("focus_label") or w.get("focus"),
+        )
+    except Exception:
+        pass
 
 
 async def _show_completed_or_planned_for_date(telegram_user_id: str | None, target_date: str) -> str:

@@ -21,7 +21,8 @@ def _month_end_iso() -> str:
 
 
 def _date_title(target_date: str) -> str:
-    return f"Тренировка на {target_date}"
+    from app.modules.fitness.formatter import format_human_date
+    return f"Тренировка на {format_human_date(target_date)}"
 
 
 def _is_non_empty_workout(item: dict) -> bool:
@@ -845,7 +846,7 @@ async def execute_planned_workout_action(
             return await _format_workouts_with_weights(
                 telegram_user_id=telegram_user_id,
                 items=[data],
-                title=f"Тренировка на {target_date} с весами:",
+                title=f"Тренировка на {_date_title(target_date).removeprefix('Тренировка на ')} с весами:",
             )
 
         items = await get_planned_workouts_in_period(

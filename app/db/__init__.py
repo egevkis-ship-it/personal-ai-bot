@@ -248,9 +248,16 @@ async def init_db() -> None:
             input_text TEXT,
             bot_response TEXT,
             action TEXT,
-            parsed_json JSONB
+            parsed_json JSONB,
+            current_workout_date DATE,
+            current_planned_workout_id BIGINT,
+            current_focus TEXT
         );
         """))
+        # Forward-compat migrations for existing installs
+        await conn.execute(text("ALTER TABLE last_interaction ADD COLUMN IF NOT EXISTS current_workout_date DATE;"))
+        await conn.execute(text("ALTER TABLE last_interaction ADD COLUMN IF NOT EXISTS current_planned_workout_id BIGINT;"))
+        await conn.execute(text("ALTER TABLE last_interaction ADD COLUMN IF NOT EXISTS current_focus TEXT;"))
 
         await conn.execute(text("""
         CREATE TABLE IF NOT EXISTS learning_corrections (
@@ -781,22 +788,31 @@ async def save_last_interaction(
     bot_response: str,
     action: str | None = None,
     parsed: dict | None = None,
+    current_workout_date: str | None = None,
+    current_planned_workout_id: int | None = None,
+    current_focus: str | None = None,
 ) -> None:
-    """Upsert the most recent user↔bot interaction for use by self-learning."""
+    """Upsert the most recent user↔bot interaction for self-learning + context carry-over."""
     import json as _json
     if not telegram_user_id:
         return
     async with AsyncSessionLocal() as session:
         await session.execute(
             text("""
-            INSERT INTO last_interaction (telegram_user_id, updated_at, input_text, bot_response, action, parsed_json)
-            VALUES (:uid, now(), :inp, :resp, :act, CAST(:parsed AS JSONB))
+            INSERT INTO last_interaction
+              (telegram_user_id, updated_at, input_text, bot_response, action, parsed_json,
+               current_workout_date, current_planned_workout_id, current_focus)
+            VALUES (:uid, now(), :inp, :resp, :act, CAST(:parsed AS JSONB),
+                    :cwd, :cpwid, :cfocus)
             ON CONFLICT (telegram_user_id) DO UPDATE
             SET updated_at = now(),
-                input_text = EXCLUDED.input_text,
-                bot_response = EXCLUDED.bot_response,
-                action = EXCLUDED.action,
-                parsed_json = EXCLUDED.parsed_json
+                input_text = COALESCE(NULLIF(EXCLUDED.input_text, ''), last_interaction.input_text),
+                bot_response = COALESCE(NULLIF(EXCLUDED.bot_response, ''), last_interaction.bot_response),
+                action = COALESCE(EXCLUDED.action, last_interaction.action),
+                parsed_json = COALESCE(EXCLUDED.parsed_json, last_interaction.parsed_json),
+                current_workout_date = COALESCE(EXCLUDED.current_workout_date, last_interaction.current_workout_date),
+                current_planned_workout_id = COALESCE(EXCLUDED.current_planned_workout_id, last_interaction.current_planned_workout_id),
+                current_focus = COALESCE(EXCLUDED.current_focus, last_interaction.current_focus)
             """),
             {
                 "uid": telegram_user_id,
@@ -804,6 +820,9 @@ async def save_last_interaction(
                 "resp": bot_response[:4000] if bot_response else None,
                 "act": action,
                 "parsed": _json.dumps(parsed or {}, ensure_ascii=False),
+                "cwd": current_workout_date,
+                "cpwid": current_planned_workout_id,
+                "cfocus": current_focus,
             },
         )
         await session.commit()
