@@ -75,25 +75,31 @@ def safe_json_loads(text: str) -> dict:
 async def parse_message(text: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
 
-    response = await claude_client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=512,
-        system=[
-            {
-                "type": "text",
-                "text": _PARSE_SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            },
-            {
-                "type": "text",
-                "text": f"Сегодняшняя дата: {today}",
-            },
-        ],
-        messages=[{"role": "user", "content": text}],
-    )
+    # Если текст слишком длинный — почти всегда импорт фитнес-плана. Не гоняем haiku.
+    if len(text) > 1500:
+        return {"intent": "fitness", "confidence": 0.9, "summary": "long fitness import"}
 
-    content = response.content[0].text if response.content else "{}"
-    return safe_json_loads(content)
+    try:
+        response = await claude_client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=512,
+            system=[
+                {
+                    "type": "text",
+                    "text": _PARSE_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {
+                    "type": "text",
+                    "text": f"Сегодняшняя дата: {today}",
+                },
+            ],
+            messages=[{"role": "user", "content": text}],
+        )
+        content = response.content[0].text if response.content else "{}"
+        return safe_json_loads(content)
+    except Exception as e:
+        return {"intent": "unknown", "confidence": 0.0, "error": str(e)[:200]}
 
 
 async def generate_general_answer(text: str) -> str:

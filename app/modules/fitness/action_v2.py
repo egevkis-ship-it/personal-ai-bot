@@ -46,6 +46,7 @@ from app.db import (
     add_fitness_goal, list_active_goals, mark_goal_achieved,
     log_pain, get_pain_journal,
     bulk_update_planned_exercises, find_workouts_by_exercise,
+    copy_planned_period,
 )
 from app.modules.fitness.muscle_groups import (
     classify_exercise, aggregate_by_group, estimate_1rm,
@@ -704,7 +705,7 @@ async def parse_fitness_action_v2(
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_volume_by_group | show_lagging_group | show_streak | find_workout_by_exercise | show_trend | show_1rm | log_pain_action | sick_leave | show_plateau | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_volume_by_group | show_lagging_group | show_streak | find_workout_by_exercise | show_trend | show_1rm | log_pain_action | sick_leave | show_plateau | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | copy_week_to_next | copy_period_to_period | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -979,6 +980,14 @@ async def parse_fitness_action_v2(
 - "сделай отчёт тренеру", "текст для тренера", "отчёт за неделю красиво" → coach_report
   period.start_date / end_date (по умолчанию неделя)
 - "сводка недели", "weekly", "weekly summary" → weekly_summary
+
+14l. КОПИРОВАНИЕ ПЕРИОДОВ:
+- "скопируй неделю на следующую", "копируй тренировки этой недели на след",
+  "перенеси все тренировки этой недели в следующую", "продублируй неделю",
+  "клонируй неделю" → copy_week_to_next
+- "скопируй с 18.05 по 24.05 начиная с 01.06" → copy_period_to_period
+  period.start_date / end_date = source, target.to_date = destination start
+- НЕ путать со скиппами или сдвигами — здесь именно ДУБЛИРОВАНИЕ.
 
 15. НЕ-ФИТНЕС сообщения → non_fitness:
 - "какая сегодня погода", "сколько времени", "найди ресторан", "напомни купить молоко", "что такое X"
@@ -2671,6 +2680,45 @@ async def _handle_fitness_action_v2_inner(
 
     if action == "weekly_summary":
         return await _weekly_summary(telegram_user_id)
+
+    # ═══ Копирование периодов ═══
+    if action == "copy_week_to_next":
+        cur_s, cur_e = week_bounds()
+        from datetime import timedelta
+        dst_s = (datetime.strptime(cur_s, "%Y-%m-%d").date() + timedelta(days=7)).isoformat()
+        result = await copy_planned_period(
+            telegram_user_id=telegram_user_id,
+            src_start=cur_s, src_end=cur_e,
+            dst_start=dst_s, skip_existing=True,
+        )
+        if result["copied"] == 0:
+            return f"⚠️ Не нашёл что копировать в текущей неделе ({format_human_date(cur_s)} — {format_human_date(cur_e)}). Пропущено (уже есть): {result['skipped']}."
+        return (
+            f"📋 Скопировал {result['copied']} тренировок с {format_human_date(cur_s)} — {format_human_date(cur_e)} "
+            f"на {format_human_date(result['dst_first'])} — {format_human_date(result['dst_last'])}."
+            + (f"\nПропущено (уже было запланировано): {result['skipped']}." if result['skipped'] else "")
+        )
+
+    if action == "copy_period_to_period":
+        period = parsed.get("period") or {}
+        target = parsed.get("target") or {}
+        src_s = period.get("start_date")
+        src_e = period.get("end_date")
+        dst_s = target.get("to_date")
+        if not src_s or not src_e or not dst_s:
+            return "Уточни: «скопируй с 18.05 по 24.05 начиная с 01.06»."
+        result = await copy_planned_period(
+            telegram_user_id=telegram_user_id,
+            src_start=src_s, src_end=src_e,
+            dst_start=dst_s, skip_existing=True,
+        )
+        if result["copied"] == 0:
+            return f"⚠️ Нечего копировать с {format_human_date(src_s)} — {format_human_date(src_e)}."
+        return (
+            f"📋 Скопировал {result['copied']} тренировок с {format_human_date(src_s)} — {format_human_date(src_e)} "
+            f"на {format_human_date(result['dst_first'])} — {format_human_date(result['dst_last'])}."
+            + (f"\nПропущено: {result['skipped']}." if result['skipped'] else "")
+        )
 
     if action == "non_fitness":
         # Делегируем общему AI-ответчику, не ломая активную сессию

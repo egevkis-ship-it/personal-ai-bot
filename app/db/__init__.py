@@ -1053,6 +1053,97 @@ async def bulk_update_planned_exercises(
         return n
 
 
+async def copy_planned_period(
+    telegram_user_id: str | None,
+    src_start: str,
+    src_end: str,
+    dst_start: str,
+    skip_existing: bool = True,
+) -> dict:
+    """Copy planned workouts from [src_start, src_end] starting at dst_start (keep day offsets).
+    Returns {copied, skipped, dst_end}."""
+    from datetime import timedelta as _td
+    async with AsyncSessionLocal() as session:
+        # Compute date offset
+        src_s_d = datetime.strptime(src_start, "%Y-%m-%d").date()
+        dst_s_d = datetime.strptime(dst_start, "%Y-%m-%d").date()
+        offset = (dst_s_d - src_s_d).days
+
+        src = await session.execute(
+            text("""
+            SELECT id, planned_date, title, focus, focus_label, workout_type, notes, plan_id
+            FROM planned_workouts
+            WHERE telegram_user_id = :uid
+              AND planned_date BETWEEN :s AND :e
+              AND status IN ('planned','completed','completed_modified','skipped','moved','replaced')
+            ORDER BY planned_date ASC, id ASC
+            """),
+            {"uid": telegram_user_id, "s": src_start, "e": src_end},
+        )
+        rows = list(src.mappings().all())
+        copied = 0
+        skipped = 0
+        dst_dates = []
+        for r in rows:
+            new_d = (r["planned_date"] + _td(days=offset)).isoformat() if hasattr(r["planned_date"], "year") else None
+            if not new_d:
+                try:
+                    src_d = datetime.strptime(str(r["planned_date"])[:10], "%Y-%m-%d").date()
+                    new_d = (src_d + _td(days=offset)).isoformat()
+                except Exception:
+                    continue
+
+            if skip_existing:
+                check = await session.execute(
+                    text("""SELECT id FROM planned_workouts
+                            WHERE telegram_user_id = :uid AND planned_date = :d AND status = 'planned' LIMIT 1"""),
+                    {"uid": telegram_user_id, "d": new_d},
+                )
+                if check.first():
+                    skipped += 1
+                    continue
+
+            new_id_res = await session.execute(
+                text("""
+                INSERT INTO planned_workouts
+                  (telegram_user_id, planned_date, title, focus, focus_label,
+                   workout_type, status, notes, plan_id, source_text)
+                VALUES (:uid, :d, :t, :f, :fl, :wt, 'planned', :n, :pid, :src)
+                RETURNING id
+                """),
+                {
+                    "uid": telegram_user_id, "d": new_d, "t": r["title"],
+                    "f": r["focus"], "fl": r["focus_label"], "wt": r["workout_type"],
+                    "n": r["notes"], "pid": r["plan_id"],
+                    "src": f"copy_from_{r['id']}",
+                },
+            )
+            new_id = new_id_res.scalar()
+
+            await session.execute(
+                text("""
+                INSERT INTO planned_exercises
+                  (planned_workout_id, exercise_order, exercise_name,
+                   target_sets, target_reps_min, target_reps_max, target_reps_text,
+                   target_weight_kg, notes)
+                SELECT :nid, exercise_order, exercise_name,
+                       target_sets, target_reps_min, target_reps_max, target_reps_text,
+                       target_weight_kg, notes
+                FROM planned_exercises WHERE planned_workout_id = :sid
+                """),
+                {"nid": new_id, "sid": r["id"]},
+            )
+            copied += 1
+            dst_dates.append(new_d)
+        await session.commit()
+        return {
+            "copied": copied,
+            "skipped": skipped,
+            "dst_first": min(dst_dates) if dst_dates else None,
+            "dst_last": max(dst_dates) if dst_dates else None,
+        }
+
+
 async def find_workouts_by_exercise(
     telegram_user_id: str | None,
     exercise_pattern: str,

@@ -883,9 +883,15 @@ async def execute_planned_workout_action(
             include_cancelled=False,
         )
 
-        title = f"План {start_date} — {end_date}"
+        from app.modules.fitness.formatter import format_human_date
         if scope == "future":
             title = "Все будущие плановые тренировки"
+        elif scope == "all":
+            title = "Все плановые тренировки"
+        elif start_date == "1900-01-01" or end_date == "2999-12-31":
+            title = "Плановые тренировки (все доступные)"
+        else:
+            title = f"План {format_human_date(start_date, include_weekday=False)} — {format_human_date(end_date, include_weekday=False)}"
 
         return _format_active_plan_or_empty(items, title=title)
 
