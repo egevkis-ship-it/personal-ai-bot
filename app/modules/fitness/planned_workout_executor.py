@@ -1365,15 +1365,21 @@ async def execute_planned_workout_action(
         parts = []
         if updates.get("target_sets") is not None:
             parts.append(f"подходы: {updates.get('target_sets')}")
-        if updates.get("target_reps_min") is not None and updates.get("target_reps_max") is not None:
-            if updates.get("target_reps_min") == updates.get("target_reps_max"):
-                parts.append(f"повторы: {updates.get('target_reps_min')}")
+
+        # Repetitions: prefer numeric range, fall back to text — no double field.
+        rmin = updates.get("target_reps_min")
+        rmax = updates.get("target_reps_max")
+        rtext = updates.get("target_reps_text")
+        if rmin is not None and rmax is not None:
+            if rmin == rmax:
+                parts.append(f"повторы: {rmin}")
             else:
-                parts.append(f"повторы: {updates.get('target_reps_min')}-{updates.get('target_reps_max')}")
-        elif updates.get("target_reps_min") is not None:
-            parts.append(f"повторы: {updates.get('target_reps_min')}")
-        if updates.get("target_reps_text") is not None:
-            parts.append(f"повторы: {updates.get('target_reps_text')}")
+                parts.append(f"повторы: {rmin}-{rmax}")
+        elif rmin is not None:
+            parts.append(f"повторы: {rmin}")
+        elif rtext is not None:
+            parts.append(f"повторы: {rtext}")
+
         if updates.get("target_weight_kg") is not None:
             parts.append(f"вес: {updates.get('target_weight_kg'):g} кг")
 

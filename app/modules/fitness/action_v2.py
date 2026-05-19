@@ -862,6 +862,33 @@ async def parse_fitness_action_v2(
 - "скопируй понедельник на четверг", "продублируй вторник"
 → move_workout / copy_workout. target.from_date, target.to_date.
 
+6b. ⚠️ КРИТИЧНО — РАЗЛИЧАЙ ФАКТ vs ПРАВКУ ПЛАНА:
+
+ФАКТ (log_workout_sets) — пользователь РАССКАЗЫВАЕТ что СДЕЛАЛ:
+- "сделал X 25 кг 12 раз"
+- "выполнил жим 80 на 10"
+- "первый подход пуловер 25×12"
+- "разминка: 20 на 10"
+- "последний подход 90 на 8, перехожу к следующему упражнению"
+- "пуловер с канатами 25 килограмм 12 повторений" (в контексте текущей сессии)
+
+ПРАВКА ПЛАНА (edit_plan / operation=update) — пользователь ИЗМЕНЯЕТ план будущей тренировки:
+- "поставь 90 кг в жиме на пятницу"
+- "увеличь вес жима на 5 кг"
+- "сделай 4 по 8 в плане"
+- "измени план жима лёжа на 5×5"
+
+Ключевые маркеры ФАКТА: "сделал/выполнил/завершил" (прош. время своего действия) + число + ("кг"/"раз"/"повтор"/"подход").
+Ключевые маркеры ПЛАНА: "поставь/измени/увеличь/сократи" (повелительное наклонение к боту).
+
+Если сомневаешься — выбирай log_workout_sets, особенно когда дата = сегодня.
+
+6c. "Начинаю тренировку" / "стартую сессию" — НЕ просмотр плана!
+- "начинаю делать сегодняшнюю", "стартую тренировку", "приступаю",
+  "запускаю активную сессию", "первый подход X" (без чисел) → action="log_workout_sets"
+  с logged_exercises=[] если упражнение не названо, ИЛИ с упражнением но без подходов.
+  Если нет числа подходов — confidence=0.6, summary="старт сессии, ждём подходы".
+
 7. РЕДАКТИРОВАНИЕ ПЛАНА (edit_plan) — confidence >= 0.8 даже если детали не извлечены:
 - "добавь жим в сегодняшнюю", "вставь тягу в план на четверг"
 - "убери присед из вторника", "удали жим из плана"
@@ -2359,6 +2386,107 @@ async def _handle_fitness_action_v2_inner(
         parsed_multi = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id, prev_context=_PREV)
         if parsed_multi.get("action") == "log_workout_sets" and parsed_multi.get("logged_exercises"):
             return await _log_workout_sets(telegram_user_id, text, parsed_multi, active_session)
+
+    # ── HARD-route на "начинаю тренировку" → создаём пустую активную сессию ──
+    start_session_triggers = [
+        "начинаю делать сегодняшнюю", "начинаю делать тренировку",
+        "стартую тренировку", "стартую сессию", "приступаю к тренировке",
+        "запускаю активную сессию", "начинаю тренировку сегодня",
+        "начинаю тренировку", "начал тренировку", "приступаю",
+        "я делаю тренировку", "я начинаю тренировку",
+    ]
+    if any(p in t_lower for p in start_session_triggers) and not active_session:
+        today = date.today().isoformat()
+        # Найти плановую тренировку на сегодня
+        planned = await get_today_planned_workout(telegram_user_id, today)
+        focus = None
+        focus_label = None
+        if planned:
+            w = planned.get("workout") or {}
+            focus = w.get("focus")
+            focus_label = w.get("focus_label")
+
+        # Создать пустую active_session workout
+        workout_id = await save_fitness_workout_session_v2(
+            telegram_user_id=telegram_user_id,
+            workout_date=today,
+            workout_type="actual",
+            focus=focus,
+            focus_label=focus_label,
+            source_text=text,
+            notes=None,
+            exercises=[],
+        )
+
+        session_context = {
+            "workout_id": workout_id,
+            "workout_date": today,
+            "current_exercise": None,
+            "session_status": "active",
+            "started_at": _now_iso(),
+            "last_activity_at": _now_iso(),
+            "last_training_activity_at": _now_iso(),
+            "last_action": "session_started",
+        }
+        await create_fitness_pending_decision(
+            telegram_user_id=telegram_user_id,
+            decision_type="active_workout_session",
+            context=session_context,
+            source_text=text,
+        )
+
+        msg = (
+            f"▶️ Активная сессия #{workout_id} запущена.\n\n"
+            f"Дата: {format_human_date(today)}\n"
+            + (f"Фокус: {focus_label}\n" if focus_label else "")
+            + "\nДиктуй подходы. Пример: «жим штанги 80 на 10», «следующий 80×8», "
+              "«последний 75×10, перехожу к гантелям»."
+        )
+        return msg
+
+    # ── HARD-route на запись факта: "сделал/выполнил X N кг M раз" ──
+    # Эти фразы ВСЕГДА факт, никогда не правка плана.
+    fact_verbs = re.search(
+        r"\b(сделал[аои]?|сделанн|выполнил[аио]?|записывай|запиши|залогируй|первый подход|второй подход|третий подход|последний подход|был[оаи]? подход|рабочий подход)\b",
+        t_lower,
+    )
+    has_kg_or_reps = bool(re.search(r"\d+\s*(кг|килограмм|повтор|раз)", t_lower)) or has_sets_pattern
+    looks_like_fact = bool(fact_verbs) and has_kg_or_reps
+
+    if looks_like_fact:
+        parsed_fact = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id, prev_context=_PREV)
+        # Force into log path even if parser thought it was edit_plan
+        if parsed_fact.get("action") in ("log_workout_sets", "edit_plan", "continue_current_exercise"):
+            # Try to extract logged_exercises; if edit_plan was chosen, coerce
+            if parsed_fact.get("logged_exercises"):
+                return await _log_workout_sets(telegram_user_id, text, parsed_fact, active_session)
+            # Synthesize a logged_exercises from parser's edit_plan output
+            tgt = parsed_fact.get("target") or {}
+            ex_name = tgt.get("exercise_name")
+            if ex_name:
+                # rough fallback: parse numbers from text
+                nums = re.findall(r"\d+(?:[.,]\d+)?", text)
+                weight = None
+                reps = None
+                if nums:
+                    vals = [float(n.replace(",", ".")) for n in nums]
+                    # heuristic: first >20 = weight, smaller = reps
+                    big = [v for v in vals if v >= 20]
+                    small = [v for v in vals if v < 30]
+                    if big:
+                        weight = big[0]
+                    if small:
+                        reps = int(small[-1])
+                synth = {
+                    "action": "log_workout_sets",
+                    "date": date.today().isoformat(),
+                    "workout": {},
+                    "logged_exercises": [{
+                        "exercise_name": ex_name,
+                        "sets": [{"set_number": 1, "weight_kg": weight, "reps": reps}],
+                    }],
+                }
+                return await _log_workout_sets(telegram_user_id, text, synth, active_session)
 
     # ── Router hardening (handles set logging, confirmation flows, etc.) ───────
     hardening_reply = await handle_router_hardening(telegram_user_id, text)
