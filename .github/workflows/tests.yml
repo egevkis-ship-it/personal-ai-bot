@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Syntax check
+        run: |
+          python -c "
+          import ast, pathlib, sys
+          errs = []
+          for f in pathlib.Path('app').rglob('*.py'):
+              try: ast.parse(open(f).read())
+              except SyntaxError as e: errs.append((str(f), str(e)))
+          if errs:
+              for f, e in errs: print(f'{f}: {e}')
+              sys.exit(1)
+          print('OK')
+          "
+
+      - name: Unit + regression tests
+        run: |
+          pytest tests/unit tests/regression -v --tb=short
+
+      - name: Migration coverage check
+        run: |
+          python -c "
+          import os, re, sys
+          DIR = 'app/db/migrations'
+          all_sql = ''
+          for f in sorted(os.listdir(DIR)):
+              if re.match(r'^\d{3}_.*\.sql$', f):
+                  all_sql += open(os.path.join(DIR, f)).read() + '\n'
+          req = ['last_interaction','learning_corrections','user_preferences','workout_templates','fitness_goals','pain_journal','scheduled_reminders']
+          miss = [t for t in req if t not in all_sql]
+          assert not miss, f'Missing tables in migrations: {miss}'
+          print('All required tables present')
+          "
