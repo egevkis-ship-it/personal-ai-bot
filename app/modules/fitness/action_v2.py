@@ -2633,6 +2633,13 @@ async def _handle_fitness_action_v2_inner(
         return await _create_or_replace_today_workout(telegram_user_id, text, parsed)
 
     if action == "add_custom_workout":
+        # DEBUG: всегда префиксим
+        _dbg = (
+            f"[DBG add_custom: session={active_session is not None}, "
+            f"wid={(active_session or {}).get('workout_id')}, "
+            f"wdate={(active_session or {}).get('workout_date')!r}, "
+            f"today={date.today().isoformat()!r}]\n"
+        )
         # Если есть активная сессия СЕГОДНЯ — это запись подходов, не план.
         # "Подтягивания 10 раз" / "Брусья 3×10" / "Планка 60 секунд" в сессии = log.
         if active_session and active_session.get("workout_id"):
@@ -2665,7 +2672,8 @@ async def _handle_fitness_action_v2_inner(
                         "logged_exercises": logged,
                     }
                     return await _log_workout_sets(telegram_user_id, text, synth, active_session)
-        return await _add_custom_workout(telegram_user_id, text, parsed)
+        result_add = await _add_custom_workout(telegram_user_id, text, parsed)
+        return _dbg + (result_add if isinstance(result_add, str) else str(result_add))
 
     if action == "log_workout_sets":
         return await _log_workout_sets(telegram_user_id, text, parsed, active_session)
