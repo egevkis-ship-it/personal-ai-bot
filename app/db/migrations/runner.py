@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR = os.path.dirname(__file__)
 
 
+def _split_sql(sql: str) -> list[str]:
+    """Split a SQL file into individual statements, skipping empty ones."""
+    return [s.strip() for s in sql.split(";") if s.strip()]
+
+
 async def run_migrations() -> None:
     async with get_session() as session:
         await session.execute(text("""
@@ -38,7 +43,8 @@ async def run_migrations() -> None:
                 sql = f.read()
 
             logger.info(f"Applying migration: {filename}")
-            await session.execute(text(sql))
+            for statement in _split_sql(sql):
+                await session.execute(text(statement))
             await session.execute(
                 text("INSERT INTO schema_migrations (filename) VALUES (:f)"),
                 {"f": filename},

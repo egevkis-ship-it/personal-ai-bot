@@ -1,12 +1,62 @@
 import json
 from datetime import datetime
 
+from anthropic import AsyncAnthropic
 from openai import OpenAI
 
 from app.config import settings
 
 
+# OpenAI client — kept for audio transcription and legacy fitness module imports
 client = OpenAI(api_key=settings.openai_api_key)
+
+# Anthropic client — used for all text parsing and generation
+claude_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+_PARSE_SYSTEM_PROMPT = """\
+Ты персональный AI-ассистент Егора в Telegram.
+
+Твоя задача — определить intent сообщения и вернуть строго JSON.
+
+Поддерживаемые intent:
+- fitness — тренировки, упражнения, вес, замеры тела, фитнес-план
+- nutrition — еда, калории, приёмы пищи, БЖУ
+- translation — перевод текста
+- task — задачи, проекты, дедлайны
+- reminder — напоминания
+- construction_note — стройка, ремонт, материалы
+- finance_expense — расходы, доходы, финансы
+- ops — системные команды: установить пакет, добавить модуль, изменить код, создать таблицу в БД, задеплоить
+- general_question — общий вопрос или разговор
+- unknown — непонятное
+
+Формат ответа:
+{
+  "intent": "...",
+  "confidence": 0.0,
+  "date": "YYYY-MM-DD",
+  "requires_confirmation": false,
+  "summary": "...",
+  "data": {}
+}
+
+Правила:
+- Ответ только JSON, без markdown.
+- Если дата не указана, используй сегодняшнюю.
+- Если сообщение связано с тренировками, фитнес-планом, выполненной тренировкой, весом, замерами тела, пропуском тренировки или запросом тренировки — intent="fitness".
+- Если это расход, задача, ops-действие или изменение данных — requires_confirmation=true.
+- Если это фитнес, замеры или питание — можно requires_confirmation=false.
+- Не выдумывай точные калории, если пользователь явно не просит посчитать.\
+"""
+
+_GENERAL_SYSTEM_PROMPT = """\
+Ты персональный Telegram AI-ассистент Егора.
+
+Отвечай естественно, кратко и по делу.
+Ты уже умеешь принимать текст и голосовые, расшифровывать их, определять тип задачи и сохранять события в базу.
+Не говори, что ты полноценный готовый ассистент на все случаи жизни — система ещё развивается.
+Если пользователь просто общается, отвечай нормально как ассистент.\
+"""
 
 
 def safe_json_loads(text: str) -> dict:
@@ -20,58 +70,45 @@ def safe_json_loads(text: str) -> dict:
         raise
 
 
-def parse_message(text: str) -> dict:
+async def parse_message(text: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
 
-    system_prompt = f"""
-Ты персональный AI-ассистент Егора в Telegram.
-
-Твоя задача — определить intent сообщения и вернуть строго JSON.
-
-Поддерживаемые intent:
-- fitness
-- nutrition
-- translation
-- task
-- reminder
-- construction_note
-- finance_expense
-- ops
-- general_question
-- unknown
-
-Сегодняшняя дата: {today}
-
-Формат ответа:
-{{
-  "intent": "...",
-  "confidence": 0.0,
-  "date": "YYYY-MM-DD",
-  "requires_confirmation": false,
-  "summary": "...",
-  "data": {{}}
-}}
-
-Правила:
-- Ответ только JSON, без markdown.
-- Если дата не указана, используй сегодняшнюю.
-- Если сообщение связано с тренировками, фитнес-планом, выполненной тренировкой, весом, замерами тела, пропуском тренировки или запросом тренировки — intent="fitness".
-- Если это расход, задача, ops-действие или изменение данных — requires_confirmation=true.
-- Если это фитнес, замеры или питание — можно requires_confirmation=false.
-- Не выдумывай точные калории, если пользователь явно не просит посчитать.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=512,
+        system=[
+            {
+                "type": "text",
+                "text": _PARSE_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            },
+            {
+                "type": "text",
+                "text": f"Сегодняшняя дата: {today}",
+            },
         ],
+        messages=[{"role": "user", "content": text}],
     )
 
-    content = response.choices[0].message.content or "{}"
+    content = response.content[0].text if response.content else "{}"
     return safe_json_loads(content)
+
+
+async def generate_general_answer(text: str) -> str:
+    response = await claude_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        system=[
+            {
+                "type": "text",
+                "text": _GENERAL_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        messages=[{"role": "user", "content": text}],
+    )
+
+    return response.content[0].text if response.content else "Понял."
 
 
 def transcribe_audio(file_path: str) -> str:
@@ -82,47 +119,3 @@ def transcribe_audio(file_path: str) -> str:
             language="ru",
         )
     return result.text
-
-
-def generate_general_answer(text: str) -> str:
-    system_prompt = """
-Ты персональный Telegram AI-ассистент Егора.
-
-Отвечай естественно, кратко и по делу.
-Ты уже умеешь принимать текст и голосовые, расшифровывать их, определять тип задачи и сохранять события в базу.
-Не говори, что ты полноценный готовый ассистент на все случаи жизни — система ещё развивается.
-Если пользователь просто общается, отвечай нормально как ассистент.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0.4,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
-    )
-
-    return response.choices[0].message.content or "Понял."
-
-
-def generate_general_answer(text: str) -> str:
-    system_prompt = """
-Ты персональный Telegram AI-ассистент Егора.
-
-Отвечай естественно, кратко и по делу.
-Ты уже умеешь принимать текст и голосовые, расшифровывать их, определять тип задачи и сохранять события в базу.
-Не говори, что ты полноценный готовый ассистент на все случаи жизни — система ещё развивается.
-Если пользователь просто общается, отвечай нормально как ассистент.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0.4,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
-    )
-
-    return response.choices[0].message.content or "Понял."
