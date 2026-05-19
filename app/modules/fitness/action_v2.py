@@ -72,14 +72,30 @@ from app.modules.fitness.utils import (
 
 
 def _safe_json_loads(text: str) -> dict:
+    # 1) direct
     try:
         return json.loads(text)
     except Exception:
+        pass
+    # 2) raw_decode — берёт первый валидный JSON-объект, игнорирует хвост
+    try:
+        decoder = json.JSONDecoder()
+        start = text.find("{")
+        if start >= 0:
+            obj, _ = decoder.raw_decode(text[start:])
+            return obj
+    except Exception:
+        pass
+    # 3) полная нарезка от { до последнего }
+    try:
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end >= 0:
             return json.loads(text[start:end + 1])
-        raise
+    except Exception:
+        pass
+    # 4) пустой объект вместо falling
+    return {}
 
 
 SESSION_TIMEOUT_HOURS = 6
