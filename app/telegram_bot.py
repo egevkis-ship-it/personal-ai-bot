@@ -165,46 +165,78 @@ async def cmd_reset(update, context):
 
 
 async def cmd_cleanup(update, context):
-    """Удалить мусорные дубли кастомных тренировок (от smoke-тестов)."""
+    """Удалить мусор: planned дубли + recorded тренировки с command-префиксами в exercise_name."""
     if not _is_allowed(update):
         return
     from app.db.engine import get_session
     from sqlalchemy import text as sql_text
     uid = _user_id(update)
     async with get_session() as s:
-        # Отменяем все planned_workouts с title 'Кастомная тренировка'
-        # которые НЕ имеют упражнений или имеют 1 упражнение
-        result = await s.execute(
+        # 1) planned дубли
+        result1 = await s.execute(
             sql_text("""
                 UPDATE planned_workouts
                 SET status = 'cancelled'
                 WHERE telegram_user_id = :uid
                   AND status = 'planned'
-                  AND (
-                    title ILIKE 'Кастомная тренировка%'
-                    OR title ILIKE 'Ad hoc%'
-                  )
+                  AND (title ILIKE 'Кастомная тренировка%' OR title ILIKE 'Ad hoc%')
                   AND id IN (
                     SELECT pw.id FROM planned_workouts pw
                     LEFT JOIN planned_exercises pe ON pe.planned_workout_id = pw.id
                     WHERE pw.telegram_user_id = :uid AND pw.status = 'planned'
-                    GROUP BY pw.id
-                    HAVING COUNT(pe.id) <= 1
+                    GROUP BY pw.id HAVING COUNT(pe.id) <= 1
                   )
-                RETURNING id, planned_date, title
+                RETURNING id
             """),
             {"uid": uid},
         )
-        rows = list(result.mappings().all())
-        await s.commit()
-    if rows:
-        details = "\n".join(f"  #{r['id']} {r['planned_date']} {r['title']}" for r in rows[:20])
-        await update.message.reply_text(
-            f"🧹 Удалил {len(rows)} мусорных кастомных тренировок:\n{details}"
-            + (f"\n... и ещё {len(rows) - 20}" if len(rows) > 20 else "")
+        n_planned = len(list(result1.mappings().all()))
+
+        # 2) recorded fitness_exercise_sets с мусорными exercise_name
+        result2 = await s.execute(
+            sql_text("""
+                DELETE FROM fitness_exercise_sets
+                WHERE workout_id IN (
+                    SELECT id FROM fitness_workouts WHERE telegram_user_id = :uid
+                )
+                AND (
+                    exercise_name ILIKE 'запланируй%'
+                    OR exercise_name ILIKE 'поставь%'
+                    OR exercise_name ILIKE 'добавь%'
+                    OR exercise_name ILIKE 'в четверг%'
+                    OR exercise_name ILIKE 'в пятницу%'
+                    OR exercise_name ILIKE 'в понедельник%'
+                    OR exercise_name ILIKE 'покажи%'
+                    OR exercise_name ILIKE 'что я делал%'
+                    OR exercise_name ILIKE 'что у меня%'
+                    OR exercise_name ILIKE 'жал штангу%'
+                    OR exercise_name ILIKE 'сделал жим%'
+                )
+                RETURNING id
+            """),
+            {"uid": uid},
         )
-    else:
-        await update.message.reply_text("Мусорных тренировок не найдено.")
+        n_sets = len(list(result2.mappings().all()))
+
+        # 3) пустые workouts (без sets)
+        result3 = await s.execute(
+            sql_text("""
+                DELETE FROM fitness_workouts
+                WHERE telegram_user_id = :uid
+                  AND id NOT IN (SELECT DISTINCT workout_id FROM fitness_exercise_sets)
+                RETURNING id
+            """),
+            {"uid": uid},
+        )
+        n_workouts = len(list(result3.mappings().all()))
+
+        await s.commit()
+    await update.message.reply_text(
+        f"🧹 Очистка:\n"
+        f"  Отменил planned дублей: {n_planned}\n"
+        f"  Удалил мусорных подходов: {n_sets}\n"
+        f"  Удалил пустых тренировок: {n_workouts}"
+    )
 
 
 async def cmd_run_tests(update, context):
