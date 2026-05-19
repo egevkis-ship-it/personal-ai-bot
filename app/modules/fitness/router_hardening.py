@@ -1689,6 +1689,24 @@ async def _log_exercise_sets_to_active_session(
     if len(exercise_part) > 60 or len(exercise_part.split()) > 6:
         return None
 
+    # Команды планирования / показа / служебные — НЕ лог подходов.
+    ep_low = exercise_part.lower()
+    plan_command_prefixes = [
+        "запланируй", "запланир", "поставь", "поставлю", "создай",
+        "сделай план", "хочу запланир", "добавь тренир", "добавь в план",
+        "покажи", "что у меня", "что сегодня", "что завтра",
+        "удали", "очисти", "сотри", "скопируй", "клонируй",
+        "перенеси", "сдвинь",
+        "напомни", "напоминай",
+        "цель", "мои цели", "мои рекорд",
+    ]
+    if any(ep_low.startswith(p) for p in plan_command_prefixes):
+        return None
+    # Также если внутри (не только в начале) есть команда планирования
+    for p in ["запланируй", "запланир", "поставь на", "добавь в план"]:
+        if p in ep_low:
+            return None
+
     exercise_name = _normalize_logged_exercise_name(exercise_part)
 
     parsed_sets = _parse_flexible_sets_text(sets_text)
