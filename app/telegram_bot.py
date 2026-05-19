@@ -138,6 +138,32 @@ async def cmd_rules(update, context):
     await _route_text_as(update, "Покажи выученные правила")
 
 
+async def cmd_reset(update, context):
+    """Сбросить все висящие pending decisions у юзера."""
+    if not _is_allowed(update):
+        return
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+    uid = _user_id(update)
+    async with get_session() as s:
+        result = await s.execute(
+            sql_text("""
+                UPDATE fitness_pending_decisions
+                SET status = 'cancelled', resolved_at = now()
+                WHERE telegram_user_id = :uid AND status = 'pending'
+                RETURNING id, decision_type
+            """),
+            {"uid": uid},
+        )
+        rows = list(result.mappings().all())
+        await s.commit()
+    if rows:
+        details = "\n".join(f"  #{r['id']} {r['decision_type']}" for r in rows)
+        await update.message.reply_text(f"✅ Сбросил {len(rows)} pending decisions:\n{details}")
+    else:
+        await update.message.reply_text("Активных pending нет.")
+
+
 async def cmd_run_tests(update, context):
     if not _is_allowed(update):
         return
@@ -276,6 +302,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("run_tests", cmd_run_tests))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
