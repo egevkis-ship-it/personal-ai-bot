@@ -117,7 +117,7 @@ async def send_and_wait(client, bot, text: str, timeout: int = 30) -> str:
             return ""
 
 
-async def run_scenarios(client, bot_username: str, only: str | None = None) -> list[dict]:
+async def run_scenarios(client, bot_username: str, only: str | None = None, dump_path: str | None = None) -> list[dict]:
     scenarios = load_scenarios()
     if only:
         scenarios = [s for s in scenarios if s.get("name") == only or only in s.get("name", "")]
@@ -126,6 +126,7 @@ async def run_scenarios(client, bot_username: str, only: str | None = None) -> l
             sys.exit(1)
 
     results = []
+    dump_lines = []
     for scenario in scenarios:
         name = scenario.get("name", "?")
         steps = scenario.get("steps") or []
@@ -174,8 +175,19 @@ async def run_scenarios(client, bot_username: str, only: str | None = None) -> l
                 "response_preview": response[:200],
                 "elapsed_s": round(elapsed, 2),
             })
+            if dump_path:
+                dump_lines.append(f"### {name} — step {i}")
+                dump_lines.append(f"> SEND: {send_text}")
+                dump_lines.append(f"REPLY:\n{response}")
+                dump_lines.append(f"PASSED: {ok}  ({reason or ''})")
+                dump_lines.append("")
 
         results.append({"name": name, "passed": all_ok, "steps": steps_results})
+
+    if dump_path:
+        with open(dump_path, "w") as f:
+            f.write("\n".join(dump_lines))
+        print(f"\n📝 Dump saved to {dump_path}")
 
     return results
 
@@ -183,6 +195,7 @@ async def run_scenarios(client, bot_username: str, only: str | None = None) -> l
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", help="прогнать только этот сценарий (по имени или подстроке)")
+    ap.add_argument("--dump", help="сохранить все запросы+ответы в файл")
     args = ap.parse_args()
 
     env = load_env()
@@ -232,7 +245,7 @@ async def main():
     print(f"🧪 Прогоняю сценарии:")
     start = time.time()
     try:
-        results = await run_scenarios(client, bot_username, args.scenario)
+        results = await run_scenarios(client, bot_username, args.scenario, dump_path=args.dump)
     finally:
         await client.disconnect()
 

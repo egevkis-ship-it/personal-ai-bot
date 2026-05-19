@@ -1412,6 +1412,21 @@ async def _finish_active_workout_session(
                 {"planned_workout_id": int(active["planned_workout_id"])},
             )
 
+        # Resolve pending decision (active_workout_session) — иначе следующий
+        # "Начинаю тренировку" думает что сессия ещё активна.
+        await session.execute(
+            text(
+                """
+                UPDATE fitness_pending_decisions
+                SET status = 'resolved', resolved_at = now()
+                WHERE telegram_user_id = :uid
+                  AND decision_type = 'active_workout_session'
+                  AND status = 'pending'
+                """
+            ),
+            {"uid": str(telegram_user_id) if telegram_user_id else None},
+        )
+
         sets_result = await session.execute(
             text(
                 """

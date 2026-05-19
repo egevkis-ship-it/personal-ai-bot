@@ -3120,7 +3120,15 @@ async def _record_measurement(telegram_user_id: str | None, parsed: dict) -> str
     from sqlalchemy import text as sql_text
 
     m = parsed.get("measurement") or {}
-    measurement_date = parsed.get("date") or date.today().isoformat()
+    raw_date = parsed.get("date") or date.today().isoformat()
+    # asyncpg хочет реальный date объект, не строку
+    if isinstance(raw_date, str):
+        try:
+            measurement_date = datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
+        except Exception:
+            measurement_date = date.today()
+    else:
+        measurement_date = raw_date
 
     if not any(v is not None for v in m.values() if not isinstance(v, str)):
         return "Не понял, какие замеры записать. Пример: «вес 80.5, талия 82, % жира 15»."
@@ -3953,7 +3961,7 @@ async def _schedule_reminder_action(
 
     rid = await schedule_reminder(
         telegram_user_id=telegram_user_id,
-        fire_at=fire_dt.isoformat(),
+        fire_at=fire_dt,  # передаём datetime, asyncpg сконвертит сам
         kind=kind,
         payload={"text": note[:300]},
         recurrence=recurrence,
