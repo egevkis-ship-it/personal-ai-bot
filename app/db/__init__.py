@@ -1687,6 +1687,16 @@ async def get_completed_workouts_in_period(
     end_date: str,
 ) -> list[dict]:
     """Return all completed workouts in [start_date, end_date] with their sets."""
+    # asyncpg хочет date объекты для DATE-колонок, не строки
+    def _to_date(x):
+        if isinstance(x, str):
+            try:
+                return datetime.strptime(x[:10], "%Y-%m-%d").date()
+            except Exception:
+                return None
+        return x
+    s_d = _to_date(start_date)
+    e_d = _to_date(end_date)
     async with AsyncSessionLocal() as session:
         workouts_result = await session.execute(
             text("""
@@ -1697,7 +1707,7 @@ async def get_completed_workouts_in_period(
               AND workout_date BETWEEN :start_date AND :end_date
             ORDER BY workout_date ASC, id ASC
             """),
-            {"uid": telegram_user_id, "start_date": start_date, "end_date": end_date},
+            {"uid": telegram_user_id, "start_date": s_d, "end_date": e_d},
         )
         workouts = [dict(row) for row in workouts_result.mappings().all()]
         if not workouts:
