@@ -24,6 +24,14 @@ def safe_json_loads(text: str) -> dict:
 
 def looks_like_history_request(text: str) -> bool:
     t = (text or "").lower().replace("ё", "е")
+    # "что я делал сегодня/вчера/на неделе/за месяц" = completed_period, не history
+    if "что я делал" in t:
+        if any(x in t for x in [
+            "сегодня", "вчера", "позавчера",
+            "на этой неделе", "на прошлой неделе", "за неделю",
+            "в этом месяце", "за месяц", "за период",
+        ]):
+            return False
     return any(x in t for x in [
         "что я делал",
         "какой вес",
