@@ -2715,7 +2715,7 @@ async def save_fitness_workout_session_v2(
             INSERT INTO fitness_workouts
             (telegram_user_id, workout_date, workout_type, focus, focus_label, completion_type, source_text, notes)
             VALUES
-            (:telegram_user_id, :workout_date, :workout_type, :focus, :focus_label, 'custom', :source_text, :notes)
+            (:telegram_user_id, :workout_date, :workout_type, :focus, :focus_label, 'active_session', :source_text, :notes)
             RETURNING id
             """),
             {

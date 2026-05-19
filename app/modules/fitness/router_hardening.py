@@ -1500,9 +1500,30 @@ def _normalize_logged_exercise_name(name: str) -> str:
 
 
 async def _get_active_fitness_workout_id(telegram_user_id: str | None) -> int | None:
+    """Find active workout — ONLY если:
+    - completion_type='active_session' И создана за последние 6 часов
+    - ИЛИ если есть свежий pending decision active_workout_session с workout_id
+    """
     from sqlalchemy import text
-    from app.db import AsyncSessionLocal
+    from app.db import AsyncSessionLocal, get_latest_fitness_pending_decision
+    from datetime import datetime, timedelta, timezone
 
+    # Сначала проверяем pending_decision — это «источник правды» от action_v2
+    pending = await get_latest_fitness_pending_decision(telegram_user_id)
+    if pending and pending.get("decision_type") == "active_workout_session":
+        ctx = pending.get("context_json") or {}
+        wid = ctx.get("workout_id")
+        last_act = ctx.get("last_activity_at") or ctx.get("last_training_activity_at")
+        if wid and last_act:
+            try:
+                ts = datetime.fromisoformat(last_act.replace("Z", "+00:00"))
+                age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                if age_h <= 6:
+                    return int(wid)
+            except Exception:
+                pass
+
+    # Fallback: completion_type='active_session' но ТОЛЬКО свежие
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text(
@@ -1511,6 +1532,7 @@ async def _get_active_fitness_workout_id(telegram_user_id: str | None) -> int | 
                 FROM fitness_workouts
                 WHERE telegram_user_id = :telegram_user_id
                   AND completion_type = 'active_session'
+                  AND created_at >= now() - interval '6 hours'
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """
@@ -1630,6 +1652,11 @@ async def _log_exercise_sets_to_active_session(
     sets_text = raw[first_number.start():].strip()
 
     if not exercise_part or not sets_text:
+        return None
+
+    # Sanity: если "название упражнения" >60 символов или содержит много слов —
+    # это не упражнение а просто префиксная болтовня. Не пишем мусор в БД.
+    if len(exercise_part) > 60 or len(exercise_part.split()) > 6:
         return None
 
     exercise_name = _normalize_logged_exercise_name(exercise_part)
@@ -1768,28 +1795,29 @@ def _normalize_spoken_numbers(text: str | None) -> str:
 
 
 async def _get_last_logged_exercise_name(telegram_user_id: str | None) -> tuple[int, str] | None:
+    """Last exercise from the CURRENT active session — use pending_decision as truth."""
+    wid = await _get_active_fitness_workout_id(telegram_user_id)
+    if not wid:
+        return None
     from sqlalchemy import text
     from app.db import AsyncSessionLocal
-
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text(
                 """
-                SELECT fw.id AS workout_id, fes.exercise_name AS exercise_name
-                FROM fitness_workouts fw
-                JOIN fitness_exercise_sets fes ON fes.workout_id = fw.id
-                WHERE fw.telegram_user_id = :telegram_user_id
-                  AND fw.completion_type = 'active_session'
-                ORDER BY fes.created_at DESC, fes.id DESC
+                SELECT exercise_name
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """
             ),
-            {"telegram_user_id": str(telegram_user_id) if telegram_user_id else None},
+            {"wid": wid},
         )
         row = result.mappings().first()
         if not row:
             return None
-        return int(row["workout_id"]), str(row["exercise_name"])
+        return wid, str(row["exercise_name"])
 
 
 async def _log_continuation_set_to_active_session(

@@ -796,7 +796,11 @@ async def parse_fitness_action_v2(
 - "план на месяц", "месячный план" → show_month_plan / show_next_month_plan
 - "что в пятницу", "тренировка в пн", "что 20-го" → show_workout_on_date. date = вычисли ближайшую такую.
 - "что я делал в прошлый раз", "последняя тренировка", "что было на прошлой тренировке" → show_last_workout
-- "что я сделал сегодня", "что я делал сегодня", "что я зафиксировал сегодня", "тренировка которую я сегодня сделал" → show_completed_day (date=today)
+- "что я сделал сегодня", "что я делал сегодня", "что я зафиксировал сегодня",
+  "тренировка которую я сегодня сделал",
+  "покажи что я записал", "покажи что записал", "покажи мою запись сегодня",
+  "что у меня в записи на сегодня", "что я залогировал сегодня" → show_completed_day (date=today)
+  ВАЖНО: это про ФАКТИЧЕСКУЮ запись, а не план. НЕ путать с show_today_workout (план).
 - "что я делал вчера", "вчерашняя выполненная тренировка" → show_completed_day с date=вчера
 - "что я делал 15-го", "что было 12 мая" → show_completed_day с явной date
 - "что я сделал на этой неделе", "тренировки за неделю", "отчёт за неделю", "сводка за неделю" → show_completed_week
@@ -3965,6 +3969,17 @@ async def _weekly_summary(telegram_user_id: str | None) -> str:
     return "\n".join(lines)
 
 
+async def _mark_workout_completed(workout_id: int) -> None:
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+    async with get_session() as s:
+        await s.execute(
+            sql_text("UPDATE fitness_workouts SET completion_type='completed' WHERE id = :id"),
+            {"id": workout_id},
+        )
+        await s.commit()
+
+
 async def _finish_workout_with_summary(telegram_user_id: str | None, workout_id: int) -> str:
     """Закрыть сессию + богатое резюме: подходы, тоннаж, длительность, новые PR."""
     from app.db.engine import get_session
@@ -3995,6 +4010,9 @@ async def _finish_workout_with_summary(telegram_user_id: str | None, workout_id:
         started_iso = ctx.get("started_at")
         if pending.get("id"):
             await resolve_fitness_pending_decision(pending["id"], status="resolved")
+
+    # Mark workout as completed (so router_hardening не считает её активной)
+    await _mark_workout_completed(workout_id)
 
     # Aggregate
     total_sets = len(all_sets)
