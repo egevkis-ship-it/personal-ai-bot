@@ -68,22 +68,32 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(
         "Я понимаю свободный текст и голосовые сообщения.\n\n"
-        "Быстрые команды (фитнес):\n"
+        "Быстрые команды:\n"
         "/today — что сегодня по плану\n"
         "/next — следующая тренировка\n"
         "/week — план недели\n"
         "/last — последняя записанная\n"
         "/finished — закончил тренировку\n"
         "/stats — быстрая сводка\n"
-        "/pr — личные рекорды\n"
         "/reminders — мои напоминания\n"
-        "/rules — выученные правила\n\n"
-        "Примеры свободного текста:\n"
-        "— Сделал жим 100кг 3x8\n"
-        "— Покажи тренировку в пятницу\n"
-        "— Поменяй жим на тягу, 4×10 70кг\n"
-        "— Что я сделал на этой неделе\n"
-        "— Напомни в 7 утра про тренировку\n"
+        "/cleanup — почистить мусор из БД\n"
+        "/reset — сбросить висящие pending\n\n"
+        "Примеры:\n"
+        "Планирование:\n"
+        "— Запланируй на завтра грудь: жим 4×10 80кг, разводка 3×12 20кг\n"
+        "— Поставь на пятницу ноги: присед 4×8 100кг\n"
+        "Запись (после «Начинаю тренировку»):\n"
+        "— Жим штанги 80×5, 80×5, 75×8\n"
+        "— Подтягивания 10 раз\n"
+        "— Брусья 3 по 8\n"
+        "— Закончил тренировку\n"
+        "Архив:\n"
+        "— Что я делал сегодня\n"
+        "— Что я делал на этой неделе\n"
+        "— Покажи последнюю тренировку\n"
+        "Замеры:\n"
+        "— Вес 102.3, талия 92, грудь 108\n"
+        "— Multiline формат (Вес/Голень/Бедро/Бедра/Живот/Талия/Грудь/Рука/Шея)\n"
     )
 
 
@@ -121,11 +131,6 @@ async def cmd_finished(update, context):
 async def cmd_stats(update, context):
     if not _is_allowed(update): return
     await _route_text_as(update, "Быстрая сводка")
-
-
-async def cmd_pr(update, context):
-    if not _is_allowed(update): return
-    await _route_text_as(update, "Мои рекорды")
 
 
 async def cmd_reminders(update, context):
@@ -373,7 +378,6 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("last", cmd_last))
     app.add_handler(CommandHandler("finished", cmd_finished))
     app.add_handler(CommandHandler("stats", cmd_stats))
-    app.add_handler(CommandHandler("pr", cmd_pr))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("run_tests", cmd_run_tests))

@@ -767,7 +767,7 @@ async def parse_fitness_action_v2(
 
 ═══ JSON-СХЕМА ═══
 {{
-  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | compare_weeks | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | show_exercise_stats | show_personal_records | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | add_constraint | list_constraints | resolve_constraint | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_volume_by_group | show_lagging_group | show_streak | find_workout_by_exercise | show_trend | show_1rm | log_pain_action | sick_leave | show_plateau | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | copy_week_to_next | copy_period_to_period | schedule_reminder_action | list_reminders | cancel_reminder_action | show_measurements_trend | non_fitness | unknown | clarify",
+  "action": "show_today_workout | show_yesterday_workout | show_tomorrow_workout | show_week_plan | show_next_week_plan | show_month_plan | show_next_month_plan | show_workout_on_date | show_last_workout | show_completed_day | show_completed_week | show_completed_month | show_completed_period | show_next_workout | quick_stats | replace_today_workout | add_custom_workout | log_workout_sets | continue_current_exercise | finish_workout | correct_previous_action | delete_last_set | edit_last_set | move_workout | copy_workout | edit_plan | show_progress | add_note | record_measurement | import_program | export_workouts | dangerous_delete | help | show_learned_rules | skip_workout | shift_plan | clear_plan_period | merge_workouts | delete_last_n_sets_action | delete_last_exercise | delete_workout_action | rename_last_exercise | mark_last_as_warmup | export_csv | show_last_recorded | undo_last | add_set_note | resume_session | tag_feeling | show_streak | save_template | apply_template | list_templates | bulk_edit_exercises | set_goal | show_goals | coach_report | weekly_summary | copy_week_to_next | copy_period_to_period | schedule_reminder_action | list_reminders | cancel_reminder_action | non_fitness | unknown | clarify",
   "confidence": 0.0,
   "date": null,
   "weekday": null,
@@ -862,11 +862,7 @@ async def parse_fitness_action_v2(
 - "что я сделал в этом месяце", "отчёт за месяц", "сводка за месяц", "тренировки месяца" → show_completed_month
 - "за период с X по Y", "с понедельника по пятницу", "с 1 по 15 мая" → show_completed_period
 - "что дальше", "следующая тренировка", "когда след треня", "что у меня дальше по плану" → show_next_workout
-- "сравни эту неделю с прошлой", "сравни недели", "прогресс по неделям" → compare_weeks
 - "сводка", "быстрая статистика", "что у меня", "статус", "кратко" (без указания периода) → quick_stats
-- "как у меня жим", "прогресс по приседу", "история жима", "сколько я жал" → show_exercise_stats. target.exercise_name = "жим штанги".
-- "мои рекорды", "PR", "ПР", "личный рекорд по жиму", "максимум" → show_personal_records
-- "сколько раз я приседал в этом месяце", "статистика за месяц" → show_progress с period.
 
 2. ЗАМЕНА сегодняшней (replace_today_workout):
 - "сегодня вместо ног делаем плечи"
@@ -1006,15 +1002,6 @@ async def parse_fitness_action_v2(
 - "покажи правила", "что ты выучил", "какие у меня правила",
 - "список правил", "что ты запомнил"
 
-14c. ТРАВМЫ И ОГРАНИЧЕНИЯ (add_constraint / list_constraints / resolve_constraint):
-- "болит кисть", "травма плеча", "потянул спину", "колено хрустит",
-  "у меня болит X", "X травмирован", "X не делать" → add_constraint
-  target.body_part = "кисть/плечо/колено/спина/локоть/поясница", severity="active/чтото"
-  Если сказана длительность ("на неделю", "до пятницы") — target.constraint_until=ISO дата
-- "что у меня болит", "мои ограничения", "список травм" → list_constraints
-- "плечо прошло", "кисть зажила", "сними ограничение по колену", "убери травму" → resolve_constraint
-  target.body_part или target.constraint_id
-
 14d. ПРОПУСКИ И СДВИГИ ПЛАНА (skip_workout / shift_plan / clear_plan_period / merge_workouts):
 - "пропустил вчерашнюю", "не ходил вчера", "пометь пятницу как пропущенную" → skip_workout
   target.from_date = пропущенная дата (например, вчера)
@@ -1055,24 +1042,8 @@ async def parse_fitness_action_v2(
 - "json" → target.export_format="json"
 - target.export_format = "csv" | "json" | "txt", по умолчанию csv
 
-14h. АНАЛИТИКА (Пакет 2):
-- "volume по группам", "сколько объёма груди в мае", "тоннаж по мышцам" → show_volume_by_group + period
-- "какая группа отстаёт", "что недогружено", "слабое место" → show_lagging_group
-- "сколько дней подряд", "стрик", "frequency", "сколько тренировок в этом месяце" → show_streak
-- "когда я делал жим 100", "найди тренировку с приседом 120", "история тяги" → find_workout_by_exercise
-  target.exercise_name="жим/тяга/...", target.weight_set_to=100 (если есть минимум)
-- "тренд по жиму", "как растёт жим", "прогресс по приседу за 3 месяца" → show_trend
-  target.exercise_name, target.days=90
-- "мой 1ПМ жима", "посчитай 1RM", "максимум по приседу" → show_1rm
-  target.exercise_name
-
-14i. ЗДОРОВЬЕ (Пакет 3):
-- "плечо болит на 4", "колено 6 из 10", "сегодня поясница 3/10" → log_pain_action
-  target.body_part="плечо/колено/поясница", target.pain_severity=4
-- "заболел отмени неделю", "простуда, неделю отдых", "слёг на 3 дня" → sick_leave
-  target.days=7 (или сколько сказано)
-- "где я застрял", "плато по жиму", "застрял на 80", "какие упражнения стоят" → show_plateau
-  target.exercise_name (опционально)
+14h. СТРИК / ЧАСТОТА:
+- "сколько дней подряд", "стрик", "сколько тренировок в этом месяце" → show_streak
 
 14j. ШАБЛОНЫ И ПРОГРАММИРОВАНИЕ (Пакет 4):
 - "сохрани как шаблон 'грудь A'", "запомни эту как шаблон X" → save_template
@@ -2768,13 +2739,8 @@ async def _handle_fitness_action_v2_inner(
         workouts = await get_completed_workouts_in_period(telegram_user_id, s, e)
         return format_completed_period(workouts, f"Тренировки {format_human_date(s, include_weekday=False)} — {format_human_date(e, include_weekday=False)}")
 
-    if action == "show_personal_records":
-        records = await get_personal_records(telegram_user_id, limit=30)
-        return format_personal_records(records)
-
-    if action == "show_exercise_stats":
-        # Re-use _show_progress (it already handles exercise_name in target)
-        return await _show_progress(telegram_user_id, text, parsed)
+    # show_personal_records отключено
+    # show_exercise_stats отключено
 
     if action == "finish_workout":
         if active_session and active_session.get("workout_id"):
@@ -2805,59 +2771,14 @@ async def _handle_fitness_action_v2_inner(
             return "Дальше по плану ничего нет — добавь тренировки или импортируй программу."
         return "Следующая тренировка:\n\n" + format_planned_workout(nxt)
 
-    if action == "compare_weeks":
-        return await _compare_weeks(telegram_user_id)
-
+    # compare_weeks отключено
     if action == "quick_stats":
         return await _quick_stats(telegram_user_id)
 
     if action == "edit_last_set":
         return await _edit_last_set(telegram_user_id, parsed, active_session)
 
-    # ─── Травмы и ограничения ───────────────────────────────────────────
-    if action == "add_constraint":
-        target = parsed.get("target") or {}
-        bp = target.get("body_part") or "—"
-        note = target.get("note_text") or text
-        sev = target.get("severity")
-        until = target.get("constraint_until")
-        cid = await add_training_constraint(
-            telegram_user_id=telegram_user_id,
-            body_part=bp,
-            severity=sev,
-            note=note,
-            constraint_date=None,
-            source_text=text,
-        )
-        until_part = f" до {format_human_date(until)}" if until else ""
-        return f"🩹 Записал ограничение #{cid}: {bp}{until_part}. Учту в плане. «прошло» — снимешь."
-
-    if action == "list_constraints":
-        cs = await list_active_constraints(telegram_user_id)
-        if not cs:
-            return "Активных ограничений нет."
-        lines = ["🩹 Активные ограничения:"]
-        for c in cs:
-            d = c.get("constraint_date")
-            lines.append(f"  #{c['id']} {c.get('body_part') or '—'}: {c.get('note') or 'без деталей'}")
-        return "\n".join(lines)
-
-    if action == "resolve_constraint":
-        target = parsed.get("target") or {}
-        cid = target.get("constraint_id")
-        bp = target.get("body_part")
-        if cid:
-            await resolve_constraint(int(cid))
-            return f"✅ Ограничение #{cid} снято."
-        if bp:
-            cs = await list_active_constraints(telegram_user_id)
-            matched = [c for c in cs if (c.get("body_part") or "").lower() == bp.lower()]
-            if not matched:
-                return f"Не нашёл активного ограничения по «{bp}»."
-            for c in matched:
-                await resolve_constraint(c["id"])
-            return f"✅ Снял ограничение(я) по «{bp}»: {', '.join('#' + str(c['id']) for c in matched)}."
-        return "Уточни какое ограничение снять (например «сними травму плеча»)."
+    # Травмы и ограничения отключены (add_constraint / list_constraints / resolve_constraint)
 
     # ─── Пропуски/сдвиги/очистка плана ──────────────────────────────────
     if action == "skip_workout":
@@ -3016,61 +2937,12 @@ async def _handle_fitness_action_v2_inner(
     if action == "tag_feeling":
         return await _tag_feeling(telegram_user_id, text, parsed, active_session)
 
-    # ═══ Пакет 2: Аналитика ═══
-    if action == "show_volume_by_group":
-        return await _show_volume_by_group(telegram_user_id, parsed)
-
-    if action == "show_lagging_group":
-        return await _show_lagging_group(telegram_user_id, parsed)
+    # Удалены: show_volume_by_group, show_lagging_group, show_trend, show_1rm,
+    # find_workout_by_exercise, log_pain_action, sick_leave, show_plateau —
+    # не нужны по требованию пользователя.
 
     if action == "show_streak":
         return await _show_streak(telegram_user_id)
-
-    if action == "find_workout_by_exercise":
-        return await _find_workout_by_exercise(telegram_user_id, parsed)
-
-    if action == "show_trend":
-        return await _show_trend(telegram_user_id, parsed)
-
-    if action == "show_1rm":
-        return await _show_1rm(telegram_user_id, parsed)
-
-    # ═══ Пакет 3: Здоровье ═══
-    if action == "log_pain_action":
-        target = parsed.get("target") or {}
-        bp = target.get("body_part") or "—"
-        sev = target.get("pain_severity")
-        pid = await log_pain(
-            telegram_user_id=telegram_user_id,
-            body_part=bp,
-            severity=float(sev) if sev else None,
-            note=target.get("note_text") or text[:200],
-            source_text=text,
-        )
-        sev_str = f" ({sev}/10)" if sev else ""
-        return f"🩹 Записал боль #{pid}: {bp}{sev_str}. Учту в плане."
-
-    if action == "sick_leave":
-        target = parsed.get("target") or {}
-        days = int(target.get("days") or 7)
-        from datetime import timedelta
-        today = date.today()
-        end_d = (today + timedelta(days=days - 1)).isoformat()
-        n = await cancel_plan_period(telegram_user_id, today.isoformat(), end_d)
-        cid = await add_training_constraint(
-            telegram_user_id=telegram_user_id,
-            body_part="общее (болезнь)",
-            severity="active",
-            note=f"Sick leave {days} дней, до {end_d}",
-            source_text=text,
-        )
-        return (
-            f"🤒 Записал болезнь #{cid}, отменил {n} тренировок до {format_human_date(end_d)}.\n"
-            f"Скажи «выздоровел» или «закрой ограничение #{cid}» когда вернёшься."
-        )
-
-    if action == "show_plateau":
-        return await _show_plateau(telegram_user_id, parsed)
 
     # ═══ Пакет 4: Шаблоны и программирование ═══
     if action == "save_template":
