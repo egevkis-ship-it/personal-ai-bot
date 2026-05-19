@@ -2516,11 +2516,13 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
             source_text=text,
         )
 
-    if _looks_like_finish_active_workout(text):
-        return await _finish_active_workout_session(
-            telegram_user_id=telegram_user_id,
-            source_text=text,
-        )
+    # 'Закончил тренировку' идёт через action_v2._finish_workout_with_summary
+    # (богатый отчёт с длительностью / тоннажем / PR). Здесь не перехватываем.
+    # if _looks_like_finish_active_workout(text):
+    #     return await _finish_active_workout_session(
+    #         telegram_user_id=telegram_user_id,
+    #         source_text=text,
+    #     )
 
     if _looks_like_show_last_actual_workout(text):
         from app.db import get_last_workout
