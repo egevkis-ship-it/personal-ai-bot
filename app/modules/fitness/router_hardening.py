@@ -2439,6 +2439,28 @@ async def _edit_last_logged_set_reps_in_active_session(
 
 
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
+    # SHORT exercise messages in an ACTIVE SESSION should go to log, never to plan.
+    # "Подтягивания 10 раз" / "Брусья 3×10" / "Планка 60 секунд" — это записи в текущую сессию.
+    import re as _re
+    active_wid = await _get_active_fitness_workout_id(telegram_user_id)
+    if active_wid:
+        # Если короткое сообщение которое выглядит как запись подходов — пропускаем
+        t_clean = (text or "").strip()
+        if len(t_clean) < 100:
+            looks_like_set_log = bool(_re.search(r"\d", t_clean)) and any(
+                marker in t_clean.lower()
+                for marker in [
+                    "подтяг", "брус", "отжим", "присед", "выпад", "планка",
+                    "жим", "тяга", "сгибан", "разгибан", "махи", "разводк",
+                    "пуловер", "икр", "ягодиц", "пресс", "скручиван",
+                    "бицепс", "трицепс", "канат", "блок", "гантел", "штанг",
+                    "кг", "повт", "раз", "сек",
+                ]
+            )
+            if looks_like_set_log:
+                # Не перехватываем — пусть action_v2 _log_workout_sets разбирается
+                return None
+
     # HARD PRIORITY: whole-week copy before generic selected-workout copy.
     if _is_this_week_period_copy_request(text):
         copy_week_priority_reply = await _handle_copy_this_week_workouts_period_priority(
