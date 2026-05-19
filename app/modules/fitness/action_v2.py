@@ -108,6 +108,43 @@ def _active_session_context_from_pending(pending: dict | None) -> dict | None:
     return ctx
 
 
+async def _validate_active_session_or_resolve(
+    telegram_user_id: str | None,
+    pending: dict | None,
+) -> dict | None:
+    """Если pending указывает на workout с completion_type != 'active_session',
+    значит это орфанный pending (finished, но pending не resolved). Resolveим и возвращаем None.
+    Иначе возвращаем context из pending как есть.
+    """
+    if not pending:
+        return None
+    ctx = _active_session_context_from_pending(pending)
+    if not ctx:
+        return None
+    wid = ctx.get("workout_id")
+    if not wid:
+        return ctx
+    try:
+        from app.db.engine import get_session
+        from sqlalchemy import text as sql_text
+        async with get_session() as s:
+            r = await s.execute(
+                sql_text("SELECT completion_type FROM fitness_workouts WHERE id = :id"),
+                {"id": int(wid)},
+            )
+            row = r.first()
+        if row and row[0] not in ("active_session", None):
+            # Workout finished but pending still pending — resolve and ignore
+            try:
+                await resolve_fitness_pending_decision(pending["id"], status="resolved")
+            except Exception:
+                pass
+            return None
+    except Exception:
+        pass
+    return ctx
+
+
 def _is_dormant(session: dict | None) -> bool:
     return bool(session and session.get("_dormant"))
 
@@ -2270,7 +2307,7 @@ async def _handle_fitness_action_v2_inner(
     prev_context: dict | None = None,
 ) -> "str | BotReply | None":
     pending = await get_latest_fitness_pending_decision(telegram_user_id)
-    active_session = _active_session_context_from_pending(pending)
+    active_session = await _validate_active_session_or_resolve(telegram_user_id, pending)
     _PREV = prev_context or {}
 
     # ── Plan import detection runs FIRST and overrides any stale pending/session ──
