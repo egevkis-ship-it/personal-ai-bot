@@ -2396,7 +2396,15 @@ async def _handle_fitness_action_v2_inner(
         "начинаю тренировку", "начал тренировку", "приступаю",
         "я делаю тренировку", "я начинаю тренировку",
     ]
-    if any(p in t_lower for p in start_session_triggers) and not active_session:
+    # Старт сессии срабатывает если нет активной СЕГОДНЯ. Если есть сессия от
+    # вчера/раньше — её закрываем и стартуем новую.
+    today = date.today().isoformat()
+    _session_is_for_today = (
+        active_session
+        and str(active_session.get("workout_date") or "")[:10] == today
+        and not active_session.get("_dormant")
+    )
+    if any(p in t_lower for p in start_session_triggers) and not _session_is_for_today:
         today = date.today().isoformat()
         # Найти плановую тренировку на сегодня
         planned = await get_today_planned_workout(telegram_user_id, today)

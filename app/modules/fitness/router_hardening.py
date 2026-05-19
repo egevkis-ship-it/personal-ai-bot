@@ -1284,7 +1284,9 @@ async def _start_selected_planned_workout_session(
 
     data = await _get_selected_planned_for_workout_log(telegram_user_id)
     if not data:
-        return "Не понял, какую тренировку начать. Сначала покажи нужную тренировку."
+        # Selected-workout flow doesn't have data — отдаём None,
+        # пусть action_v2 запустит новый start_session_triggers блок.
+        return None
 
     workout = data.get("workout") or {}
     planned_id = workout.get("id")
