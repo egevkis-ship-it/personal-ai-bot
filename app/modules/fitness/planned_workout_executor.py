@@ -35,8 +35,9 @@ def _format_workouts_on_date(items: list[dict], target_date: str, include_weight
         if (item.get("workout") or {}).get("status") == "planned"
     ]
 
+    from app.modules.fitness.formatter import format_human_date as _fhd
     if not active_items:
-        return f"На {target_date} активных плановых тренировок не найдено."
+        return f"На {_fhd(target_date)} активных плановых тренировок не найдено."
 
     non_empty = [item for item in active_items if _is_non_empty_workout(item)]
     empty = [item for item in active_items if not _is_non_empty_workout(item)]
@@ -49,7 +50,7 @@ def _format_workouts_on_date(items: list[dict], target_date: str, include_weight
             title = f"{_date_title(target_date)} с весами:"
         return title + "\n\n" + format_planned_workout(ordered[0])
 
-    lines = [f"На {target_date} найдено активных тренировок: {len(ordered)}"]
+    lines = [f"На {_fhd(target_date)} найдено активных тренировок: {len(ordered)}"]
 
     for i, item in enumerate(ordered, start=1):
         lines.append("")
@@ -858,7 +859,8 @@ async def execute_planned_workout_action(
         if action.get("include_weights"):
             data = await get_today_planned_workout(telegram_user_id, target_date)
             if not data:
-                return f"На {target_date} активная плановая тренировка не найдена."
+                from app.modules.fitness.formatter import format_human_date as _fhd2
+                return f"На {_fhd2(target_date)} активная плановая тренировка не найдена."
 
             await _set_selected_planned_workout_context(
                 telegram_user_id=telegram_user_id,

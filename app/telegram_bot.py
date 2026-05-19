@@ -164,6 +164,49 @@ async def cmd_reset(update, context):
         await update.message.reply_text("Активных pending нет.")
 
 
+async def cmd_cleanup(update, context):
+    """Удалить мусорные дубли кастомных тренировок (от smoke-тестов)."""
+    if not _is_allowed(update):
+        return
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+    uid = _user_id(update)
+    async with get_session() as s:
+        # Отменяем все planned_workouts с title 'Кастомная тренировка'
+        # которые НЕ имеют упражнений или имеют 1 упражнение
+        result = await s.execute(
+            sql_text("""
+                UPDATE planned_workouts
+                SET status = 'cancelled'
+                WHERE telegram_user_id = :uid
+                  AND status = 'planned'
+                  AND (
+                    title ILIKE 'Кастомная тренировка%'
+                    OR title ILIKE 'Ad hoc%'
+                  )
+                  AND id IN (
+                    SELECT pw.id FROM planned_workouts pw
+                    LEFT JOIN planned_exercises pe ON pe.planned_workout_id = pw.id
+                    WHERE pw.telegram_user_id = :uid AND pw.status = 'planned'
+                    GROUP BY pw.id
+                    HAVING COUNT(pe.id) <= 1
+                  )
+                RETURNING id, planned_date, title
+            """),
+            {"uid": uid},
+        )
+        rows = list(result.mappings().all())
+        await s.commit()
+    if rows:
+        details = "\n".join(f"  #{r['id']} {r['planned_date']} {r['title']}" for r in rows[:20])
+        await update.message.reply_text(
+            f"🧹 Удалил {len(rows)} мусорных кастомных тренировок:\n{details}"
+            + (f"\n... и ещё {len(rows) - 20}" if len(rows) > 20 else "")
+        )
+    else:
+        await update.message.reply_text("Мусорных тренировок не найдено.")
+
+
 async def cmd_run_tests(update, context):
     if not _is_allowed(update):
         return
@@ -303,6 +346,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("run_tests", cmd_run_tests))
     app.add_handler(CommandHandler("reset", cmd_reset))
+    app.add_handler(CommandHandler("cleanup", cmd_cleanup))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
