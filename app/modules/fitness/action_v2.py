@@ -2608,6 +2608,32 @@ async def _handle_fitness_action_v2_inner(
     action = parsed.get("action")
     confidence = float(parsed.get("confidence") or 0)
 
+    # HARD-OVERRIDE: фразы с "я делал/сделал/записал" в прошлом времени всегда архив
+    t_lc = text.lower().replace("ё", "е")
+    archive_phrases = [
+        ("я делал сегодня", "show_completed_day", "today"),
+        ("я делал вчера", "show_completed_day", "yesterday"),
+        ("я делал позавчера", "show_completed_day", None),
+        ("я сделал сегодня", "show_completed_day", "today"),
+        ("я сделал вчера", "show_completed_day", "yesterday"),
+        ("я записал сегодня", "show_completed_day", "today"),
+        ("я записал вчера", "show_completed_day", "yesterday"),
+        ("я делал на этой неделе", "show_completed_week", None),
+        ("я сделал на этой неделе", "show_completed_week", None),
+        ("я делал в этом месяце", "show_completed_month", None),
+        ("я сделал в этом месяце", "show_completed_month", None),
+    ]
+    for phrase, override_action, day_hint in archive_phrases:
+        if phrase in t_lc:
+            action = override_action
+            if day_hint == "today":
+                parsed["date"] = date.today().isoformat()
+            elif day_hint == "yesterday":
+                from datetime import timedelta as _td
+                parsed["date"] = (date.today() - _td(days=1)).isoformat()
+            confidence = 0.95
+            break
+
     if not action or action in ("unknown", "clarify") or confidence < 0.55:
         # Если текст явно НЕ про фитнес и нет активной сессии — отвечаем как общий AI
         if not active_session and not _looks_like_fitness_text(text):
