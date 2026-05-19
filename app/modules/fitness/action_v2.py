@@ -833,7 +833,7 @@ async def parse_fitness_action_v2(
       "notes": null
     }}
   ],
-  "measurement": {{"weight_kg": null, "waist_cm": null, "chest_cm": null, "hips_cm": null, "arm_cm": null, "thigh_cm": null, "neck_cm": null, "bodyfat_pct": null, "notes": null}},
+  "measurement": {{"weight_kg": null, "neck_cm": null, "chest_cm": null, "arm_cm": null, "belly_cm": null, "waist_cm": null, "hips_cm": null, "thigh_cm": null, "calf_cm": null, "notes": null}},
   "correction": {{"field": null, "old_value": null, "new_value": null}},
   "needs_confirmation": false,
   "summary": ""
@@ -973,9 +973,22 @@ async def parse_fitness_action_v2(
 
 10. ЗАМЕРЫ ТЕЛА (record_measurement):
 - "вес 80.5 кг", "сегодня 80,5", "взвесился 80.5"
-- "талия 82, грудь 100", "замеры: вес 80, талия 82, бицепс 38"
-- "% жира 15", "процент жира 18"
-→ record_measurement, заполни measurement.
+- "талия 82, грудь 100", "замеры: вес 80, талия 82, рука 38"
+- Multiline формат:
+    Вес 102.3
+    Голень 46
+    Бедро 68
+    Бедра 105
+    Живот 98
+    Талия 92
+    Грудь 108
+    Рука 40
+    Шея 40
+  → record_measurement, заполни measurement: weight_kg=102.3, calf_cm=46, thigh_cm=68,
+  hips_cm=105, belly_cm=98, waist_cm=92, chest_cm=108, arm_cm=40, neck_cm=40.
+  Маппинг: Вес→weight_kg, Голень→calf_cm, Бедро→thigh_cm, Бедра→hips_cm,
+  Живот→belly_cm, Талия→waist_cm, Грудь→chest_cm, Рука→arm_cm/Бицепс→arm_cm,
+  Шея→neck_cm.
 
 11. ИМПОРТ ПРОГРАММЫ (import_program):
 - "вот программа: пн — грудь...", "загрузи план", "запиши программу на 4 недели"
@@ -2770,6 +2783,7 @@ async def _handle_fitness_action_v2_inner(
         return "Активная тренировочная сессия не найдена. Возможно, она уже завершена."
 
     if action == "record_measurement":
+        parsed["_source_text"] = text
         return await _record_measurement(telegram_user_id, parsed)
 
     if action == "move_workout":
@@ -3227,13 +3241,24 @@ async def _record_measurement(telegram_user_id: str | None, parsed: dict) -> str
     if not any(v is not None for v in m.values() if not isinstance(v, str)):
         return "Не понял, какие замеры записать. Пример: «вес 80.5, талия 82, % жира 15»."
 
+    # Дополнительно парсим из текста: "Голень N" и "Живот N" если AI парсер их пропустил
+    source_text = parsed.get("_source_text") or ""
+    if "calf_cm" not in m or m.get("calf_cm") is None:
+        cm = re.search(r"\bголен[ьи]\s+(\d+(?:[.,]\d+)?)", source_text.lower())
+        if cm:
+            m["calf_cm"] = float(cm.group(1).replace(",", "."))
+    if "belly_cm" not in m or m.get("belly_cm") is None:
+        cm = re.search(r"\bживот\s+(\d+(?:[.,]\d+)?)", source_text.lower())
+        if cm:
+            m["belly_cm"] = float(cm.group(1).replace(",", "."))
+
     async with get_session() as session:
         result = await session.execute(sql_text("""
             INSERT INTO body_measurements
               (telegram_user_id, measurement_date, weight_kg, waist_cm, chest_cm,
-               hips_cm, arm_cm, thigh_cm, neck_cm, bodyfat_pct, notes)
+               hips_cm, arm_cm, thigh_cm, neck_cm, calf_cm, belly_cm, notes)
             VALUES
-              (:uid, :d, :w, :waist, :chest, :hips, :arm, :thigh, :neck, :bf, :notes)
+              (:uid, :d, :w, :waist, :chest, :hips, :arm, :thigh, :neck, :calf, :belly, :notes)
             RETURNING id
         """), {
             "uid": telegram_user_id,
@@ -3245,7 +3270,8 @@ async def _record_measurement(telegram_user_id: str | None, parsed: dict) -> str
             "arm": m.get("arm_cm"),
             "thigh": m.get("thigh_cm"),
             "neck": m.get("neck_cm"),
-            "bf": m.get("bodyfat_pct"),
+            "calf": m.get("calf_cm"),
+            "belly": m.get("belly_cm"),
             "notes": m.get("notes"),
         })
         mid = result.scalar()
@@ -3253,10 +3279,15 @@ async def _record_measurement(telegram_user_id: str | None, parsed: dict) -> str
 
     parts = [f"Записал замеры (ID: {mid}, {format_human_date(measurement_date)}):"]
     for key, label, unit in [
-        ("weight_kg", "Вес", "кг"), ("waist_cm", "Талия", "см"),
-        ("chest_cm", "Грудь", "см"), ("hips_cm", "Бёдра", "см"),
-        ("arm_cm", "Рука", "см"), ("thigh_cm", "Бедро", "см"),
-        ("neck_cm", "Шея", "см"), ("bodyfat_pct", "% жира", "%"),
+        ("weight_kg", "Вес", "кг"),
+        ("neck_cm", "Шея", "см"),
+        ("chest_cm", "Грудь", "см"),
+        ("arm_cm", "Рука", "см"),
+        ("belly_cm", "Живот", "см"),
+        ("waist_cm", "Талия", "см"),
+        ("hips_cm", "Бёдра", "см"),
+        ("thigh_cm", "Бедро", "см"),
+        ("calf_cm", "Голень", "см"),
     ]:
         if m.get(key) is not None:
             parts.append(f"  {label}: {m[key]} {unit}")
