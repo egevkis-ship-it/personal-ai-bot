@@ -4204,24 +4204,7 @@ async def _finish_workout_with_summary(telegram_user_id: str | None, workout_id:
             except Exception:
                 pass
 
-    # Detect new PRs (max weight in this workout > max weight before this workout)
-    new_prs: list[str] = []
-    if max_per_ex:
-        from app.db.engine import get_session as gs
-        async with gs() as s2:
-            for ex_name, this_max in max_per_ex.items():
-                prev = await s2.execute(sql_text("""
-                    SELECT MAX(s.weight_kg) FROM fitness_exercise_sets s
-                    JOIN fitness_workouts w ON w.id = s.workout_id
-                    WHERE w.telegram_user_id = :uid
-                      AND s.exercise_name = :ex
-                      AND w.id < :wid
-                      AND s.weight_kg IS NOT NULL
-                """), {"uid": telegram_user_id, "ex": ex_name, "wid": workout_id})
-                prev_max = prev.scalar() or 0
-                if this_max > float(prev_max):
-                    new_prs.append(f"{ex_name}: {format_number(this_max)} кг (было {format_number(prev_max)})")
-
+    # PR detection отключено по требованию пользователя
     # Duration
     duration_str = ""
     if started_iso:
@@ -4246,11 +4229,6 @@ async def _finish_workout_with_summary(telegram_user_id: str | None, workout_id:
     lines.append(f"💪 Упражнений: {len(by_ex)}, подходов: {total_sets}")
     if total_tonnage > 0:
         lines.append(f"📊 Тоннаж: {format_number(round(total_tonnage, 1))} кг")
-    if new_prs:
-        lines.append("")
-        lines.append("🏆 НОВЫЕ ЛИЧНЫЕ РЕКОРДЫ:")
-        for pr in new_prs:
-            lines.append(f"  • {pr}")
     if wrow.get("notes"):
         lines.append("")
         lines.append(f"📝 {wrow['notes']}")

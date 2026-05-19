@@ -177,7 +177,7 @@ async def cmd_cleanup(update, context):
     from sqlalchemy import text as sql_text
     uid = _user_id(update)
     async with get_session() as s:
-        # 1) planned дубли
+        # 1) planned дубли (без упражнений)
         result1 = await s.execute(
             sql_text("""
                 UPDATE planned_workouts
@@ -197,7 +197,7 @@ async def cmd_cleanup(update, context):
         )
         n_planned = len(list(result1.mappings().all()))
 
-        # 2) recorded fitness_exercise_sets с мусорными exercise_name
+        # 2) recorded sets с мусорными exercise_name (длинные фразы или command-префиксы)
         result2 = await s.execute(
             sql_text("""
                 DELETE FROM fitness_exercise_sets
@@ -205,7 +205,8 @@ async def cmd_cleanup(update, context):
                     SELECT id FROM fitness_workouts WHERE telegram_user_id = :uid
                 )
                 AND (
-                    exercise_name ILIKE 'запланируй%'
+                    length(exercise_name) > 50
+                    OR exercise_name ILIKE 'запланируй%'
                     OR exercise_name ILIKE 'поставь%'
                     OR exercise_name ILIKE 'добавь%'
                     OR exercise_name ILIKE 'в четверг%'
@@ -216,6 +217,11 @@ async def cmd_cleanup(update, context):
                     OR exercise_name ILIKE 'что у меня%'
                     OR exercise_name ILIKE 'жал штангу%'
                     OR exercise_name ILIKE 'сделал жим%'
+                    OR exercise_name ILIKE 'хоть ты%'
+                    OR exercise_name ILIKE 'запиши%'
+                    OR exercise_name ILIKE 'сегодняшнюю%'
+                    OR exercise_name ILIKE 'замени%'
+                    OR exercise_name ILIKE '%долбоеб%'
                 )
                 RETURNING id
             """),
