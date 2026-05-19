@@ -1,25 +1,39 @@
 """
-Telethon-based E2E smoke test.
+E2E тесты в РЕАЛЬНОМ Telegram.
 
-Шлёт реальные сообщения боту через твой аккаунт Telegram и проверяет ответы.
-Использует уже задеплоенный бот.
+Шлёт сообщения боту от твоего аккаунта, читает ответы, проверяет.
 
 ОДНОРАЗОВАЯ НАСТРОЙКА:
-1. https://my.telegram.org/apps → создай app → получи API_ID и API_HASH
-2. Положи их в .env.smoke:
-     TELEGRAM_API_ID=12345
-     TELEGRAM_API_HASH=abcdef...
-     TELEGRAM_BOT_USERNAME=@your_bot_name   # имя бота в Telegram
-     STRING_SESSION=                        # оставить пустым в первый раз
-3. pip install telethon pyyaml
-4. python scripts/telegram_smoke.py
-   - В первый раз запросит phone + код из Telegram
-   - Сохранит StringSession в .env.smoke
-5. После: можешь добавить STRING_SESSION в GitHub Secrets и запускать в Actions
 
-ИСПОЛЬЗОВАНИЕ:
-  python scripts/telegram_smoke.py                 # все сценарии
-  python scripts/telegram_smoke.py --scenario name # один
+1. Получи API_ID и API_HASH:
+   - https://my.telegram.org/apps
+   - Создай "Telegram App" (любое название)
+   - Сохрани api_id и api_hash
+
+2. Создай файл .env.smoke в корне проекта:
+
+     TELEGRAM_API_ID=12345
+     TELEGRAM_API_HASH=abcdef1234567890abcdef1234567890
+     TELEGRAM_BOT_USERNAME=@your_bot_username
+     STRING_SESSION=
+
+3. Установи зависимости:
+     .venv/bin/python -m pip install telethon pyyaml
+
+4. Первый запуск (интерактивный логин):
+     .venv/bin/python scripts/telegram_smoke.py
+
+   - Запросит твой номер телефона
+   - Пришлёт код в Telegram (от Telegram, не от твоего бота)
+   - Ты его введёшь
+   - Сохранит STRING_SESSION в .env.smoke
+
+5. Все следующие запуски — БЕЗ логина:
+     .venv/bin/python scripts/telegram_smoke.py
+
+CI/Cron:
+   Добавь STRING_SESSION в env-переменные деплоя/CI и
+   копируй .env.smoke оттуда.
 """
 import argparse
 import asyncio
@@ -32,151 +46,213 @@ try:
     import yaml
     from telethon import TelegramClient
     from telethon.sessions import StringSession
+    from telethon.errors import FloodWaitError
 except ImportError:
-    print("ERROR: pip install telethon pyyaml")
+    print("❌ Не установлены зависимости.")
+    print("   Запусти: .venv/bin/python -m pip install telethon pyyaml")
     sys.exit(1)
 
 
-def load_env(path: str = ".env.smoke") -> dict:
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_PATH = os.path.join(ROOT, ".env.smoke")
+SCENARIOS_PATH = os.path.join(ROOT, "tests", "e2e_scenarios.yaml")
+
+
+def load_env() -> dict:
     env = {}
-    if not os.path.exists(path):
+    if not os.path.exists(ENV_PATH):
         return env
-    with open(path) as f:
+    with open(ENV_PATH) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("#"):
+            if not line or line.startswith("#") or "=" not in line:
                 continue
-            if "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip().strip("'\"")
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip().strip("'\"")
     return env
 
 
-def save_env(env: dict, path: str = ".env.smoke") -> None:
-    with open(path, "w") as f:
+def save_env(env: dict) -> None:
+    with open(ENV_PATH, "w") as f:
         for k, v in env.items():
             f.write(f"{k}={v}\n")
 
 
-SCENARIOS_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests", "e2e_scenarios.yaml",
-)
-
-
 def load_scenarios() -> list[dict]:
-    with open(SCENARIOS_FILE) as f:
+    with open(SCENARIOS_PATH) as f:
         return (yaml.safe_load(f) or {}).get("scenarios", [])
 
 
-async def run_one(client, bot_username, scenario):
-    name = scenario.get("name", "?")
-    steps = scenario.get("steps") or []
-    step_results = []
-    all_ok = True
+def check_assertions(response_text: str, step: dict) -> tuple[bool, str]:
+    """Returns (passed, reason)."""
+    must = step.get("must_contain") or []
+    must_not = step.get("must_not_contain") or []
+    must_re = step.get("must_contain_regex") or []
+    must_not_re = step.get("must_not_contain_regex") or []
 
-    for i, step in enumerate(steps, start=1):
-        send_text = step.get("send", "")
-        # Send + wait for reply
-        async with client.conversation(bot_username, timeout=60) as conv:
-            await conv.send_message(send_text)
+    rt = (response_text or "").lower()
+    for n in must:
+        if n.lower() not in rt:
+            return False, f"missing required: {n!r}"
+    for n in must_not:
+        if n.lower() in rt:
+            return False, f"contains forbidden: {n!r}"
+    for p in must_re:
+        if not re.search(p, response_text, re.IGNORECASE):
+            return False, f"regex not matched: {p!r}"
+    for p in must_not_re:
+        if re.search(p, response_text, re.IGNORECASE):
+            return False, f"forbidden regex matched: {p!r}"
+    return True, ""
+
+
+async def send_and_wait(client, bot, text: str, timeout: int = 30) -> str:
+    """Send message, wait for the first reply."""
+    async with client.conversation(bot, timeout=timeout) as conv:
+        await conv.send_message(text)
+        try:
+            reply = await conv.get_response()
+            return reply.text or ""
+        except asyncio.TimeoutError:
+            return ""
+
+
+async def run_scenarios(client, bot_username: str, only: str | None = None) -> list[dict]:
+    scenarios = load_scenarios()
+    if only:
+        scenarios = [s for s in scenarios if s.get("name") == only or only in s.get("name", "")]
+        if not scenarios:
+            print(f"❌ Сценарий {only!r} не найден")
+            sys.exit(1)
+
+    results = []
+    for scenario in scenarios:
+        name = scenario.get("name", "?")
+        steps = scenario.get("steps") or []
+        print(f"  ▶  {name}")
+
+        steps_results = []
+        all_ok = True
+
+        for i, step in enumerate(steps, start=1):
+            send_text = step.get("send", "")
+            timeout = int(step.get("timeout_s", 30))
+            preview_send = send_text if len(send_text) < 50 else send_text[:50] + "…"
+            print(f"     step {i}: send {preview_send!r} ... ", end="", flush=True)
+
+            t0 = time.time()
             try:
-                reply = await conv.get_response()
-                resp_text = reply.text or ""
+                response = await send_and_wait(client, bot_username, send_text, timeout)
+            except FloodWaitError as e:
+                print(f"⚠️  FLOOD WAIT {e.seconds}s")
+                steps_results.append({"step": i, "passed": False, "reason": f"flood {e.seconds}s"})
+                all_ok = False
+                continue
             except Exception as e:
-                step_results.append({"step": i, "passed": False, "reason": f"no reply: {e}"})
+                print(f"❌ {type(e).__name__}: {e}")
+                steps_results.append({"step": i, "passed": False, "reason": f"{type(e).__name__}: {e}"})
                 all_ok = False
                 continue
 
-        ok = True
-        reason = ""
-        for n in step.get("must_contain") or []:
-            if n.lower() not in resp_text.lower():
-                ok = False; reason = f"missing: {n!r}"; break
-        if ok:
-            for n in step.get("must_not_contain") or []:
-                if n.lower() in resp_text.lower():
-                    ok = False; reason = f"contains: {n!r}"; break
-        if ok:
-            for p in step.get("must_contain_regex") or []:
-                if not re.search(p, resp_text, re.IGNORECASE):
-                    ok = False; reason = f"regex miss: {p!r}"; break
-        if ok:
-            for p in step.get("must_not_contain_regex") or []:
-                if re.search(p, resp_text, re.IGNORECASE):
-                    ok = False; reason = f"regex hit: {p!r}"; break
+            elapsed = time.time() - t0
 
-        step_results.append({
-            "step": i, "send": send_text[:50], "passed": ok, "reason": reason,
-            "response_preview": resp_text[:120],
-        })
-        if not ok:
-            all_ok = False
+            if not response:
+                print(f"❌ no reply in {timeout}s")
+                steps_results.append({"step": i, "passed": False, "reason": "no reply (timeout)"})
+                all_ok = False
+                continue
 
-    return {"name": name, "passed": all_ok, "steps": step_results}
+            ok, reason = check_assertions(response, step)
+            mark = "✅" if ok else "❌"
+            print(f"{mark} {elapsed:.1f}s")
+            if not ok:
+                print(f"          reason: {reason}")
+                print(f"          reply: {response[:200]!r}")
+                all_ok = False
+            steps_results.append({
+                "step": i, "passed": ok, "reason": reason,
+                "response_preview": response[:200],
+                "elapsed_s": round(elapsed, 2),
+            })
+
+        results.append({"name": name, "passed": all_ok, "steps": steps_results})
+
+    return results
 
 
 async def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scenario", help="run only this scenario name")
+    ap.add_argument("--scenario", help="прогнать только этот сценарий (по имени или подстроке)")
     args = ap.parse_args()
 
     env = load_env()
-    api_id = int(env.get("TELEGRAM_API_ID") or os.getenv("TELEGRAM_API_ID") or 0)
+    api_id_raw = env.get("TELEGRAM_API_ID") or os.getenv("TELEGRAM_API_ID")
     api_hash = env.get("TELEGRAM_API_HASH") or os.getenv("TELEGRAM_API_HASH")
     bot_username = env.get("TELEGRAM_BOT_USERNAME") or os.getenv("TELEGRAM_BOT_USERNAME")
     string_session = env.get("STRING_SESSION") or os.getenv("TELEGRAM_STRING_SESSION") or ""
 
-    if not (api_id and api_hash and bot_username):
-        print("ERROR: настрой TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_USERNAME в .env.smoke")
+    if not (api_id_raw and api_hash and bot_username):
+        print("❌ Нет конфигурации.")
+        print(f"   Создай файл {ENV_PATH} со строками:")
+        print("   TELEGRAM_API_ID=12345")
+        print("   TELEGRAM_API_HASH=abcdef...")
+        print("   TELEGRAM_BOT_USERNAME=@your_bot_username")
+        print("   STRING_SESSION=")
+        print()
+        print("   API_ID/API_HASH получи на https://my.telegram.org/apps")
         sys.exit(1)
 
+    try:
+        api_id = int(api_id_raw)
+    except ValueError:
+        print(f"❌ TELEGRAM_API_ID должен быть числом, а не {api_id_raw!r}")
+        sys.exit(1)
+
+    print(f"🔌 Подключаюсь к Telegram как пользователь...")
     client = TelegramClient(StringSession(string_session), api_id, api_hash)
-    await client.start()  # запросит phone+код если string_session пуст
+
+    try:
+        await client.start()
+    except Exception as e:
+        print(f"❌ Не получилось залогиниться: {e}")
+        sys.exit(1)
 
     if not string_session:
         new_session = client.session.save()
         env["STRING_SESSION"] = new_session
         save_env(env)
-        print(f"✅ Сохранил StringSession в .env.smoke ({len(new_session)} chars).")
-        print(f"   Добавь его в GitHub Secrets как TELEGRAM_STRING_SESSION для CI.")
+        print(f"✅ Сохранил STRING_SESSION в {ENV_PATH}")
+        print(f"   (длина {len(new_session)} символов — больше логиниться не будет)")
 
-    scenarios = load_scenarios()
-    if args.scenario:
-        scenarios = [s for s in scenarios if s.get("name") == args.scenario]
-        if not scenarios:
-            print(f"ERROR: сценарий {args.scenario!r} не найден")
-            sys.exit(1)
+    me = await client.get_me()
+    print(f"   логин: @{me.username or me.id}")
+    print(f"   бот:   {bot_username}")
+    print()
 
-    print(f"🧪 Запускаю {len(scenarios)} сценариев против {bot_username}...")
-    results = []
+    print(f"🧪 Прогоняю сценарии:")
     start = time.time()
-    for s in scenarios:
-        print(f"  → {s.get('name')}...")
-        try:
-            r = await run_one(client, bot_username, s)
-        except Exception as e:
-            r = {"name": s.get("name"), "passed": False, "steps": [{"step": 0, "passed": False, "reason": str(e)}]}
-        results.append(r)
-        print(f"    {'✅' if r['passed'] else '❌'}")
+    try:
+        results = await run_scenarios(client, bot_username, args.scenario)
+    finally:
+        await client.disconnect()
 
-    await client.disconnect()
-
+    elapsed = round(time.time() - start, 1)
     total = len(results)
     passed = sum(1 for r in results if r["passed"])
-    elapsed = round(time.time() - start, 1)
+
     print()
-    print(f"{'='*50}")
-    print(f"{'✅ ALL PASSED' if passed == total else '❌ SOME FAILED'}: {passed}/{total} ({elapsed}s)")
-    print()
-    for r in results:
-        mark = "✅" if r["passed"] else "❌"
-        print(f"{mark} {r['name']}")
-        if not r["passed"]:
-            for s in r["steps"]:
-                if not s.get("passed"):
-                    print(f"    ✗ step {s.get('step')}: {s.get('reason')}")
-                    print(f"      resp: {s.get('response_preview')}")
+    print("=" * 60)
+    if passed == total:
+        print(f"✅ ALL PASSED — {passed}/{total} сценариев за {elapsed}s")
+    else:
+        print(f"❌ FAILED — {passed}/{total} сценариев прошло за {elapsed}s")
+        print()
+        for r in results:
+            if not r["passed"]:
+                print(f"  ❌ {r['name']}")
+                for s in r["steps"]:
+                    if not s.get("passed"):
+                        print(f"     step {s['step']}: {s.get('reason')}")
 
     sys.exit(0 if passed == total else 1)
 

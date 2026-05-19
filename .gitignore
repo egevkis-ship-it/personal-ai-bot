@@ -6,3 +6,6 @@ venv/
 .DS_Store
 .env.dbcheck
 .claude/worktrees/
+
+# Telegram smoke tests
+.env.smoke

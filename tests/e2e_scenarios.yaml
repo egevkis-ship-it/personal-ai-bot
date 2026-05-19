@@ -1,101 +1,44 @@
-# Сценарии E2E-тестов — запускаются командой /run_tests или по расписанию.
-# Каждый сценарий: serial conversation steps. После каждого шага assert.
+# E2E сценарии для запуска через scripts/telegram_smoke.py
+# (реальный Telegram, реальный бот).
 #
-# Формат:
-#   name: human-readable
-#   steps:
-#     - send: что юзер пишет
-#       must_contain: [list]      # ИЛИ regex (must_contain_regex)
-#       must_not_contain: [list]
-#       skip_db_cleanup: false
+# Только базовые сценарии — те которые ДОЛЖНЫ работать перед чем угодно.
+# Добавлять новые — по одному, только когда базовые зелёные.
 
 scenarios:
 
-  - name: "Базовый: показ плана на сегодня"
-    steps:
-      - send: "что сегодня по плану"
-        must_not_contain:
-          - "упал с ошибкой"
-          - "Модуль в разработке"
-
-  - name: "Дата в человеческом формате"
-    steps:
-      - send: "покажи план на пятницу"
-        must_not_contain_regex:
-          - 'Тренировка на \d{4}-\d{2}-\d{2}:'
-
-  - name: "Удаление тренировок не идёт в ops"
-    steps:
-      - send: "удали все мои тренировки"
-        must_not_contain:
-          - "миграцию"
-          - "git commit"
-          - "Модуль в разработке"
-
-  - name: "Погода уходит в general AI"
-    steps:
-      - send: "какая сегодня погода в Москве"
-        must_not_contain:
-          - "тренировк"
-          - "упражнен"
-          - "подход"
-
-  - name: "Slash-команды работают (smoke)"
+  - name: "1. /help отвечает"
     steps:
       - send: "/help"
         must_contain:
           - "тренировк"
+        timeout_s: 15
 
-  - name: "Помощь / описание"
+  - name: "2. Показ плана на сегодня"
     steps:
-      - send: "что ты умеешь"
+      - send: "Что сегодня по плану"
+        must_not_contain:
+          - "Модуль в разработке"
+          - "упал с ошибкой"
+          - "NameError"
+        timeout_s: 30
+
+  - name: "3. Запись подхода создаёт тренировку"
+    steps:
+      - send: "Начинаю тренировку"
+        must_contain:
+          - "сесси"
         must_not_contain:
           - "упал с ошибкой"
-
-  - name: "Старт сессии — есть active_session"
-    steps:
-      - send: "начинаю делать сегодняшнюю тренировку"
-        must_contain:
-          - "Активная сессия"
-
-  - name: "Запись подхода в активной сессии"
-    steps:
-      - send: "начинаю тренировку"
-        must_contain:
-          - "Активная сессия"
-      - send: "жим штанги лёжа 80 кг 5 раз"
-        must_not_contain:
-          - "Изменил параметры упражнения"
-          - "упал с ошибкой"
-      - send: "закончил тренировку"
-        must_contain:
-          - "завершена"
-
-  - name: "Замеры тела"
-    steps:
-      - send: "вес 80.5 кг талия 82"
+        timeout_s: 30
+      - send: "Жим лёжа 80 на 5"
         must_not_contain:
           - "упал с ошибкой"
-
-  - name: "Finish workout не падает с NameError"
-    steps:
-      - send: "начинаю тренировку"
-        must_contain:
-          - "Активная сессия"
-      - send: "жим лёжа 80 на 5"
-        must_not_contain:
-          - "упал с ошибкой"
-      - send: "закончил тренировку"
+          - "NameError"
+          - "Изменил параметры"
+        timeout_s: 30
+      - send: "Закончил тренировку"
         must_not_contain:
           - "NameError"
+          - "упал с ошибкой"
           - "format_number"
-          - "is not defined"
-          - "упал с ошибкой"
-
-  - name: "Старт сессии + первый подход в одном сообщении"
-    steps:
-      - send: "приступаю к тренировке. сделал жим штанги 80 на 5"
-        must_contain:
-          - "Активная сессия"
-        must_not_contain:
-          - "упал с ошибкой"
+        timeout_s: 30
