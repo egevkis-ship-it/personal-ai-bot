@@ -2506,9 +2506,10 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
         )
 
     if _looks_like_show_last_actual_workout(text):
-        from app.modules.fitness.handler import command_last_workout
-
-        return await command_last_workout(telegram_user_id)
+        from app.db import get_last_workout
+        from app.modules.fitness.formatter import format_last_workout
+        last = await get_last_workout(telegram_user_id)
+        return format_last_workout(last)
 
     # Copy month/custom period before week/single workout copy.
     copy_period_action = _parse_copy_month_or_custom_period_action(text)

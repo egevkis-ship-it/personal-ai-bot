@@ -2444,7 +2444,8 @@ async def _handle_fitness_action_v2_inner(
 
         # Если в том же сообщении есть упоминание подхода — парсим и пишем.
         # Триггеры подхода: есть число+(кг|повтор|раз) или числовой паттерн NxM.
-        if has_kg_or_reps:
+        _has_kg_or_reps_inline = bool(re.search(r"\d+\s*(кг|килограмм|повтор|раз)", t_lower)) or bool(re.search(r"\d+\s*[×x✕х]\s*\d+", text))
+        if _has_kg_or_reps_inline:
             # Активная сессия теперь существует — перезапрашиваем для прокидки
             pending_after = await get_latest_fitness_pending_decision(telegram_user_id)
             active_after = _active_session_context_from_pending(pending_after)
