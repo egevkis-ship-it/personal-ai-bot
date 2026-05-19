@@ -2633,6 +2633,38 @@ async def _handle_fitness_action_v2_inner(
         return await _create_or_replace_today_workout(telegram_user_id, text, parsed)
 
     if action == "add_custom_workout":
+        # Если есть активная сессия СЕГОДНЯ — это запись подходов, не план.
+        # "Подтягивания 10 раз" / "Брусья 3×10" / "Планка 60 секунд" в сессии = log.
+        if active_session and active_session.get("workout_id"):
+            existing_date = str(active_session.get("workout_date") or "")[:10]
+            if existing_date == date.today().isoformat():
+                # Конвертируем workout.exercises → logged_exercises (set каждого упр = 1)
+                wk = parsed.get("workout") or {}
+                exes = wk.get("exercises") or []
+                if exes:
+                    logged = []
+                    for ex in exes:
+                        sets_count = ex.get("target_sets") or 1
+                        reps = ex.get("target_reps_min") or ex.get("target_reps_max") or None
+                        weight = ex.get("target_weight_kg")
+                        synthetic_sets = []
+                        for i in range(sets_count):
+                            synthetic_sets.append({
+                                "set_number": i + 1,
+                                "weight_kg": weight,
+                                "reps": reps,
+                            })
+                        logged.append({
+                            "exercise_name": ex.get("exercise_name"),
+                            "sets": synthetic_sets,
+                        })
+                    synth = {
+                        "action": "log_workout_sets",
+                        "date": date.today().isoformat(),
+                        "workout": {},
+                        "logged_exercises": logged,
+                    }
+                    return await _log_workout_sets(telegram_user_id, text, synth, active_session)
         return await _add_custom_workout(telegram_user_id, text, parsed)
 
     if action == "log_workout_sets":
