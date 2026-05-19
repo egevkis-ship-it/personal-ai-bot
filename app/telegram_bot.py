@@ -138,6 +138,19 @@ async def cmd_rules(update, context):
     await _route_text_as(update, "Покажи выученные правила")
 
 
+async def cmd_run_tests(update, context):
+    if not _is_allowed(update):
+        return
+    await update.message.reply_text("🧪 Запускаю E2E тесты... подожди 30–60с")
+    try:
+        from app.modules.fitness.e2e_runner import run_scenarios, format_report
+        summary = await run_scenarios()
+        report = format_report(summary, verbose=False)
+        await update.message.reply_text(report)
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ E2E runner упал: {type(e).__name__}: {e}")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
@@ -212,10 +225,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _post_init(application: Application) -> None:
+    import asyncio as _asyncio
     from app.db.migrations.runner import run_migrations
     from app.modules.fitness.reminders import reminder_loop as fitness_reminder_loop
     await run_migrations()
     application.create_task(fitness_reminder_loop(bot=application.bot))
+
+    # Auto-smoke E2E через 90 секунд после старта, если включено
+    if os.getenv("RUN_E2E_ON_START", "0") == "1" and settings.allowed_telegram_user_id:
+        async def _delayed_smoke():
+            await _asyncio.sleep(90)
+            try:
+                from app.modules.fitness.e2e_runner import run_scenarios, format_report
+                summary = await run_scenarios()
+                report = format_report(summary, verbose=False)
+                await application.bot.send_message(
+                    chat_id=int(settings.allowed_telegram_user_id),
+                    text="🚀 Авто-E2E после деплоя:\n\n" + report,
+                )
+            except Exception as e:
+                try:
+                    await application.bot.send_message(
+                        chat_id=int(settings.allowed_telegram_user_id),
+                        text=f"⚠️ Авто-E2E упал: {type(e).__name__}: {e}",
+                    )
+                except Exception:
+                    pass
+        application.create_task(_delayed_smoke())
 
 
 def build_application() -> Application:
@@ -239,6 +275,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("pr", cmd_pr))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(CommandHandler("rules", cmd_rules))
+    app.add_handler(CommandHandler("run_tests", cmd_run_tests))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
