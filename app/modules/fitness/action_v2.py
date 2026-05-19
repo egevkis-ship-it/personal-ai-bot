@@ -61,6 +61,7 @@ from app.modules.fitness.formatter import (
     format_personal_records,
     format_last_workout,
     format_last_measurement,
+    format_number,
 )
 from app.modules.fitness.utils import (
     week_bounds,
@@ -2435,14 +2436,35 @@ async def _handle_fitness_action_v2_inner(
             source_text=text,
         )
 
-        msg = (
-            f"▶️ Активная сессия #{workout_id} запущена.\n\n"
-            f"Дата: {format_human_date(today)}\n"
-            + (f"Фокус: {focus_label}\n" if focus_label else "")
-            + "\nДиктуй подходы. Пример: «жим штанги 80 на 10», «следующий 80×8», "
-              "«последний 75×10, перехожу к гантелям»."
+        start_msg = (
+            f"▶️ Активная сессия #{workout_id} запущена.\n"
+            f"Дата: {format_human_date(today)}"
+            + (f"\nФокус: {focus_label}" if focus_label else "")
         )
-        return msg
+
+        # Если в том же сообщении есть упоминание подхода — парсим и пишем.
+        # Триггеры подхода: есть число+(кг|повтор|раз) или числовой паттерн NxM.
+        if has_kg_or_reps:
+            # Активная сессия теперь существует — перезапрашиваем для прокидки
+            pending_after = await get_latest_fitness_pending_decision(telegram_user_id)
+            active_after = _active_session_context_from_pending(pending_after)
+            parsed_set = await parse_fitness_action_v2(
+                text, active_session=active_after,
+                telegram_user_id=telegram_user_id, prev_context=_PREV,
+            )
+            if parsed_set.get("logged_exercises"):
+                log_result = await _log_workout_sets(
+                    telegram_user_id, text, parsed_set, active_after,
+                )
+                # Объединяем стартовое сообщение и лог в один ответ
+                log_text = log_result.text if isinstance(log_result, BotReply) else log_result
+                return f"{start_msg}\n\n{log_text}"
+
+        return (
+            start_msg + "\n\n"
+            "Диктуй подходы. Пример: «жим штанги 80 на 10», «следующий 80×8», "
+            "«последний 75×10, перехожу к гантелям»."
+        )
 
     # ── HARD-route на запись факта: "сделал/выполнил X N кг M раз" ──
     # Эти фразы ВСЕГДА факт, никогда не правка плана.

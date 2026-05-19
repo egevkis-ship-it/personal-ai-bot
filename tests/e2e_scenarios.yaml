@@ -76,3 +76,26 @@ scenarios:
       - send: "вес 80.5 кг талия 82"
         must_not_contain:
           - "упал с ошибкой"
+
+  - name: "Finish workout не падает с NameError"
+    steps:
+      - send: "начинаю тренировку"
+        must_contain:
+          - "Активная сессия"
+      - send: "жим лёжа 80 на 5"
+        must_not_contain:
+          - "упал с ошибкой"
+      - send: "закончил тренировку"
+        must_not_contain:
+          - "NameError"
+          - "format_number"
+          - "is not defined"
+          - "упал с ошибкой"
+
+  - name: "Старт сессии + первый подход в одном сообщении"
+    steps:
+      - send: "приступаю к тренировке. сделал жим штанги 80 на 5"
+        must_contain:
+          - "Активная сессия"
+        must_not_contain:
+          - "упал с ошибкой"
