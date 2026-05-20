@@ -1292,6 +1292,98 @@ async def _create_or_replace_today_workout(telegram_user_id: str | None, text: s
     )
 
 
+_STRONG_LOG_VERBS = [
+    "я сделал", "я сделала", "я выполнил", "я выполнила", "я записал", "я записала",
+    "сделал ", "сделала ", "выполнил ", "выполнила ", "залогируй", "записывай",
+    "запиши тренировку", "запиши треню", "лог тренировки", "лог сессии",
+    "сегодня сделал", "сегодня делал", "вчера сделал", "вчера делал",
+    "сегодня в зале", "сегодня было", "вот моя тренировка", "вот тренировка",
+    "записываем", "записываю",
+]
+
+_STRONG_PLAN_VERBS = [
+    "запланируй", "запланир", "поставь на", "сделай мне план", "сделай план",
+    "программа тренировок", "программу тренировок", "хочу запланир",
+    "добавь тренировку на", "добавь в план", "поставь в план", "запиши план",
+    "план на",
+]
+
+
+def _has_strong_log_signal(text: str) -> bool:
+    t = (text or "").lower().replace("ё", "е")
+    return any(v in t for v in _STRONG_LOG_VERBS)
+
+
+def _has_strong_plan_signal(text: str) -> bool:
+    t = (text or "").lower().replace("ё", "е")
+    return any(v in t for v in _STRONG_PLAN_VERBS)
+
+
+async def _maybe_ask_log_or_plan(
+    telegram_user_id: str | None,
+    text: str,
+    parsed: dict,
+) -> "str | BotReply | None":
+    """Ask the user via inline buttons whether to log or plan an ambiguous workout block.
+
+    Returns BotReply with buttons if ambiguous, None otherwise (caller continues normally).
+    """
+    # Если уже есть сильный маркер — не спрашиваем
+    if _has_strong_log_signal(text) or _has_strong_plan_signal(text):
+        return None
+
+    # Должны быть упражнения хоть в каком-то виде
+    workout = parsed.get("workout") or {}
+    exes = workout.get("exercises") or []
+    logged = parsed.get("logged_exercises") or []
+    if not exes and not logged:
+        return None
+
+    # Создаём pending decision с распарсенными данными
+    try:
+        from app.db import create_fitness_pending_decision
+        await create_fitness_pending_decision(
+            telegram_user_id=telegram_user_id,
+            decision_type="disambiguate_log_or_plan",
+            context={"parsed": parsed, "source_text": text[:2000]},
+            source_text=text[:500],
+        )
+    except Exception:
+        return None
+
+    # Формируем превью
+    n_exes = len(exes) + len(logged)
+    names = []
+    for ex in (exes + logged)[:3]:
+        names.append(ex.get("exercise_name") or "—")
+    sample = ", ".join(names)
+    if n_exes > 3:
+        sample += f" и ещё {n_exes - 3}"
+    target_date = parsed.get("date") or date.today().isoformat()
+    try:
+        date_human = format_human_date(target_date)
+    except Exception:
+        date_human = target_date
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📝 Записать (факт)", callback_data="fit:disamb_log"),
+        InlineKeyboardButton("📅 Запланировать", callback_data="fit:disamb_plan"),
+    ], [
+        InlineKeyboardButton("❌ Отменить", callback_data="fit:disamb_cancel"),
+    ]])
+
+    return BotReply(
+        text=(
+            f"Не уверен — это уже сделанная тренировка или план на {date_human}?\n\n"
+            f"Упражнения: {sample}\n\n"
+            "📝 Записать — добавить как выполненный факт\n"
+            "📅 Запланировать — добавить в план на дату"
+        ),
+        keyboard=keyboard,
+    )
+
+
 async def _add_custom_workout(telegram_user_id: str | None, text: str, parsed: dict) -> str:
     target_date = parsed.get("date") or date.today().isoformat()
     workout = parsed.get("workout") or {}
@@ -2811,6 +2903,16 @@ async def _handle_fitness_action_v2_inner(
 
     if action == "replace_today_workout":
         return await _create_or_replace_today_workout(telegram_user_id, text, parsed)
+
+    # ── DISAMBIGUATION: лог vs план ────────────────────────────────────────
+    # Если парсер выбрал между add_custom_workout/log_workout_sets без
+    # явных глагольных маркеров — спрашиваем пользователя кнопками.
+    if action in ("add_custom_workout", "log_workout_sets"):
+        # Если активная сессия — всегда лог
+        if not (active_session and active_session.get("workout_id")):
+            disamb_reply = await _maybe_ask_log_or_plan(telegram_user_id, text, parsed)
+            if disamb_reply is not None:
+                return disamb_reply
 
     if action == "add_custom_workout":
         # Если есть активная сессия СЕГОДНЯ — это запись подходов, не план.
