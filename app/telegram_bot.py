@@ -309,19 +309,24 @@ async def cmd_wipe(update, context):
             async with get_session() as s2:
                 cnt_r = await s2.execute(sql_text(f"SELECT COUNT(*) FROM {table}"))
                 cnt = cnt_r.scalar_one()
-                if cnt != 0:
-                    continue
                 # 1) SERIAL/BIGSERIAL → pg_get_serial_sequence + setval
                 seq_r = await s2.execute(sql_text(
                     "SELECT pg_get_serial_sequence(:t, 'id')"
                 ), {"t": table})
                 seq_name = seq_r.scalar_one()
                 if seq_name:
-                    await s2.execute(sql_text(
-                        f"SELECT setval('{seq_name}', 1, false)"
-                    ))
+                    # Если есть данные — ставим в MAX(id)+1, иначе 1 (с is_called=false)
+                    if cnt > 0:
+                        await s2.execute(sql_text(
+                            f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)"
+                        ))
+                        reset_seqs.append(f"{table}: rows={cnt}, seq=MAX+1")
+                    else:
+                        await s2.execute(sql_text(
+                            f"SELECT setval('{seq_name}', 1, false)"
+                        ))
+                        reset_seqs.append(f"{table}: empty → 1")
                     await s2.commit()
-                    reset_seqs.append(f"{table} → {seq_name.split('.')[-1]}")
                     continue
                 # 2) IDENTITY column → ALTER TABLE … ALTER COLUMN id RESTART
                 try:
@@ -331,9 +336,9 @@ async def cmd_wipe(update, context):
                     await s2.commit()
                     reset_seqs.append(f"{table} (IDENTITY)")
                 except Exception as e2:
-                    reset_seqs.append(f"{table}: identity err {type(e2).__name__}")
+                    reset_seqs.append(f"{table}: identity err {type(e2).__name__}: {str(e2)[:80]}")
         except Exception as e:
-            reset_seqs.append(f"{table}: err {type(e).__name__}")
+            reset_seqs.append(f"{table}: err {type(e).__name__}: {str(e)[:80]}")
 
     lines = ["🧨 Полная очистка fitness-данных:"]
     for table, n in deleted.items():
