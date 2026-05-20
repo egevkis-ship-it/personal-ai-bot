@@ -2490,7 +2490,10 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
     import re as _re
     active_wid = await _get_active_fitness_workout_id(telegram_user_id)
     if active_wid:
-        # Если короткое сообщение которое выглядит как запись подходов — пропускаем
+        # Если короткое сообщение которое выглядит как запись подходов —
+        # СНАЧАЛА пробуем regex-логгер (без Claude), и только если он не справился,
+        # отдаём action_v2 для парсинга через AI. Это нужно потому что Anthropic API
+        # бывает перегружен и парсер возвращает clarification вместо лога.
         t_clean = (text or "").strip()
         if len(t_clean) < 100:
             looks_like_set_log = bool(_re.search(r"\d", t_clean)) and any(
@@ -2504,7 +2507,14 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
                 ]
             )
             if looks_like_set_log:
-                # Не перехватываем — пусть action_v2 _log_workout_sets разбирается
+                # Сначала regex-логгер (быстро, без AI)
+                regex_reply = await _log_exercise_sets_to_active_session(
+                    telegram_user_id=telegram_user_id,
+                    text_value=text,
+                )
+                if regex_reply is not None:
+                    return regex_reply
+                # Не получилось — отдаём action_v2
                 return None
 
     # HARD PRIORITY: whole-week copy before generic selected-workout copy.
