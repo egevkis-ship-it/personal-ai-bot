@@ -270,8 +270,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = _user_id(update)
     text = update.message.text or ""
 
-    reply = await route(user_id, text)
-    await _send_reply(update, reply)
+    try:
+        reply = await route(user_id, text)
+        await _send_reply(update, reply)
+    except Exception as e:
+        import traceback
+        import logging as _log
+        _log.getLogger(__name__).exception("handle_text crashed: %s", e)
+        try:
+            await update.message.reply_text(
+                f"⚠️ Внутренняя ошибка: {type(e).__name__}: {str(e)[:300]}"
+            )
+        except Exception:
+            pass
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
