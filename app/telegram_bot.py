@@ -266,6 +266,7 @@ async def cmd_wipe(update, context):
     from sqlalchemy import text as sql_text
     uid = _user_id(update)
     deleted = {}
+    reset_seqs = []
     async with get_session() as s:
         tables = [
             ("fitness_exercise_sets", "workout_id IN (SELECT id FROM fitness_workouts WHERE telegram_user_id = :uid)"),
@@ -278,6 +279,11 @@ async def cmd_wipe(update, context):
             ("fitness_goals", "telegram_user_id = :uid"),
             ("workout_templates", "telegram_user_id = :uid"),
             ("last_interaction", "telegram_user_id = :uid"),
+            ("exercise_normalization_cache", "1=1"),
+            ("learning_corrections", "telegram_user_id = :uid"),
+            ("user_preferences", "telegram_user_id = :uid"),
+            ("pain_journal", "telegram_user_id = :uid"),
+            ("training_constraints", "telegram_user_id = :uid"),
         ]
         for table, where_clause in tables:
             try:
@@ -288,11 +294,39 @@ async def cmd_wipe(update, context):
                 deleted[table] = len(list(result.mappings().all()))
             except Exception as e:
                 deleted[table] = f"err: {type(e).__name__}"
+
+        # Сбросить ID-счётчики, если таблица пустая после очистки
+        seq_tables = [
+            "fitness_exercise_sets", "fitness_workouts",
+            "planned_exercises", "planned_workouts", "training_plans",
+            "body_measurements", "fitness_pending_decisions",
+            "fitness_goals", "workout_templates",
+            "learning_corrections",
+        ]
+        for table in seq_tables:
+            try:
+                # Проверим что таблица пустая
+                cnt_r = await s.execute(sql_text(f"SELECT COUNT(*) FROM {table}"))
+                cnt = cnt_r.scalar_one()
+                if cnt == 0:
+                    # ALTER SEQUENCE … RESTART WITH 1
+                    await s.execute(sql_text(
+                        f"ALTER SEQUENCE {table}_id_seq RESTART WITH 1"
+                    ))
+                    reset_seqs.append(table)
+            except Exception:
+                pass
+
         await s.commit()
 
     lines = ["🧨 Полная очистка fitness-данных:"]
     for table, n in deleted.items():
         lines.append(f"  {table}: {n}")
+    if reset_seqs:
+        lines.append("")
+        lines.append("🔢 ID-счётчики сброшены (RESTART WITH 1):")
+        for t in reset_seqs:
+            lines.append(f"  {t}")
     await update.message.reply_text("\n".join(lines))
 
 
