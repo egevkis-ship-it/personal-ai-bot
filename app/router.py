@@ -133,6 +133,26 @@ async def route(user_id: str, text: str) -> BotReply | str:
         if confirm is not None:
             return await _dispatch_confirm(user_id, text, confirm)
 
+        # 3a. Fitness pending decisions (disambiguate_log_or_plan и пр.) — короткие
+        #     ответы юзера типа "запиши"/"запланируй" должны идти в fitness, не в general AI.
+        try:
+            from app.db import get_latest_fitness_pending_decision
+            _fit_pend = await get_latest_fitness_pending_decision(user_id)
+            if _fit_pend and _fit_pend.get("decision_type") in (
+                "disambiguate_log_or_plan",
+                "active_workout_session",
+                "awaiting_custom_workout_details",
+                "awaiting_add_exercises_to_workout",
+                "cancel_planned_period_confirm",
+                "period_copy_confirm",
+                "selected_planned_workout_context",
+                "exercise_disambiguation",
+            ):
+                from app.modules.fitness.handler import handle
+                return await handle(user_id, text, {"intent": "fitness", "confidence": 1.0})
+        except Exception:
+            pass
+
         # 4. HARD fitness signal short-circuit — длинный план или явные веса/упражнения
         #    идут в фитнес сразу, минуя haiku-классификатор (он часто ошибается на длинных текстах)
         if _has_hard_fitness_signal(text):
