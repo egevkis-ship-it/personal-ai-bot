@@ -449,7 +449,11 @@ def format_completed_period(workouts: list[dict], title: str) -> str:
         focus_summary = ", ".join(f"{k} ({v})" for k, v in sorted(by_focus.items(), key=lambda x: -x[1]))
         lines.append(f"По фокусу: {focus_summary}")
 
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    # Telegram message limit is 4096; truncate with a hint
+    if len(body) > 3900:
+        body = body[:3850] + "\n…\n(сокращено — попроси экспорт csv для полного списка)"
+    return body
 
 
 def format_personal_records(records: list[dict]) -> str:
