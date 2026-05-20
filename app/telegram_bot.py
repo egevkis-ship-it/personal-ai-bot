@@ -250,6 +250,52 @@ async def cmd_cleanup(update, context):
     )
 
 
+async def cmd_wipe(update, context):
+    """Полностью обнулить fitness-данные пользователя. Требует подтверждение через arg 'yes'."""
+    if not _is_allowed(update):
+        return
+    args = (context.args if hasattr(context, "args") else []) or []
+    if "yes" not in args:
+        await update.message.reply_text(
+            "⚠️ Команда удалит ВСЕ твои тренировки, подходы, замеры, планы, цели, шаблоны.\n"
+            "Подтверди: /wipe yes"
+        )
+        return
+
+    from app.db.engine import get_session
+    from sqlalchemy import text as sql_text
+    uid = _user_id(update)
+    deleted = {}
+    async with get_session() as s:
+        tables = [
+            ("fitness_exercise_sets", "workout_id IN (SELECT id FROM fitness_workouts WHERE telegram_user_id = :uid)"),
+            ("fitness_workouts", "telegram_user_id = :uid"),
+            ("planned_exercises", "planned_workout_id IN (SELECT id FROM planned_workouts WHERE telegram_user_id = :uid)"),
+            ("planned_workouts", "telegram_user_id = :uid"),
+            ("training_plans", "telegram_user_id = :uid"),
+            ("body_measurements", "telegram_user_id = :uid"),
+            ("fitness_pending_decisions", "telegram_user_id = :uid"),
+            ("fitness_goals", "telegram_user_id = :uid"),
+            ("workout_templates", "telegram_user_id = :uid"),
+            ("last_interaction", "telegram_user_id = :uid"),
+        ]
+        for table, where_clause in tables:
+            try:
+                result = await s.execute(
+                    sql_text(f"DELETE FROM {table} WHERE {where_clause} RETURNING 1"),
+                    {"uid": uid},
+                )
+                deleted[table] = len(list(result.mappings().all()))
+            except Exception as e:
+                deleted[table] = f"err: {type(e).__name__}"
+        await s.commit()
+
+    lines = ["🧨 Полная очистка fitness-данных:"]
+    for table, n in deleted.items():
+        lines.append(f"  {table}: {n}")
+    await update.message.reply_text("\n".join(lines))
+
+
 async def cmd_run_tests(update, context):
     if not _is_allowed(update):
         return
@@ -400,6 +446,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("run_tests", cmd_run_tests))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("cleanup", cmd_cleanup))
+    app.add_handler(CommandHandler("wipe", cmd_wipe))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
