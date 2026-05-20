@@ -274,6 +274,73 @@ def _extract_exercise_names_for_replace(action: dict) -> tuple[str | None, str |
     return old_name or None, new_name or None
 
 
+async def _rename_exercise_in_active_session(
+    telegram_user_id: str | None,
+    old_name: str,
+    new_name: str,
+) -> str | None:
+    """Если есть активная сессия — переименовать упражнение прямо в логе подходов,
+    а не править план. Возвращает строку-ответ или None если нечего переименовывать."""
+    from app.modules.fitness.router_hardening import _get_active_fitness_workout_id
+    from app.db import AsyncSessionLocal, get_latest_fitness_pending_decision, resolve_fitness_pending_decision, create_fitness_pending_decision
+    from sqlalchemy import text as sql_text
+
+    workout_id = await _get_active_fitness_workout_id(telegram_user_id)
+    if not workout_id:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        # Найти все подходы с похожим именем (case-insensitive substring)
+        found = await session.execute(
+            sql_text("""
+                SELECT id, exercise_name
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                  AND LOWER(exercise_name) LIKE LOWER(:pat)
+            """),
+            {"wid": workout_id, "pat": f"%{old_name}%"},
+        )
+        rows = found.mappings().all()
+        if not rows:
+            return None
+
+        old_actual = rows[0]["exercise_name"]
+        count = len(rows)
+
+        await session.execute(
+            sql_text("""
+                UPDATE fitness_exercise_sets
+                SET exercise_name = :new
+                WHERE workout_id = :wid AND exercise_name = :old
+            """),
+            {"new": new_name, "old": old_actual, "wid": workout_id},
+        )
+        await session.commit()
+
+    # Обновить pending context (current_exercise)
+    try:
+        pending = await get_latest_fitness_pending_decision(telegram_user_id)
+        if pending and pending.get("decision_type") == "active_workout_session":
+            ctx = pending.get("context_json") or {}
+            if ctx.get("current_exercise") == old_actual:
+                ctx["current_exercise"] = new_name
+                # пересоздать pending с новым контекстом
+                await resolve_fitness_pending_decision(pending["id"], status="resolved")
+                await create_fitness_pending_decision(
+                    telegram_user_id=telegram_user_id,
+                    decision_type="active_workout_session",
+                    context=ctx,
+                    source_text=None,
+                )
+    except Exception:
+        pass
+
+    return (
+        f"✏️ Переименовал в активной сессии: «{old_actual}» → «{new_name}» "
+        f"({count} подход{'а' if count in (2,3,4) else 'ов'} сохранены)."
+    )
+
+
 async def _replace_exercise(
     telegram_user_id: str | None,
     action: dict,
@@ -296,6 +363,16 @@ async def _replace_exercise(
     old_name, new_name = _extract_exercise_names_for_replace(action)
     if not old_name or not new_name:
         return "Понял, что нужно заменить упражнение, но не понял что на что менять."
+
+    # Если есть активная сессия и старое упражнение в ней залогировано —
+    # переименовываем в сессии, не трогаем план.
+    session_reply = await _rename_exercise_in_active_session(
+        telegram_user_id=telegram_user_id,
+        old_name=old_name,
+        new_name=new_name,
+    )
+    if session_reply is not None:
+        return session_reply
 
     # Extract new params if mentioned (parser may put them in action.new_*)
     new_params = action.get("new_params") or {}
