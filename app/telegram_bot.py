@@ -309,14 +309,21 @@ async def cmd_wipe(update, context):
             async with get_session() as s2:
                 cnt_r = await s2.execute(sql_text(f"SELECT COUNT(*) FROM {table}"))
                 cnt = cnt_r.scalar_one()
-                if cnt == 0:
+                if cnt != 0:
+                    continue
+                # Узнать реальное имя sequence через pg_get_serial_sequence
+                seq_r = await s2.execute(sql_text(
+                    "SELECT pg_get_serial_sequence(:t, 'id')"
+                ), {"t": table})
+                seq_name = seq_r.scalar_one()
+                if seq_name:
                     await s2.execute(sql_text(
-                        f"ALTER SEQUENCE {table}_id_seq RESTART WITH 1"
+                        f"SELECT setval('{seq_name}', 1, false)"
                     ))
                     await s2.commit()
-                    reset_seqs.append(table)
-        except Exception:
-            pass
+                    reset_seqs.append(f"{table} → {seq_name.split('.')[-1]}")
+        except Exception as e:
+            reset_seqs.append(f"{table}: err {type(e).__name__}")
 
     lines = ["🧨 Полная очистка fitness-данных:"]
     for table, n in deleted.items():
