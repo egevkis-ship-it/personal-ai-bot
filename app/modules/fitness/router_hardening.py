@@ -2462,6 +2462,25 @@ async def _edit_last_logged_set_reps_in_active_session(
 
 
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
+    # Если pending — disambiguate_log_or_plan, юзер может ответить кнопкой ИЛИ текстом.
+    # Текстовый ответ: "запиши"/"факт"/"лог" → log, "запланируй"/"план" → plan, "отмена" → cancel.
+    try:
+        from app.db import get_latest_fitness_pending_decision
+        _pending_disamb = await get_latest_fitness_pending_decision(telegram_user_id)
+    except Exception:
+        _pending_disamb = None
+    if _pending_disamb and _pending_disamb.get("decision_type") == "disambiguate_log_or_plan":
+        _t_low = (text or "").lower().replace("ё", "е").strip()
+        from app.modules.fitness.callbacks import _handle_disambiguation_callback
+        if any(w in _t_low for w in ["запиши", "факт", "лог", "записать", "записываю"]):
+            return await _handle_disambiguation_callback(telegram_user_id, "disamb_log")
+        if any(w in _t_low for w in ["запланир", "план", "запланируй"]):
+            return await _handle_disambiguation_callback(telegram_user_id, "disamb_plan")
+        if any(w in _t_low for w in ["отмен", "не надо", "забудь"]):
+            return await _handle_disambiguation_callback(telegram_user_id, "disamb_cancel")
+        # Иначе не понял — повторим вопрос
+        return "Скажи коротко: «запиши» (факт), «запланируй» (план) или «отмена»."
+
     # ARCHIVE phrases must NEVER hit planned-workout parser — those mean
     # "show me what I actually did", not "show plan".
     # Без этого guard'а Claude в parse_planned_workout_action классифицирует
