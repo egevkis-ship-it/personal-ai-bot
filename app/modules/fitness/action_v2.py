@@ -901,6 +901,11 @@ async def parse_fitness_action_v2(
 - "записываем сегодняшнюю тренировку..."
 - "жим: 80×5, 80×5, 75×8" / "жим 80 на 5, 80 на 5, 75 на 8"
 - "присед 4 подхода 100×5" / "присед 4×5 100кг" / "100 на 5 четыре раза"
+- ⚠️ ТРИ числа через × это weight×reps×sets:
+  "30×15×2" → 2 подхода 30кг×15повт (вес=30, reps=15, sets=2)
+  "100×5×3" → 3 подхода 100кг×5повт
+  "22×12×3" → 3 подхода 22кг×12повт
+  "Сведение 30×15×2" → exercise="Сведение", 2 подхода 30×15
 - "сделал жим: 1) 80×5, 2) 80×5, 3) 75×6" (явная нумерация)
 - "первый 80×5, второй 80×5, третий 75×6" / "первый подход 80 на 5..."
 - "жим штанги 4 на 10 по 25 кг" → 4 sets × 10 reps × 25 kg, exercise="жим штанги"
@@ -4567,12 +4572,32 @@ async def _edit_last_set(
 
     target = parsed.get("target") or {}
     set_number = target.get("set_number")
+    exercise_name = target.get("exercise_name")
 
     from app.db.engine import get_session
     from sqlalchemy import text as sql_text
 
     async with get_session() as session:
-        if set_number:
+        # Если в правке явно указано упражнение — ищем именно его.
+        # Иначе берём последнее.
+        if exercise_name and set_number:
+            row = await session.execute(sql_text("""
+                SELECT id, exercise_name, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                  AND LOWER(exercise_name) LIKE LOWER(:exn)
+                  AND set_number = :sn
+                ORDER BY id DESC LIMIT 1
+            """), {"wid": workout_id, "exn": f"%{exercise_name}%", "sn": int(set_number)})
+        elif exercise_name:
+            row = await session.execute(sql_text("""
+                SELECT id, exercise_name, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                  AND LOWER(exercise_name) LIKE LOWER(:exn)
+                ORDER BY id DESC LIMIT 1
+            """), {"wid": workout_id, "exn": f"%{exercise_name}%"})
+        elif set_number:
             row = await session.execute(sql_text("""
                 SELECT id, exercise_name, weight_kg, reps
                 FROM fitness_exercise_sets
