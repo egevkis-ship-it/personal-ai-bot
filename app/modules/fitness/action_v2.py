@@ -2598,6 +2598,46 @@ async def _handle_fitness_action_v2_inner(
                 }
                 return await _log_workout_sets(telegram_user_id, text, synth, active_session)
 
+    # ── FAST-PATH: архивные фразы. Прямой dispatch без AI-парсера. ─────────
+    # "Что я делал сегодня/вчера" / "вчерашняя/прошлая/последняя тренировка"
+    # — частые запросы, не нужно гонять Sonnet парсер. Сразу вызываем БД.
+    _t_arch = (text or "").lower().replace("ё", "е").strip()
+    _archive_today = any(p in _t_arch for p in [
+        "я делал сегодня", "я сделал сегодня", "я записал сегодня",
+        "что я делал сегодня", "что я сделал сегодня",
+    ])
+    _archive_yesterday = any(p in _t_arch for p in [
+        "я делал вчера", "я сделал вчера", "я записал вчера",
+        "что я делал вчера", "что я сделал вчера",
+        "вчерашняя трен", "вчерашнюю трен",
+    ])
+    _archive_week = any(p in _t_arch for p in [
+        "я делал на этой неделе", "я сделал на этой неделе",
+        "что я делал на неделе", "что на этой неделе сделал",
+        "что я делал за неделю", "что я сделал за неделю",
+    ])
+    _archive_last = any(p in _t_arch for p in [
+        "прошлая тренир", "прошлую тренир", "последняя тренир", "последнюю тренир",
+        "покажи прошлую", "покажи последнюю",
+    ])
+    if _archive_today or _archive_yesterday or _archive_week or _archive_last:
+        from datetime import timedelta as _td
+        if _archive_today:
+            tgt = date.today().isoformat()
+            workouts = await get_completed_workouts_in_period(telegram_user_id, tgt, tgt)
+            return format_completed_period(workouts, f"Тренировки за {format_human_date(tgt)}")
+        if _archive_yesterday:
+            tgt = (date.today() - _td(days=1)).isoformat()
+            workouts = await get_completed_workouts_in_period(telegram_user_id, tgt, tgt)
+            return format_completed_period(workouts, f"Тренировки за {format_human_date(tgt)}")
+        if _archive_week:
+            start, end = week_bounds()
+            workouts = await get_completed_workouts_in_period(telegram_user_id, start, end)
+            return format_completed_period(workouts, f"Тренировки за неделю ({format_human_date(start, include_weekday=False)} — {format_human_date(end, include_weekday=False)})")
+        if _archive_last:
+            last = await get_last_workout(telegram_user_id)
+            return format_last_workout(last)
+
     # ── Router hardening (handles set logging, confirmation flows, etc.) ───────
     hardening_reply = await handle_router_hardening(telegram_user_id, text)
     if hardening_reply is not None:

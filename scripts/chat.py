@@ -34,7 +34,7 @@ async def main(message: str):
     client = TelegramClient(StringSession(session), api_id, api_hash)
     await client.start()
     try:
-        async with client.conversation(bot, timeout=120) as conv:
+        async with client.conversation(bot, timeout=180) as conv:
             await conv.send_message(message)
             reply = await conv.get_response()
             print(reply.text or "<пусто>")
