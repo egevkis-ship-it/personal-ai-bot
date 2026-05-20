@@ -317,10 +317,18 @@ def _split_weeks(text: str) -> list[tuple[str, str]]:
     return weeks
 
 
+_WEEKDAY_TOKENS = _WEEKDAYS_RU + [
+    # Короткие формы — отдельным регексом со словарными границами
+]
+_WEEKDAY_SHORT_RE = re.compile(r"\b(пн|вт|ср|чт|пт|сб|вс)\b", re.IGNORECASE)
+
+
 def _looks_like_weekly_plan(text: str) -> bool:
     """Detect multi-day plan: several day-name headers OR explicit dates."""
     t = text.lower()
     days_found = sum(1 for d in _WEEKDAYS_RU if d in t)
+    # Короткие формы дней недели (пн/вт/ср/чт/пт/сб/вс)
+    days_found += len(_WEEKDAY_SHORT_RE.findall(text))
     # Явные даты вида "25-05-2026", "25/05/2026", "25.05.2026"
     explicit_dates = len(re.findall(r"\b\d{1,2}[-./]\d{1,2}[-./]\d{2,4}\b", text))
     # ISO: 2026-05-25
