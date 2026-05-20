@@ -75,12 +75,43 @@ def safe_json_loads(text: str) -> dict:
         raise
 
 
+_FAST_FITNESS_MARKERS = [
+    "тренировк", "упражнен", "подход", "повтор",
+    "жим", "тяг", "присед", "становая", "бицепс", "трицепс",
+    "брус", "подтяг", "отжим", "махи", "разводк", "сгибан", "разгибан",
+    "кг", "штанг", "гантел", "rpe", "amrap",
+    "что я делал", "что я сделал", "что я записал",
+    "вчерашняя тренир", "прошлая тренир", "последняя тренир",
+    "архив", "что у меня сегодня", "что сегодня", "что завтра",
+    "план на", "тренировка на", "запланируй",
+    "закончил трен", "финиш трен", "начинаю трен",
+    "вес ", "талия ", "грудь ", "шея ", "бедр", "голен", "живот",
+    "замер",
+]
+
+
+def _fast_intent(text: str) -> dict | None:
+    """Fast-path: некоторые сообщения можно классифицировать без Haiku.
+    Снижает latency на ~1-2 сек для частых фитнес-фраз."""
+    t = (text or "").lower().replace("ё", "е").strip()
+    if not t or len(t) > 600:
+        return None
+    if any(m in t for m in _FAST_FITNESS_MARKERS):
+        return {"intent": "fitness", "confidence": 0.95, "summary": "fast-path fitness"}
+    return None
+
+
 async def parse_message(text: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
 
     # Если текст слишком длинный — почти всегда импорт фитнес-плана. Не гоняем haiku.
     if len(text) > 1500:
         return {"intent": "fitness", "confidence": 0.9, "summary": "long fitness import"}
+
+    # Fast-path: явные фитнес-маркеры → пропускаем Haiku
+    fast = _fast_intent(text)
+    if fast is not None:
+        return fast
 
     try:
         response = await claude_client.messages.create(
