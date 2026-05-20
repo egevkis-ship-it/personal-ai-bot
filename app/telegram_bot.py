@@ -130,7 +130,7 @@ async def cmd_finished(update, context):
 
 async def cmd_stats(update, context):
     if not _is_allowed(update): return
-    await _route_text_as(update, "Быстрая сводка")
+    await _route_text_as(update, "сводка по тренировкам")
 
 
 async def cmd_reminders(update, context):
