@@ -251,15 +251,52 @@ async def cmd_cleanup(update, context):
 
 
 async def cmd_wipe(update, context):
-    """Полностью обнулить fitness-данные пользователя. Требует подтверждение через arg 'yes'."""
+    """Полностью обнулить fitness-данные пользователя.
+
+    /wipe yes      — удалить ТОЛЬКО строки этого юзера + сброс счётчиков к MAX+1.
+    /wipe yes all  — TRUNCATE всех fitness-таблиц с RESTART IDENTITY (счётчики → 1).
+                     Внимание: удалит данные ВСЕХ пользователей.
+    """
     if not _is_allowed(update):
         return
     args = (context.args if hasattr(context, "args") else []) or []
     if "yes" not in args:
         await update.message.reply_text(
             "⚠️ Команда удалит ВСЕ твои тренировки, подходы, замеры, планы, цели, шаблоны.\n"
-            "Подтверди: /wipe yes"
+            "Подтверди: /wipe yes\n"
+            "Чтобы полностью обнулить ID-счётчики (truncate всех таблиц): /wipe yes all"
         )
+        return
+
+    if "all" in args:
+        # Nuclear: TRUNCATE с RESTART IDENTITY → счётчики → 1
+        from app.db.engine import get_session
+        from sqlalchemy import text as sql_text
+        truncated = []
+        truncate_tables = [
+            "fitness_exercise_sets",
+            "fitness_workouts",
+            "planned_exercises",
+            "planned_workouts",
+            "training_plans",
+            "body_measurements",
+            "fitness_pending_decisions",
+            "fitness_goals",
+            "workout_templates",
+            "last_interaction",
+        ]
+        async with get_session() as s:
+            for t in truncate_tables:
+                try:
+                    await s.execute(sql_text(f"TRUNCATE TABLE {t} RESTART IDENTITY CASCADE"))
+                    truncated.append(t)
+                except Exception as e:
+                    truncated.append(f"{t}: err {type(e).__name__}")
+            await s.commit()
+        lines = ["🧨🧨🧨 TRUNCATE ALL — счётчики обнулены до 1:"]
+        for t in truncated:
+            lines.append(f"  {t}")
+        await update.message.reply_text("\n".join(lines))
         return
 
     from app.db.engine import get_session
