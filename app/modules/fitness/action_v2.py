@@ -1342,6 +1342,49 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
     workout = parsed.get("workout") or {}
     logged_exercises = _normalize_logged_exercises(parsed.get("logged_exercises"))
 
+    # Fallback для временных упражнений (Планка/Удержание/Вакуум):
+    # если парсер дал имя но без подходов, и в тексте есть "X секунд N подходов" —
+    # синтезируем подходы где reps=секунды.
+    if logged_exercises:
+        for ex in logged_exercises:
+            if ex.get("sets"):
+                continue
+            ex_name_low = (ex.get("exercise_name") or "").lower()
+            if not any(k in ex_name_low for k in ["планка", "удержан", "вакуум", "статик"]):
+                continue
+            m_dur = re.search(r"(\d+)\s*(сек|секунд|с\b|минут|мин\b)", text.lower())
+            m_count = re.search(r"(\d+)\s*(подход|раз)", text.lower())
+            if m_dur:
+                dur = int(m_dur.group(1))
+                # минуты в секунды
+                if m_dur.group(2) in ("минут", "мин"):
+                    dur *= 60
+                count = int(m_count.group(1)) if m_count else 1
+                ex["sets"] = [
+                    {"set_number": i + 1, "weight_kg": None, "reps": dur, "notes": "секунды"}
+                    for i in range(count)
+                ]
+    # Аналогичный fallback если упражнений нет вообще — детектим "планка X сек"
+    if not logged_exercises:
+        t_low = text.lower().replace("ё", "е")
+        time_match = re.search(r"(планка|удержание|вакуум|статика)\s*(\d+)\s*(сек|секунд|с\b|минут|мин\b)", t_low)
+        if time_match:
+            name_low = time_match.group(1)
+            dur = int(time_match.group(2))
+            if time_match.group(3) in ("минут", "мин"):
+                dur *= 60
+            m_count = re.search(r"(\d+)\s*(подход|раз)", t_low)
+            count = int(m_count.group(1)) if m_count else 1
+            cap_name = name_low[:1].upper() + name_low[1:]
+            logged_exercises = [{
+                "exercise_name": cap_name,
+                "sets": [
+                    {"set_number": i + 1, "weight_kg": None, "reps": dur, "notes": "секунды"}
+                    for i in range(count)
+                ],
+                "notes": None,
+            }]
+
     if not logged_exercises:
         return "Я понял, что ты записываешь тренировку, но не смог уверенно выделить подходы."
 
