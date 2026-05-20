@@ -2552,14 +2552,35 @@ async def _handle_fitness_action_v2_inner(
     )
     if any(p in t_lower for p in start_session_triggers) and not _session_is_for_today:
         today = date.today().isoformat()
-        # Найти плановую тренировку на сегодня
-        planned = await get_today_planned_workout(telegram_user_id, today)
+        # Если был выбран конкретный плановый день — стартуем сессию для НЕГО,
+        # не для сегодня. Это позволяет логировать пропущенные/будущие дни вручную.
+        selected_date = None
+        try:
+            from app.modules.fitness.planned_workout_executor import _get_selected_planned_workout_context
+            from app.db import get_planned_workout_by_id
+            sel_ctx = await _get_selected_planned_workout_context(telegram_user_id)
+            if sel_ctx and sel_ctx.get("planned_workout_id"):
+                sel_data = await get_planned_workout_by_id(int(sel_ctx["planned_workout_id"]))
+                if sel_data and sel_data.get("workout"):
+                    pd = sel_data["workout"].get("planned_date")
+                    if hasattr(pd, "isoformat"):
+                        pd = pd.isoformat()
+                    if pd:
+                        selected_date = str(pd)[:10]
+        except Exception:
+            selected_date = None
+
+        target_date = selected_date or today
+        # Найти плановую тренировку на target_date
+        planned = await get_today_planned_workout(telegram_user_id, target_date)
         focus = None
         focus_label = None
         if planned:
             w = planned.get("workout") or {}
             focus = w.get("focus")
             focus_label = w.get("focus_label")
+        # Заменяем today на target_date для остальной логики этого блока
+        today = target_date
 
         # Создать пустую active_session workout
         workout_id = await save_fitness_workout_session_v2(
