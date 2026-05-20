@@ -2624,6 +2624,10 @@ async def _handle_fitness_action_v2_inner(
     if is_multi_exercise_record and not active_session:
         parsed_multi = await parse_fitness_action_v2(text, active_session=active_session, telegram_user_id=telegram_user_id, prev_context=_PREV)
         if parsed_multi.get("action") == "log_workout_sets" and parsed_multi.get("logged_exercises"):
+            # Disambiguation: спрашиваем юзера лог vs план если нет явных глагольных маркеров
+            disamb = await _maybe_ask_log_or_plan(telegram_user_id, text, parsed_multi)
+            if disamb is not None:
+                return disamb
             return await _log_workout_sets(telegram_user_id, text, parsed_multi, active_session)
 
     # ── HARD-route на "начинаю тренировку" → создаём пустую активную сессию ──
