@@ -311,7 +311,7 @@ async def cmd_wipe(update, context):
                 cnt = cnt_r.scalar_one()
                 if cnt != 0:
                     continue
-                # Узнать реальное имя sequence через pg_get_serial_sequence
+                # 1) SERIAL/BIGSERIAL → pg_get_serial_sequence + setval
                 seq_r = await s2.execute(sql_text(
                     "SELECT pg_get_serial_sequence(:t, 'id')"
                 ), {"t": table})
@@ -322,6 +322,16 @@ async def cmd_wipe(update, context):
                     ))
                     await s2.commit()
                     reset_seqs.append(f"{table} → {seq_name.split('.')[-1]}")
+                    continue
+                # 2) IDENTITY column → ALTER TABLE … ALTER COLUMN id RESTART
+                try:
+                    await s2.execute(sql_text(
+                        f"ALTER TABLE {table} ALTER COLUMN id RESTART WITH 1"
+                    ))
+                    await s2.commit()
+                    reset_seqs.append(f"{table} (IDENTITY)")
+                except Exception as e2:
+                    reset_seqs.append(f"{table}: identity err {type(e2).__name__}")
         except Exception as e:
             reset_seqs.append(f"{table}: err {type(e).__name__}")
 
