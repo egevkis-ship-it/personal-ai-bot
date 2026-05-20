@@ -1343,23 +1343,28 @@ async def _log_workout_sets(telegram_user_id: str | None, text: str, parsed: dic
     logged_exercises = _normalize_logged_exercises(parsed.get("logged_exercises"))
 
     # Fallback для временных упражнений (Планка/Удержание/Вакуум):
-    # если парсер дал имя но без подходов, и в тексте есть "X секунд N подходов" —
-    # синтезируем подходы где reps=секунды.
+    # если парсер дал имя но без подходов ИЛИ с пустыми подходами (без reps/weight),
+    # и в тексте есть "X секунд N подходов" — синтезируем подходы где reps=секунды.
     if logged_exercises:
         for ex in logged_exercises:
-            if ex.get("sets"):
-                continue
             ex_name_low = (ex.get("exercise_name") or "").lower()
             if not any(k in ex_name_low for k in ["планка", "удержан", "вакуум", "статик"]):
                 continue
+            sets_list = ex.get("sets") or []
+            # пустые подходы = нет ни веса, ни повторов
+            all_empty = all(
+                (s.get("weight_kg") is None and s.get("reps") is None)
+                for s in sets_list
+            )
+            if sets_list and not all_empty:
+                continue  # уже валидные сеты, не трогаем
             m_dur = re.search(r"(\d+)\s*(сек|секунд|с\b|минут|мин\b)", text.lower())
             m_count = re.search(r"(\d+)\s*(подход|раз)", text.lower())
             if m_dur:
                 dur = int(m_dur.group(1))
-                # минуты в секунды
                 if m_dur.group(2) in ("минут", "мин"):
                     dur *= 60
-                count = int(m_count.group(1)) if m_count else 1
+                count = int(m_count.group(1)) if m_count else max(1, len(sets_list))
                 ex["sets"] = [
                     {"set_number": i + 1, "weight_kg": None, "reps": dur, "notes": "секунды"}
                     for i in range(count)
