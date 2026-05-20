@@ -2439,6 +2439,23 @@ async def _edit_last_logged_set_reps_in_active_session(
 
 
 async def handle_router_hardening(telegram_user_id: str | None, text: str) -> str | None:
+    # ARCHIVE phrases ("что я делал/сделал/записал" + time marker) must NEVER hit
+    # planned-workout parser — those mean "show me what I actually did", not "show plan".
+    # Без этого guard'а Claude в parse_planned_workout_action классифицирует "Что я делал сегодня"
+    # как show_workout_on_date из-за похожести на "Что у меня сегодня".
+    _t_arch = (text or "").lower().replace("ё", "е")
+    _archive_verb = any(v in _t_arch for v in [
+        "я делал", "я сделал", "я записал", "я провёл", "я провел",
+        "что я тренировал", "что выполнил", "что записал",
+    ])
+    _archive_time = any(t in _t_arch for t in [
+        "сегодня", "вчера", "позавчера",
+        "на этой неделе", "на прошлой неделе", "за неделю", "за прошл",
+        "в этом месяце", "за месяц", "за период",
+    ])
+    if _archive_verb and _archive_time:
+        return None
+
     # SHORT exercise messages in an ACTIVE SESSION should go to log, never to plan.
     # "Подтягивания 10 раз" / "Брусья 3×10" / "Планка 60 секунд" — это записи в текущую сессию.
     import re as _re
