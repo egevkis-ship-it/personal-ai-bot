@@ -2769,20 +2769,32 @@ async def handle_router_hardening(telegram_user_id: str | None, text: str) -> st
         },
     )
 
-    # DISAMBIGUATION: если parser выдал create_custom_workout с упражнениями
-    # но в тексте нет явных PLAN/LOG маркеров — спрашиваем кнопками.
-    if planned_action and planned_action.get("action") == "create_custom_workout":
+    # DISAMBIGUATION: если parser выдал create_custom_workout c has_workout_details=True
+    # (значит юзер описал упражнения) но без явных PLAN/LOG маркеров — спрашиваем кнопками.
+    if (
+        planned_action
+        and planned_action.get("action") == "create_custom_workout"
+        and planned_action.get("has_workout_details")
+    ):
         from app.modules.fitness.action_v2 import (
             _has_strong_log_signal,
             _has_strong_plan_signal,
             _maybe_ask_log_or_plan,
         )
         if not _has_strong_log_signal(text) and not _has_strong_plan_signal(text):
-            wk = planned_action.get("workout") or {}
-            if wk.get("exercises"):
+            # Парсим подробности упражнений
+            from app.modules.fitness.custom_workout_builder import parse_custom_workout_details
+            tgt = planned_action.get("target_date") or _iso(_today())
+            try:
+                payload = await parse_custom_workout_details(text, target_date=tgt)
+            except Exception:
+                payload = None
+            wk = (payload or {}).get("workout") or {}
+            exes = wk.get("exercises") or []
+            if exes:
                 synth = {
                     "action": "add_custom_workout",
-                    "date": planned_action.get("target_date") or _iso(_today()),
+                    "date": tgt,
                     "workout": wk,
                 }
                 disamb = await _maybe_ask_log_or_plan(telegram_user_id, text, synth)
