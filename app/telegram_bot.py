@@ -295,29 +295,28 @@ async def cmd_wipe(update, context):
             except Exception as e:
                 deleted[table] = f"err: {type(e).__name__}"
 
-        # Сбросить ID-счётчики, если таблица пустая после очистки
-        seq_tables = [
-            "fitness_exercise_sets", "fitness_workouts",
-            "planned_exercises", "planned_workouts", "training_plans",
-            "body_measurements", "fitness_pending_decisions",
-            "fitness_goals", "workout_templates",
-            "learning_corrections",
-        ]
-        for table in seq_tables:
-            try:
-                # Проверим что таблица пустая
-                cnt_r = await s.execute(sql_text(f"SELECT COUNT(*) FROM {table}"))
+        await s.commit()
+
+    # Сбросить ID-счётчики в отдельных транзакциях (чтобы ошибка одной не валила остальные)
+    seq_tables = [
+        "fitness_exercise_sets", "fitness_workouts",
+        "planned_exercises", "planned_workouts", "training_plans",
+        "body_measurements", "fitness_pending_decisions",
+        "fitness_goals", "workout_templates",
+    ]
+    for table in seq_tables:
+        try:
+            async with get_session() as s2:
+                cnt_r = await s2.execute(sql_text(f"SELECT COUNT(*) FROM {table}"))
                 cnt = cnt_r.scalar_one()
                 if cnt == 0:
-                    # ALTER SEQUENCE … RESTART WITH 1
-                    await s.execute(sql_text(
+                    await s2.execute(sql_text(
                         f"ALTER SEQUENCE {table}_id_seq RESTART WITH 1"
                     ))
+                    await s2.commit()
                     reset_seqs.append(table)
-            except Exception:
-                pass
-
-        await s.commit()
+        except Exception:
+            pass
 
     lines = ["🧨 Полная очистка fitness-данных:"]
     for table, n in deleted.items():
