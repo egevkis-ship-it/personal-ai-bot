@@ -4940,12 +4940,33 @@ async def _edit_last_set(
     from sqlalchemy import text as sql_text
 
     async with get_session() as session:
-        # Если в правке явно указано упражнение — ищем именно его.
-        # Иначе берём последнее (или ищем по старому весу из "Не X, а Y").
         row = None
         rec = None
 
-        if exercise_name and set_number:
+        # "Не 80, а 82.5" → старый вес — НАИБОЛЕЕ ТОЧНЫЙ сигнал. Проверяем ПЕРВЫМ,
+        # до exercise_name, т.к. AI мог подтянуть exercise_name из контекста (последнее упр.)
+        # и он будет неправильным. Явное "не 80" всегда важнее AI-угадки упражнения.
+        _m_old = re.search(r'\bне\s+(\d+(?:[.,]\d+)?)\b', (text or '').lower())
+        _old_w = float(_m_old.group(1).replace(',', '.')) if (_m_old and field == 'weight_kg') else None
+
+        if _old_w is not None:
+            _r1 = await session.execute(sql_text("""
+                SELECT id, exercise_name, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid AND weight_kg = :w
+                ORDER BY id DESC LIMIT 1
+            """), {"wid": workout_id, "w": _old_w})
+            rec = _r1.mappings().first()
+            if rec is None:
+                # Точный вес не нашли — fallback на последний подход
+                _r2 = await session.execute(sql_text("""
+                    SELECT id, exercise_name, weight_kg, reps
+                    FROM fitness_exercise_sets
+                    WHERE workout_id = :wid
+                    ORDER BY id DESC LIMIT 1
+                """), {"wid": workout_id})
+                rec = _r2.mappings().first()
+        elif exercise_name and set_number:
             row = await session.execute(sql_text("""
                 SELECT id, exercise_name, weight_kg, reps
                 FROM fitness_exercise_sets
@@ -4970,34 +4991,12 @@ async def _edit_last_set(
                 ORDER BY id DESC LIMIT 1
             """), {"wid": workout_id, "sn": int(set_number)})
         else:
-            # "Не 80, а 82.5" → ищем подход с weight_kg=80, не просто последний.
-            # Это исправляет правильное упражнение когда в сессии несколько разных весов.
-            _m_old = re.search(r'\bне\s+(\d+(?:[.,]\d+)?)\b', (text or '').lower())
-            _old_w = float(_m_old.group(1).replace(',', '.')) if (_m_old and field == 'weight_kg') else None
-            if _old_w is not None:
-                _r1 = await session.execute(sql_text("""
-                    SELECT id, exercise_name, weight_kg, reps
-                    FROM fitness_exercise_sets
-                    WHERE workout_id = :wid AND weight_kg = :w
-                    ORDER BY id DESC LIMIT 1
-                """), {"wid": workout_id, "w": _old_w})
-                rec = _r1.mappings().first()
-                if rec is None:
-                    # Точный вес не нашли — fallback на последний подход
-                    _r2 = await session.execute(sql_text("""
-                        SELECT id, exercise_name, weight_kg, reps
-                        FROM fitness_exercise_sets
-                        WHERE workout_id = :wid
-                        ORDER BY id DESC LIMIT 1
-                    """), {"wid": workout_id})
-                    rec = _r2.mappings().first()
-            else:
-                row = await session.execute(sql_text("""
-                    SELECT id, exercise_name, weight_kg, reps
-                    FROM fitness_exercise_sets
-                    WHERE workout_id = :wid
-                    ORDER BY id DESC LIMIT 1
-                """), {"wid": workout_id})
+            row = await session.execute(sql_text("""
+                SELECT id, exercise_name, weight_kg, reps
+                FROM fitness_exercise_sets
+                WHERE workout_id = :wid
+                ORDER BY id DESC LIMIT 1
+            """), {"wid": workout_id})
 
         # For branches that set row (not rec directly)
         if row is not None:
