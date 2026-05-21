@@ -1695,6 +1695,11 @@ async def _log_exercise_sets_to_active_session(
         flags=re.IGNORECASE,
     ).strip()
 
+    # Save original (pre-normalization) so we can pass it to _parse_flexible_sets_text
+    # BEFORE _normalize_spoken_numbers strips " кг" (word-boundary match).
+    # Pattern A "4x12 10 кг" and Pattern B "60 кг 4x15" need кг intact to detect structure.
+    raw_original = raw
+
     # Normalize spoken numbers in the set part while keeping exercise words intact.
     # Example: "тягу гантелей ... 35 килограмм на восемь" -> "... 35 на 8".
     raw = _normalize_spoken_numbers(raw)
@@ -1712,7 +1717,15 @@ async def _log_exercise_sets_to_active_session(
         return None
 
     exercise_part = raw[:first_number.start()].strip(" :—-")
-    sets_text = raw[first_number.start():].strip()
+
+    # Use the ORIGINAL (pre-normalize) text for sets_text so that кг markers are preserved.
+    # _normalize_spoken_numbers strips " кг" (via \b match), which breaks Pattern A/B detection.
+    # For attached кг like "50кг", \b didn't match so they survive normalization either way.
+    orig_first_number = re.search(r"\d+(?:[.,]\d+)?", raw_original)
+    if orig_first_number:
+        sets_text = raw_original[orig_first_number.start():].strip()
+    else:
+        sets_text = raw[first_number.start():].strip()
 
     if not exercise_part or not sets_text:
         return None
@@ -1892,6 +1905,10 @@ def _normalize_spoken_numbers(text: str | None) -> str:
 
     for word, value in words.items():
         t = re.sub(rf"\b{word}\b", value, t)
+
+    # Compound numbers: "30 5" → "35", "20 5" → "25", "70 5" → "75", etc.
+    # Happens after single-word replacement: "тридцать пять" → "30 5" → "35"
+    t = re.sub(r"\b(10|20|30|40|50|60|70|80|90)\s+([1-9])\b", lambda m: str(int(m.group(1)) + int(m.group(2))), t)
 
     t = re.sub(r"\b(кг|килограмм|килограмма|килограммов|раз|раза|повтор|повтора|повторов)\b", " ", t)
     t = re.sub(r"\b(еще|следующий)\b", " ", t)

@@ -1211,7 +1211,7 @@ async def get_measurements_period(
               AND measurement_date >= CURRENT_DATE - (CAST(:days AS TEXT) || ' days')::interval
             ORDER BY measurement_date ASC
             """),
-            {"uid": telegram_user_id, "days": days},
+            {"uid": telegram_user_id, "days": str(days)},
         )
         return [dict(r) for r in result.mappings().all()]
 
@@ -1424,7 +1424,7 @@ async def shift_planned_workouts(
               AND status = 'planned'
             RETURNING id
             """),
-            {"uid": telegram_user_id, "from_d": from_date, "days": days},
+            {"uid": telegram_user_id, "from_d": from_date, "days": str(days)},
         )
         n = len(result.fetchall())
         await session.commit()
