@@ -1508,6 +1508,10 @@ def _looks_like_exercise_sets_log(text: str | None) -> bool:
     if re.search(r"[а-яa-z]{3,}.*\d+(?:\s+\d+){1,}", normalized, re.IGNORECASE):
         return True
 
+    # Time-based / cardio: "Велосипед 10 минут", "Планка 60 секунд", "Бег 20 мин"
+    if re.search(r"[а-яa-z]{3,}.*\d+\s*(?:мин|минут|минуты|минуту|сек|секунд|секунды|секунду)\b", t, re.IGNORECASE):
+        return True
+
     return False
 
 
@@ -1582,9 +1586,38 @@ def _parse_flexible_sets_text(sets_text: str):
     raw = raw.replace("ё", "е")
     raw = raw.replace("×", "x").replace("х", "x")
 
+    # ── Pre-normalization: detect patterns where кг explicitly marks the weight ──
+    # Must be checked BEFORE stripping кг, otherwise these patterns are ambiguous.
+    _kg = r"(?:кг|килограмм\w*)"
+
+    # Pattern A: "NxM Wкг" — sets×reps followed by weight
+    # e.g. "4x12 10 кг", "3x8 70кг", "5x15 20 кг"
+    m_a = re.search(
+        rf"(\d+)\s*x\s*(\d+)[\s,]+(\d+(?:[.,]\d+)?)\s*{_kg}",
+        raw, re.IGNORECASE,
+    )
+    if m_a:
+        sets  = int(m_a.group(1))
+        reps  = int(m_a.group(2))
+        weight = float(m_a.group(3).replace(",", "."))
+        return [(weight, reps)] * sets
+
+    # Pattern B: "Wкг NxM" — weight followed by sets×reps
+    # e.g. "50кг 4x12", "70 кг 3x8", "10кг 5x15"
+    m_b = re.search(
+        rf"(\d+(?:[.,]\d+)?)\s*{_kg}[\s,]*(\d+)\s*x\s*(\d+)",
+        raw, re.IGNORECASE,
+    )
+    if m_b:
+        weight = float(m_b.group(1).replace(",", "."))
+        sets   = int(m_b.group(2))
+        reps   = int(m_b.group(3))
+        return [(weight, reps)] * sets
+
     # Normalize spoken units.
     raw = re.sub(r"\b(кг|килограмм|килограмма|килограммов)\b", " ", raw)
     raw = re.sub(r"\b(повторов|повтора|повтор|раза|раз)\b", " ", raw)
+    raw = re.sub(r"\b(минут|минуты|минуту|мин|секунд|секунды|секунду|сек)\b", " ", raw)
     raw = " ".join(raw.split())
 
     # 0) Count-by-reps: "70 4 по 14" = 4 sets of 70x14.
@@ -1709,7 +1742,17 @@ async def _log_exercise_sets_to_active_session(
 
     exercise_name = _normalize_logged_exercise_name(exercise_part)
 
-    parsed_sets = _parse_flexible_sets_text(sets_text)
+    # Detect time-based format before parsing (units stripped inside _parse_flexible_sets_text)
+    _is_time_min = bool(re.search(r"\b\d+\s*(?:мин|минут\w*)\b", sets_text, re.IGNORECASE))
+    _is_time_sec = bool(re.search(r"\b\d+\s*(?:сек|секунд\w*)\b", sets_text, re.IGNORECASE))
+
+    # For time-based exercises (Велосипед 10 минут, Планка 60 сек) extract duration directly
+    # because _parse_flexible_sets_text has a ≤40 threshold for bodyweight that would drop 60+
+    if _is_time_min or _is_time_sec:
+        m_time = re.search(r"(\d+(?:[.,]\d+)?)", sets_text)
+        parsed_sets = [(None, int(float(m_time.group(1).replace(",", "."))))] if m_time else []
+    else:
+        parsed_sets = _parse_flexible_sets_text(sets_text)
 
     if not parsed_sets:
         return None
@@ -1773,7 +1816,12 @@ async def _log_exercise_sets_to_active_session(
 
     for idx, (weight, reps) in enumerate(parsed_sets, start=start_number + 1):
         if weight is None:
-            lines.append(f"{idx}) {reps} повторов")
+            if _is_time_min:
+                lines.append(f"{idx}) {reps} мин")
+            elif _is_time_sec:
+                lines.append(f"{idx}) {reps} сек")
+            else:
+                lines.append(f"{idx}) {reps} повторов")
         else:
             weight_text = int(weight) if float(weight).is_integer() else weight
             lines.append(f"{idx}) {weight_text} кг × {reps}")
