@@ -2858,6 +2858,40 @@ async def _handle_fitness_action_v2_inner(
             last = await get_last_workout(telegram_user_id)
             return format_last_workout(last)
 
+    # ── FAST-PATH: показ текущей сессии ────────────────────────────────────
+    # "Покажи сессию", "Что я уже записал", "Текущие подходы" и т.п.
+    # Это нужно обработать ДО router_hardening, потому что active_session уже есть.
+    if active_session and active_session.get("workout_id"):
+        _show_session_phrases = [
+            "покажи сессию", "покажи текущую", "покажи что записал",
+            "что уже записал", "что я записал", "что в сессии",
+            "сколько записал", "что у меня в сессии", "покажи тренировку",
+            "что записано", "итог сессии", "текущие подходы",
+            "покажи текущую сессию", "покажи мне сессию",
+        ]
+        if any(p in t_lower for p in _show_session_phrases):
+            session_display = await _format_active_session_contents(telegram_user_id, active_session)
+            return session_display
+
+    # ── FAST-PATH B2: "Поставь на [день]" → add_custom_workout ─────────────
+    # Обходим router_hardening который перехватывает "поставь на..." через
+    # parse_workout_edit_action и возвращает "плановая тренировка не найдена".
+    _is_postavь = bool(re.search(
+        r"\bпостав[ьлю]\s+на\s+"
+        r"(сегодня|завтра|послезавтра"
+        r"|пн|вт|ср|чт|пт|сб|вс"
+        r"|понедельник|вторник|сред\w*|четверг|пятниц\w*|суббот\w*|воскрес\w*)\b",
+        t_lower,
+    ))
+    if _is_postavь:
+        parsed_b2 = await parse_fitness_action_v2(
+            text, active_session=active_session,
+            telegram_user_id=telegram_user_id, prev_context=_PREV,
+        )
+        parsed_b2["action"] = "add_custom_workout"
+        parsed_b2.setdefault("confidence", 0.9)
+        return await _add_custom_workout(telegram_user_id, text, parsed_b2)
+
     # ── Router hardening (handles set logging, confirmation flows, etc.) ───────
     hardening_reply = await handle_router_hardening(telegram_user_id, text)
     if hardening_reply is not None:
@@ -3117,8 +3151,13 @@ async def _handle_fitness_action_v2_inner(
     if action == "quick_stats":
         return await _quick_stats(telegram_user_id)
 
+    if action == "show_current_session":
+        if active_session and active_session.get("workout_id"):
+            return await _format_active_session_contents(telegram_user_id, active_session)
+        return "Активная сессия не найдена."
+
     if action == "edit_last_set":
-        return await _edit_last_set(telegram_user_id, parsed, active_session)
+        return await _edit_last_set(telegram_user_id, parsed, active_session, text=text)
 
     # Травмы и ограничения отключены (add_constraint / list_constraints / resolve_constraint)
 
@@ -4832,10 +4871,50 @@ async def _quick_stats(telegram_user_id: str | None) -> str:
     return "\n".join(lines)
 
 
+async def _format_active_session_contents(
+    telegram_user_id: str | None,
+    active_session: dict,
+) -> str:
+    """Display all recorded sets in the current active session."""
+    workout_id = active_session.get("workout_id")
+    if not workout_id:
+        return "📋 Активная сессия идёт, но данных ещё нет."
+
+    wdata = await get_last_workout(telegram_user_id)
+    if not wdata or str(wdata["workout"].get("id")) != str(workout_id):
+        return "📋 Сессия активна, подходов ещё не записано."
+
+    sets = wdata.get("sets") or []
+    if not sets:
+        return "📋 Сессия активна, подходов ещё не записано."
+
+    from collections import defaultdict as _dd
+    by_ex = _dd(list)
+    for s in sets:
+        by_ex[s["exercise_name"]].append(s)
+    lines = [f"📋 Текущая сессия #{workout_id}:"]
+    for ex, ex_sets in by_ex.items():
+        parts = []
+        for s in ex_sets:
+            w = s.get("weight_kg")
+            r = s.get("reps")
+            n = s.get("notes") or ""
+            if w:
+                parts.append(f"{w}×{r}" if r else f"{w}кг")
+            elif r:
+                parts.append(f"{r} повт.")
+            elif n:
+                parts.append(n[:20])
+        lines.append(f"  • {ex}: {', '.join(parts)}")
+    lines.append(f"\nПодходов: {len(sets)}")
+    return "\n".join(lines)
+
+
 async def _edit_last_set(
     telegram_user_id: str | None,
     parsed: dict,
     active_session: dict | None,
+    text: str = "",
 ) -> str:
     """Edit weight/reps of the last (or specific) set in the active workout."""
     if not active_session or not active_session.get("workout_id"):
