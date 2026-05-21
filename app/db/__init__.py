@@ -932,6 +932,13 @@ async def add_fitness_goal(
     target_deadline: str | None = None,
     notes: str | None = None,
 ) -> int:
+    from datetime import date as _date
+    td_val = None
+    if target_deadline:
+        try:
+            td_val = _date.fromisoformat(str(target_deadline)[:10])
+        except Exception:
+            td_val = None
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
@@ -942,7 +949,7 @@ async def add_fitness_goal(
             """),
             {
                 "uid": telegram_user_id, "gt": goal_type, "te": target_exercise,
-                "tv": target_value, "tu": target_unit, "td": target_deadline, "n": notes,
+                "tv": target_value, "tu": target_unit, "td": td_val, "n": notes,
             },
         )
         gid = result.scalar()
@@ -1198,10 +1205,10 @@ async def get_measurements_period(
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
-            SELECT measurement_date, weight_kg, waist_cm, chest_cm, hips_cm, arm_cm, thigh_cm, neck_cm, bodyfat_pct
+            SELECT measurement_date, weight_kg, waist_cm, chest_cm, hips_cm, arm_cm, thigh_cm, neck_cm, calf_cm, belly_cm
             FROM body_measurements
             WHERE telegram_user_id = :uid
-              AND measurement_date >= CURRENT_DATE - (:days || ' days')::interval
+              AND measurement_date >= CURRENT_DATE - (CAST(:days AS TEXT) || ' days')::interval
             ORDER BY measurement_date ASC
             """),
             {"uid": telegram_user_id, "days": days},
@@ -1316,7 +1323,7 @@ async def find_workouts_by_exercise(
             JOIN fitness_workouts w ON w.id = s.workout_id
             WHERE w.telegram_user_id = :uid
               AND lower(s.exercise_name) LIKE lower(:pat)
-              AND (:min_w IS NULL OR s.weight_kg >= :min_w)
+              AND (:min_w IS NULL OR s.weight_kg >= CAST(:min_w AS NUMERIC))
             ORDER BY w.id DESC, s.id ASC
             LIMIT :lim
             """),
@@ -1411,7 +1418,7 @@ async def shift_planned_workouts(
         result = await session.execute(
             text("""
             UPDATE planned_workouts
-            SET planned_date = planned_date + (:days || ' days')::interval
+            SET planned_date = planned_date + (CAST(:days AS TEXT) || ' days')::interval
             WHERE telegram_user_id = :uid
               AND planned_date >= :from_d
               AND status = 'planned'

@@ -1740,6 +1740,14 @@ async def _log_exercise_sets_to_active_session(
         if p in ep_low:
             return None
 
+    # B3: "В [день недели] фокус: упражнение" — это планирование, НЕ запись подхода.
+    # Например "В четверг руки: бицепс" не должно попасть в quick logger.
+    if re.search(
+        r"^(в|во)\s+(пн|вт|ср|чт|пт|сб|вс|понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье|понедел|вторник|среда|пятниц|суббот|воскрес)\b",
+        ep_low,
+    ):
+        return None
+
     exercise_name = _normalize_logged_exercise_name(exercise_part)
 
     # Detect time-based format before parsing (units stripped inside _parse_flexible_sets_text)

@@ -20,7 +20,6 @@ from app.db import (
     delete_last_fitness_set_v2,
     update_last_fitness_set_v2,
     get_completed_workouts_in_period,
-    get_personal_records,
     get_last_workout,
     get_last_measurement,
 )
@@ -37,14 +36,12 @@ from app.modules.fitness.self_learning import (
 )
 from app.db import (
     save_last_interaction, get_last_interaction,
-    add_training_constraint, list_active_constraints, resolve_constraint,
     skip_planned_workout, shift_planned_workouts, cancel_plan_period,
     delete_last_n_sets, delete_last_exercise_from_workout, delete_workout,
     rename_exercise_in_workout,
     save_workout_template, list_workout_templates, get_workout_template_by_name,
     mark_template_used,
     add_fitness_goal, list_active_goals, mark_goal_achieved,
-    log_pain, get_pain_journal,
     bulk_update_planned_exercises, find_workouts_by_exercise,
     copy_planned_period,
     schedule_reminder, list_pending_reminders, cancel_reminder,
@@ -58,7 +55,6 @@ from app.modules.fitness.formatter import (
     format_period_plan,
     format_human_date,
     format_completed_period,
-    format_personal_records,
     format_last_workout,
     format_last_measurement,
     format_number,
@@ -730,21 +726,11 @@ async def parse_fitness_action_v2(
     next_month_start, next_month_end = next_month_bounds()
 
     corrections_block = ""
-    constraints_block = ""
     if telegram_user_id:
         try:
             corrections_block = await build_corrections_context(telegram_user_id)
         except Exception:
             corrections_block = ""
-        try:
-            active_constraints = await list_active_constraints(telegram_user_id)
-            if active_constraints:
-                lines = ["═══ Активные травмы/ограничения (учитывай при планировании!) ═══"]
-                for c in active_constraints:
-                    lines.append(f"- #{c['id']} {c.get('body_part') or '?'}: {c.get('note') or 'нет деталей'}")
-                constraints_block = "\n".join(lines) + "\n"
-        except Exception:
-            constraints_block = ""
 
     # Previous conversation context — критично для разрешения "её", "оттуда", "там"
     prev_block = ""
@@ -775,7 +761,6 @@ async def parse_fitness_action_v2(
 - Следующий месяц: {next_month_start} — {next_month_end}
 - Активная сессия: {json.dumps(active_session or {}, ensure_ascii=False)}
 {prev_block}
-{constraints_block}
 {corrections_block}
 
 ═══ JSON-СХЕМА ═══
@@ -908,6 +893,12 @@ async def parse_fitness_action_v2(
   с workout.exercises и parsed.date вычисли = ближайшая такая дата
   ВАЖНО: "Поставь на [день недели] X: Y" — это ДОБАВЛЕНИЕ нового плана на тот день,
   НЕ перемещение и НЕ замена сегодняшней.
+- ⚠️ "Поставь на [день] упр1, упр2" → add_custom_workout (создаёт новую тренировку на тот день)
+  - Это НЕ edit_plan, НЕ move_workout
+  - Если на тот день плана ещё нет — создаём новый
+  - Если уже есть — заменяем (replace) или уточняем у пользователя
+  - Примеры: "Поставь на среду жим и присед", "Поставь на четверг: грудь — жим, разводка"
+    → add_custom_workout с workout.exercises и date = ближайший указанный день недели
 
 4. ЗАПИСЬ ФАКТА (log_workout_sets):
 КЛЮЧЕВОЕ — распознавай ВСЕ варианты:
@@ -998,6 +989,12 @@ async def parse_fitness_action_v2(
   "хочу убрать оттуда", "оттуда убери", "из неё убери", "там вместо X сделаем Y"
 - "поменяй трицепс канат на трицепс прямым грифом" — replace
 - "убери трицепс из пятничной" — remove
+- ⚠️ ДОБАВЛЕНИЕ УПРАЖНЕНИЯ В СУЩЕСТВУЮЩИЙ ПЛАН — это edit_plan (operation=add), НЕ add_custom_workout:
+  - "добавь в план жим" → edit_plan, operation=add
+  - "добавь X в план" → edit_plan, operation=add (НЕ add_custom_workout!)
+  - "добавь в план X 3×8" → edit_plan, operation=add, с параметрами подходов
+  - "добавь в сегодняшнюю X", "вставь X в план на [день]" → edit_plan, operation=add
+  Отличие от add_custom_workout: здесь упражнение ДОБАВЛЯЕТСЯ к уже существующей тренировке в плане.
 - ВАЖНО: если в тексте есть глагол "поменять/изменить/убрать/добавить/заменить" в адрес тренировки —
   это edit_plan, даже если дата только что обсуждалась (используй prev_context).
   ВСЕГДА предпочитай edit_plan, а не clarify, для таких глаголов.
