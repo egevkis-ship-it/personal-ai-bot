@@ -2000,6 +2000,45 @@ async def try_handle_active_workout_message(telegram_user_id: str | None, text: 
             "Напиши явно: “да, удали текущую тренировку” или “нет, оставь”."
         )
 
+    # Запрос текущего состояния сессии ("покажи что записал", "покажи сессию" и т.п.)
+    _show_session_phrases = [
+        "покажи сессию", "покажи текущую", "покажи что записал",
+        "что уже записал", "что я записал", "что в сессии",
+        "сколько записал", "что у меня в сессии", "покажи тренировку",
+        "что записано", "итог сессии", "текущие подходы",
+    ]
+    if any(p in normalized for p in _show_session_phrases):
+        workout_id = active_session.get("workout_id")
+        if workout_id:
+            from app.db import get_last_workout
+            wdata = await get_last_workout(telegram_user_id)
+            if wdata and str(wdata["workout"].get("id")) == str(workout_id):
+                sets = wdata.get("sets") or []
+                if not sets:
+                    return "📋 Сессия активна, подходов ещё не записано."
+                # Группируем по упражнению
+                from collections import defaultdict as _dd
+                by_ex = _dd(list)
+                for s in sets:
+                    by_ex[s["exercise_name"]].append(s)
+                lines = [f"📋 Текущая сессия #{workout_id}:"]
+                for ex, ex_sets in by_ex.items():
+                    parts = []
+                    for s in ex_sets:
+                        w = s.get("weight_kg")
+                        r = s.get("reps")
+                        n = s.get("notes") or ""
+                        if w:
+                            parts.append(f"{w}×{r}" if r else f"{w}кг")
+                        elif r:
+                            parts.append(f"{r} повт.")
+                        elif n:
+                            parts.append(n[:20])
+                    lines.append(f"  • {ex}: {', '.join(parts)}")
+                lines.append(f"\nПодходов: {len(sets)}")
+                return "\n".join(lines)
+        return "📋 Активная сессия идёт, но данных ещё нет."
+
     # If user sends a short set message, continue workout regardless of status.
     if _looks_like_set_message(text):
         parsed = _parse_set_from_short_text(text, active_session)
@@ -2862,6 +2901,19 @@ async def _handle_fitness_action_v2_inner(
                 parsed["date"] = (date.today() - _td(days=1)).isoformat()
             confidence = 0.95
             break
+
+    # HARD-OVERRIDE: "Поставь на [день] [фокус]: [упражнения]" — создание нового плана,
+    # никогда не правка существующего. AI путает "поставь" с edit_plan.
+    if action in ("edit_plan", "move_workout", "replace_today_workout") and re.search(
+        r"\bпостав[ьлю]\s+на\s+"
+        r"(сегодня|завтра|послезавтра"
+        r"|пн|вт|ср|чт|пт|сб|вс"
+        r"|понедельник|вторник|сред\w*|четверг|пятниц\w*|суббот\w*|воскрес\w*)\b",
+        t_lc,
+    ):
+        action = "add_custom_workout"
+        parsed["action"] = "add_custom_workout"
+        confidence = 0.9
 
     if not action or action in ("unknown", "clarify") or confidence < 0.55:
         # Если текст явно НЕ про фитнес и нет активной сессии — отвечаем как общий AI
@@ -4810,7 +4862,10 @@ async def _edit_last_set(
 
     async with get_session() as session:
         # Если в правке явно указано упражнение — ищем именно его.
-        # Иначе берём последнее.
+        # Иначе берём последнее (или ищем по старому весу из "Не X, а Y").
+        row = None
+        rec = None
+
         if exercise_name and set_number:
             row = await session.execute(sql_text("""
                 SELECT id, exercise_name, weight_kg, reps
@@ -4836,13 +4891,38 @@ async def _edit_last_set(
                 ORDER BY id DESC LIMIT 1
             """), {"wid": workout_id, "sn": int(set_number)})
         else:
-            row = await session.execute(sql_text("""
-                SELECT id, exercise_name, weight_kg, reps
-                FROM fitness_exercise_sets
-                WHERE workout_id = :wid
-                ORDER BY id DESC LIMIT 1
-            """), {"wid": workout_id})
-        rec = row.mappings().first()
+            # "Не 80, а 82.5" → ищем подход с weight_kg=80, не просто последний.
+            # Это исправляет правильное упражнение когда в сессии несколько разных весов.
+            _m_old = re.search(r'\bне\s+(\d+(?:[.,]\d+)?)\b', (text or '').lower())
+            _old_w = float(_m_old.group(1).replace(',', '.')) if (_m_old and field == 'weight_kg') else None
+            if _old_w is not None:
+                _r1 = await session.execute(sql_text("""
+                    SELECT id, exercise_name, weight_kg, reps
+                    FROM fitness_exercise_sets
+                    WHERE workout_id = :wid AND weight_kg = :w
+                    ORDER BY id DESC LIMIT 1
+                """), {"wid": workout_id, "w": _old_w})
+                rec = _r1.mappings().first()
+                if rec is None:
+                    # Точный вес не нашли — fallback на последний подход
+                    _r2 = await session.execute(sql_text("""
+                        SELECT id, exercise_name, weight_kg, reps
+                        FROM fitness_exercise_sets
+                        WHERE workout_id = :wid
+                        ORDER BY id DESC LIMIT 1
+                    """), {"wid": workout_id})
+                    rec = _r2.mappings().first()
+            else:
+                row = await session.execute(sql_text("""
+                    SELECT id, exercise_name, weight_kg, reps
+                    FROM fitness_exercise_sets
+                    WHERE workout_id = :wid
+                    ORDER BY id DESC LIMIT 1
+                """), {"wid": workout_id})
+
+        # For branches that set row (not rec directly)
+        if row is not None:
+            rec = row.mappings().first()
         if not rec:
             return "Не нашёл подход для правки."
 
