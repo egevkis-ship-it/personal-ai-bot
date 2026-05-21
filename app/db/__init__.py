@@ -1392,6 +1392,8 @@ async def skip_planned_workout(
     reason: str | None = None,
 ) -> int:
     """Mark a planned workout on a specific date as skipped."""
+    from datetime import date as _date
+    d_obj = _date.fromisoformat(planned_date) if isinstance(planned_date, str) else planned_date
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
@@ -1401,7 +1403,7 @@ async def skip_planned_workout(
             WHERE telegram_user_id = :uid AND planned_date = :d AND status = 'planned'
             RETURNING id
             """),
-            {"uid": telegram_user_id, "d": planned_date, "reason": reason},
+            {"uid": telegram_user_id, "d": d_obj, "reason": reason},
         )
         ids = [r[0] for r in result.fetchall()]
         await session.commit()
@@ -1414,6 +1416,12 @@ async def shift_planned_workouts(
     days: int,
 ) -> int:
     """Shift all planned workouts from `from_date` onwards by `days` days."""
+    # asyncpg requires a Python date object for DATE comparison, not a string
+    from datetime import date as _date
+    if isinstance(from_date, str):
+        from_date_obj = _date.fromisoformat(from_date)
+    else:
+        from_date_obj = from_date
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
@@ -1424,7 +1432,7 @@ async def shift_planned_workouts(
               AND status = 'planned'
             RETURNING id
             """),
-            {"uid": telegram_user_id, "from_d": from_date, "days": str(days)},
+            {"uid": telegram_user_id, "from_d": from_date_obj, "days": str(days)},
         )
         n = len(result.fetchall())
         await session.commit()
@@ -1437,6 +1445,9 @@ async def cancel_plan_period(
     end_date: str,
 ) -> int:
     """Mark planned workouts in [start, end] as cancelled."""
+    from datetime import date as _date
+    s_obj = _date.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+    e_obj = _date.fromisoformat(end_date) if isinstance(end_date, str) else end_date
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
@@ -1447,7 +1458,7 @@ async def cancel_plan_period(
               AND status = 'planned'
             RETURNING id
             """),
-            {"uid": telegram_user_id, "s": start_date, "e": end_date},
+            {"uid": telegram_user_id, "s": s_obj, "e": e_obj},
         )
         n = len(result.fetchall())
         await session.commit()
