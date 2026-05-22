@@ -3,22 +3,14 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     telegram_bot_token: str
-    openai_api_key: str
     anthropic_api_key: str
-    allowed_telegram_user_id: str | None = None
+    openai_api_key: str  # for Whisper voice transcription
 
     database_url: str
     redis_url: str
 
+    allowed_telegram_user_id: str | None = None
     bot_env: str = "production"
-
-    github_repo: str | None = None
-    github_token: str | None = None
-
-    coolify_url: str | None = None
-    coolify_api_token: str | None = None
-    coolify_service_id: str | None = None
-    coolify_deploy_webhook: str | None = None
 
     class Config:
         env_file = ".env"

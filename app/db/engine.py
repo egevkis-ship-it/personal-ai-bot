@@ -20,6 +20,11 @@ async def get_session() -> AsyncSession:
             raise
 
 
+async def init_db() -> None:
+    """Warm up the connection pool."""
+    await db_healthcheck()
+
+
 async def db_healthcheck() -> bool:
     try:
         async with get_session() as session:
