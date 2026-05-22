@@ -73,8 +73,10 @@ CREATE INDEX IF NOT EXISTS idx_es_name      ON exercise_sets(workout_id, exercis
 
 async def run_migrations() -> None:
     from sqlalchemy import text
+    statements = [s.strip() for s in _MIGRATE_SQL.split(";") if s.strip()]
     async with engine.begin() as conn:
-        await conn.execute(text(_MIGRATE_SQL))
+        for stmt in statements:
+            await conn.execute(text(stmt))
     log.info("Migrations OK")
 
 
