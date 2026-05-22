@@ -166,41 +166,59 @@ async def handle_plan_paste(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data == "plan_load:confirm", PlanStates.confirm_parsed)
+@router.callback_query(F.data == "plan_load:confirm")
 async def cb_confirm_parsed(cb: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    days_data: list[dict] = data.get("parsed_days", [])
-    uid = str(cb.from_user.id)
-
-    # Assign dates
-    from app.bot.services.ai_parser import PlannedDay, PlannedExercise
-    days = [
-        PlannedDay(
-            day_label=d["day_label"],
-            focus_label=d.get("focus_label"),
-            exercises=[],
-        )
-        for d in days_data
-    ]
-    assignments = _assign_dates(days)
-
-    saved = 0
-    for (day, assigned_date), day_dict in zip(assignments, days_data):
-        await create_planned_workout(
-            user_id=uid,
-            planned_date=assigned_date,
-            focus_label=day_dict.get("focus_label"),
-            exercises=day_dict.get("exercises", []),
-        )
-        saved += 1
-
-    await state.clear()
-    await cb.message.edit_reply_markup(reply_markup=None)
-    await cb.message.answer(
-        f"✅ План сохранён! {saved} дней добавлено в расписание.",
-        reply_markup=plan_menu(),
-    )
+    # Answer immediately so Telegram stops showing spinner
     await cb.answer()
+
+    try:
+        data = await state.get_data()
+        days_data: list[dict] = data.get("parsed_days", [])
+
+        if not days_data:
+            await cb.message.answer(
+                "❌ Данные плана потеряны (сессия устарела). Загрузи план заново.",
+                reply_markup=plan_menu(),
+            )
+            await state.clear()
+            return
+
+        uid = str(cb.from_user.id)
+
+        from app.bot.services.ai_parser import PlannedDay
+        days = [
+            PlannedDay(
+                day_label=d["day_label"],
+                focus_label=d.get("focus_label"),
+                exercises=[],
+            )
+            for d in days_data
+        ]
+        assignments = _assign_dates(days)
+
+        saved = 0
+        for (day, assigned_date), day_dict in zip(assignments, days_data):
+            await create_planned_workout(
+                user_id=uid,
+                planned_date=assigned_date,
+                focus_label=day_dict.get("focus_label"),
+                exercises=day_dict.get("exercises", []),
+            )
+            saved += 1
+
+        await state.clear()
+        await cb.message.answer(
+            f"✅ План сохранён! {saved} дней добавлено в расписание.",
+            reply_markup=plan_menu(),
+        )
+
+    except Exception as e:
+        log.exception("cb_confirm_parsed error")
+        await cb.message.answer(
+            f"❌ Ошибка при сохранении: {e}",
+            reply_markup=plan_menu(),
+        )
+        await state.clear()
 
 
 @router.callback_query(F.data == "plan_load:remap", PlanStates.confirm_parsed)
