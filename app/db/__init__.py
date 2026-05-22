@@ -26,7 +26,7 @@ async def create_planned_workout(
         r = await s.execute(
             text("""
                 INSERT INTO planned_workouts (user_id, planned_date, focus_label, exercises)
-                VALUES (:uid, :d, :focus, :exs::jsonb)
+                VALUES (:uid, :d, :focus, CAST(:exs AS jsonb))
                 RETURNING id
             """),
             {"uid": user_id, "d": d, "focus": focus_label, "exs": json.dumps(exercises, ensure_ascii=False)},
@@ -79,7 +79,7 @@ async def update_planned_workout(
     if focus_label is not None:
         parts.append("focus_label = :focus"); params["focus"] = focus_label
     if exercises is not None:
-        parts.append("exercises = :exs::jsonb")
+        parts.append("exercises = CAST(:exs AS jsonb)")
         params["exs"] = json.dumps(exercises, ensure_ascii=False)
     if status is not None:
         parts.append("status = :status"); params["status"] = status

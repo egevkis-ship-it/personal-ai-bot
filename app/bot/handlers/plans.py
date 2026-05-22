@@ -214,8 +214,10 @@ async def cb_confirm_parsed(cb: CallbackQuery, state: FSMContext) -> None:
 
     except Exception as e:
         log.exception("cb_confirm_parsed error")
+        import html as _html
         await cb.message.answer(
-            f"❌ Ошибка при сохранении: {e}",
+            f"❌ Ошибка при сохранении:\n<code>{_html.escape(str(e))[:400]}</code>",
+            parse_mode="HTML",
             reply_markup=plan_menu(),
         )
         await state.clear()
