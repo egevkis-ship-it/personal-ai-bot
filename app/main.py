@@ -25,6 +25,22 @@ log = logging.getLogger(__name__)
 
 
 _MIGRATE_SQL = """
+DROP TABLE IF EXISTS fitness_exercise_sets CASCADE;
+DROP TABLE IF EXISTS fitness_workouts CASCADE;
+DROP TABLE IF EXISTS planned_exercises CASCADE;
+DROP TABLE IF EXISTS planned_workouts CASCADE;
+DROP TABLE IF EXISTS training_plans CASCADE;
+DROP TABLE IF EXISTS body_measurements CASCADE;
+DROP TABLE IF EXISTS fitness_pending_decisions CASCADE;
+DROP TABLE IF EXISTS fitness_goals CASCADE;
+DROP TABLE IF EXISTS workout_templates CASCADE;
+DROP TABLE IF EXISTS last_interaction CASCADE;
+DROP TABLE IF EXISTS learning_corrections CASCADE;
+DROP TABLE IF EXISTS user_preferences CASCADE;
+DROP TABLE IF EXISTS exercise_normalization_cache CASCADE;
+DROP TABLE IF EXISTS workouts CASCADE;
+DROP TABLE IF EXISTS exercise_sets CASCADE;
+
 CREATE TABLE IF NOT EXISTS planned_workouts (
     id          SERIAL PRIMARY KEY,
     user_id     TEXT        NOT NULL,
