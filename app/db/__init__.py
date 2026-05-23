@@ -283,3 +283,58 @@ async def get_last_set(workout_id: int) -> dict | None:
         )
         row = r.mappings().first()
         return dict(row) if row else None
+
+
+# ─────────────────────────── service ops ───────────────────────────────────
+
+async def db_stats(user_id: str) -> dict:
+    """Counts per table for the user (planned, workouts) + global rows for cache."""
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                SELECT
+                    (SELECT COUNT(*) FROM planned_workouts WHERE user_id = :uid AND status = 'planned') AS planned_active,
+                    (SELECT COUNT(*) FROM planned_workouts WHERE user_id = :uid) AS planned_total,
+                    (SELECT COUNT(*) FROM workouts WHERE user_id = :uid) AS workouts_total,
+                    (SELECT COUNT(*) FROM workouts WHERE user_id = :uid AND finished_at IS NOT NULL) AS workouts_finished,
+                    (SELECT COUNT(*) FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
+                       WHERE w.user_id = :uid) AS sets_total,
+                    (SELECT COUNT(*) FROM exercise_aliases) AS aliases_total
+            """),
+            {"uid": user_id},
+        )
+        row = r.mappings().first()
+        return dict(row) if row else {}
+
+
+async def wipe_planned_workouts(user_id: str) -> int:
+    async with get_session() as s:
+        r = await s.execute(
+            text("DELETE FROM planned_workouts WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        return r.rowcount or 0
+
+
+async def wipe_workouts(user_id: str) -> int:
+    """Deletes workouts + cascades sets via FK."""
+    async with get_session() as s:
+        r = await s.execute(
+            text("DELETE FROM workouts WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        return r.rowcount or 0
+
+
+async def wipe_exercise_aliases() -> int:
+    """Global wipe — alias cache is not per-user."""
+    async with get_session() as s:
+        r = await s.execute(text("DELETE FROM exercise_aliases"))
+        return r.rowcount or 0
+
+
+async def wipe_all_user_data(user_id: str) -> dict:
+    """Wipe everything for this user. Returns counts deleted."""
+    plans = await wipe_planned_workouts(user_id)
+    workouts = await wipe_workouts(user_id)
+    return {"planned": plans, "workouts": workouts}

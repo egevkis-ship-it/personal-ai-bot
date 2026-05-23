@@ -13,7 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 
-from app.bot.handlers import history, menu, plans, workout
+from app.bot.handlers import history, menu, plans, service, workout
 from app.config import settings
 from app.db.engine import init_db, engine
 
@@ -135,6 +135,7 @@ async def main() -> None:
     dp.include_router(workout.router)
     dp.include_router(plans.router)
     dp.include_router(history.router)
+    dp.include_router(service.router)
     dp.include_router(menu.router)   # catch-all last
 
     log.info("Bot polling started.")

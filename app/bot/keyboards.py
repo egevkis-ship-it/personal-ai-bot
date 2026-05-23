@@ -22,8 +22,29 @@ def main_menu() -> ReplyKeyboardMarkup:
     kb.button(text="💪 Тренировка")
     kb.button(text="📅 Планы")
     kb.button(text="📖 История")
-    kb.adjust(3)
+    kb.button(text="⚙️ Сервис")
+    kb.adjust(3, 1)
     return kb.as_markup(resize_keyboard=True)
+
+
+def service_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Статистика БД", callback_data="svc:stats")
+    kb.button(text="🗑 Очистить запланированные", callback_data="svc:wipe_plans")
+    kb.button(text="🗑 Очистить историю", callback_data="svc:wipe_history")
+    kb.button(text="🧹 Очистить AI-кэш упражнений", callback_data="svc:wipe_aliases")
+    kb.button(text="⚠️ ПОЛНЫЙ СБРОС (всё)", callback_data="svc:wipe_all")
+    kb.button(text="🔙 Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def confirm_destructive(action: str) -> InlineKeyboardMarkup:
+    """Two-step confirm. action goes as final callback data 'svc:do:<action>'."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Да, выполнить", callback_data=f"svc:do:{action}"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="svc:back"),
+    ]])
 
 
 def remove_kb() -> ReplyKeyboardRemove:
