@@ -25,12 +25,6 @@ log = logging.getLogger(__name__)
 
 
 _MIGRATE_SQL = """
--- One-time cleanup of obsolete schema from the legacy bot.
--- These DROPs are no-ops once a clean deploy runs; we keep them so a fresh
--- environment (or one that still has the old tables) starts from a clean slate.
--- IMPORTANT: do NOT drop the new tables (planned_workouts, workouts,
--- exercise_sets, exercise_aliases, planned_workout_notes) — that would wipe
--- user data on every restart.
 DROP TABLE IF EXISTS fitness_exercise_sets CASCADE;
 DROP TABLE IF EXISTS fitness_workouts CASCADE;
 DROP TABLE IF EXISTS planned_exercises CASCADE;
@@ -105,8 +99,16 @@ CREATE INDEX IF NOT EXISTS idx_ea_clean     ON exercise_aliases(alias_clean);
 
 
 async def run_migrations() -> None:
+    """Run idempotent DDL on startup.
+
+    asyncpg can't execute multiple statements in one call, so we split on ';'.
+    To avoid a stray ';' inside a SQL comment splitting a statement in half,
+    strip all '--' line comments first.
+    """
+    import re
     from sqlalchemy import text
-    statements = [s.strip() for s in _MIGRATE_SQL.split(";") if s.strip()]
+    sql = re.sub(r"--[^\n]*", "", _MIGRATE_SQL)
+    statements = [s.strip() for s in sql.split(";") if s.strip()]
     async with engine.begin() as conn:
         for stmt in statements:
             await conn.execute(text(stmt))
