@@ -186,6 +186,9 @@ async def cb_confirm_parsed(cb: CallbackQuery, state: FSMContext) -> None:
         uid = str(cb.from_user.id)
 
         from app.bot.services.ai_parser import PlannedDay
+        from app.bot.services.exercise_catalog import resolve_or_register
+        import asyncio as _asyncio
+
         days = [
             PlannedDay(
                 day_label=d["day_label"],
@@ -196,13 +199,39 @@ async def cb_confirm_parsed(cb: CallbackQuery, state: FSMContext) -> None:
         ]
         assignments = _assign_dates(days)
 
+        # Normalize exercise names through the catalog (parallel per day).
+        # Failures fall back to the raw name — never block plan saving.
+        async def _normalize_day(day_dict: dict) -> list[dict]:
+            exs = day_dict.get("exercises", []) or []
+            if not exs:
+                return []
+            resolved = await _asyncio.gather(
+                *[resolve_or_register(e.get("name") or "") for e in exs],
+                return_exceptions=True,
+            )
+            out = []
+            for ex, r in zip(exs, resolved):
+                new_ex = dict(ex)
+                if isinstance(r, dict) and r.get("canonical"):
+                    new_ex["name"] = r["canonical"]
+                    new_ex["muscle_group"] = r.get("muscle_group")
+                out.append(new_ex)
+            return out
+
+        normalized_per_day = await _asyncio.gather(
+            *[_normalize_day(dd) for dd in days_data],
+            return_exceptions=False,
+        )
+
         saved = 0
-        for (day, assigned_date), day_dict in zip(assignments, days_data):
+        for (day, assigned_date), day_dict, norm_exs in zip(
+            assignments, days_data, normalized_per_day
+        ):
             await create_planned_workout(
                 user_id=uid,
                 planned_date=assigned_date,
                 focus_label=day_dict.get("focus_label"),
-                exercises=day_dict.get("exercises", []),
+                exercises=norm_exs,
             )
             saved += 1
 

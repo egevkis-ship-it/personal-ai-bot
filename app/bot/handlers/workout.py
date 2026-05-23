@@ -241,11 +241,25 @@ async def cb_confirm_set(cb: CallbackQuery, state: FSMContext) -> None:
     workout_id = data.get("workout_id")
     pending = data.get("pending_sets", [])
 
+    # Normalize each unique exercise_name once through the catalog.
+    from app.bot.services.exercise_catalog import resolve_or_register
+    name_cache: dict[str, str] = {}
+    for s in pending:
+        raw = s["exercise_name"]
+        if raw not in name_cache:
+            try:
+                r = await resolve_or_register(raw)
+                name_cache[raw] = r.get("canonical") or raw
+            except Exception as exc:
+                log.warning("normalize failed for %r: %s", raw, exc)
+                name_cache[raw] = raw
+
     last_ex = None
     for s in pending:
+        ex_name = name_cache.get(s["exercise_name"], s["exercise_name"])
         await add_set(
             workout_id=workout_id,
-            exercise_name=s["exercise_name"],
+            exercise_name=ex_name,
             weight_kg=s.get("weight_kg"),
             reps=s.get("reps"),
             reps_text=s.get("reps_text"),
@@ -254,7 +268,7 @@ async def cb_confirm_set(cb: CallbackQuery, state: FSMContext) -> None:
             is_failure=s.get("is_failure", False),
             superset_group=s.get("superset_group"),
         )
-        last_ex = s["exercise_name"]
+        last_ex = ex_name
 
     await state.update_data(pending_sets=[], last_exercise=last_ex)
     await state.set_state(WorkoutStates.active)

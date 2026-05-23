@@ -25,10 +25,15 @@ log = logging.getLogger(__name__)
 
 
 _MIGRATE_SQL = """
+-- One-time cleanup of obsolete schema from the legacy bot.
+-- These DROPs are no-ops once a clean deploy runs; we keep them so a fresh
+-- environment (or one that still has the old tables) starts from a clean slate.
+-- IMPORTANT: do NOT drop the new tables (planned_workouts, workouts,
+-- exercise_sets, exercise_aliases, planned_workout_notes) — that would wipe
+-- user data on every restart.
 DROP TABLE IF EXISTS fitness_exercise_sets CASCADE;
 DROP TABLE IF EXISTS fitness_workouts CASCADE;
 DROP TABLE IF EXISTS planned_exercises CASCADE;
-DROP TABLE IF EXISTS planned_workouts CASCADE;
 DROP TABLE IF EXISTS training_plans CASCADE;
 DROP TABLE IF EXISTS body_measurements CASCADE;
 DROP TABLE IF EXISTS fitness_pending_decisions CASCADE;
@@ -38,8 +43,6 @@ DROP TABLE IF EXISTS last_interaction CASCADE;
 DROP TABLE IF EXISTS learning_corrections CASCADE;
 DROP TABLE IF EXISTS user_preferences CASCADE;
 DROP TABLE IF EXISTS exercise_normalization_cache CASCADE;
-DROP TABLE IF EXISTS workouts CASCADE;
-DROP TABLE IF EXISTS exercise_sets CASCADE;
 
 CREATE TABLE IF NOT EXISTS planned_workouts (
     id          SERIAL PRIMARY KEY,
@@ -47,6 +50,7 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     planned_date DATE       NOT NULL,
     focus_label TEXT,
     exercises   JSONB       NOT NULL DEFAULT '[]',
+    notes       TEXT,
     status      TEXT        NOT NULL DEFAULT 'planned'
                             CHECK (status IN ('planned','completed','skipped')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -80,10 +84,23 @@ CREATE TABLE IF NOT EXISTS exercise_sets (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS exercise_aliases (
+    id              SERIAL PRIMARY KEY,
+    alias_text      TEXT        NOT NULL,
+    alias_clean     TEXT        NOT NULL UNIQUE,
+    canonical       TEXT        NOT NULL,
+    muscle_group    TEXT,
+    source          TEXT        NOT NULL DEFAULT 'ai',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE planned_workouts ADD COLUMN IF NOT EXISTS notes TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_pw_user_date ON planned_workouts(user_id, planned_date);
 CREATE INDEX IF NOT EXISTS idx_w_user_date  ON workouts(user_id, workout_date);
 CREATE INDEX IF NOT EXISTS idx_es_workout   ON exercise_sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_es_name      ON exercise_sets(workout_id, exercise_name);
+CREATE INDEX IF NOT EXISTS idx_ea_clean     ON exercise_aliases(alias_clean);
 """
 
 
