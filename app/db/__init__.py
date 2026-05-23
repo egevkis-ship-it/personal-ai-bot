@@ -13,6 +13,11 @@ from sqlalchemy import text
 from app.db.engine import get_session
 
 
+def _to_date(v: str | date) -> date:
+    """asyncpg requires real date objects for DATE columns — never strings."""
+    return v if isinstance(v, date) else date.fromisoformat(v)
+
+
 # ─────────────────────── planned_workouts ──────────────────────────────────
 
 async def create_planned_workout(
@@ -21,7 +26,7 @@ async def create_planned_workout(
     focus_label: str | None,
     exercises: list[dict],
 ) -> int:
-    d = planned_date if isinstance(planned_date, str) else planned_date.isoformat()
+    d = _to_date(planned_date)
     async with get_session() as s:
         r = await s.execute(
             text("""
@@ -46,8 +51,8 @@ async def get_planned_workouts_range(
     from_date: str | date,
     to_date: str | date,
 ) -> list[dict]:
-    fd = from_date if isinstance(from_date, str) else from_date.isoformat()
-    td = to_date if isinstance(to_date, str) else to_date.isoformat()
+    fd = _to_date(from_date)
+    td = _to_date(to_date)
     async with get_session() as s:
         r = await s.execute(
             text("""
@@ -106,7 +111,7 @@ async def create_workout(
     focus_label: str | None,
     planned_workout_id: int | None = None,
 ) -> int:
-    d = workout_date if isinstance(workout_date, str) else workout_date.isoformat()
+    d = _to_date(workout_date)
     async with get_session() as s:
         r = await s.execute(
             text("""
@@ -139,8 +144,8 @@ async def get_workouts_range(
     from_date: str | date,
     to_date: str | date,
 ) -> list[dict]:
-    fd = from_date if isinstance(from_date, str) else from_date.isoformat()
-    td = to_date if isinstance(to_date, str) else to_date.isoformat()
+    fd = _to_date(from_date)
+    td = _to_date(to_date)
     async with get_session() as s:
         r = await s.execute(
             text("""
