@@ -143,6 +143,7 @@ async def handle_plan_paste(message: Message, state: FSMContext) -> None:
         {
             "day_label": d.day_label,
             "focus_label": d.focus_label,
+            "notes": d.notes,
             "exercises": _exercises_to_db(d.exercises),
         }
         for d in days
@@ -227,12 +228,19 @@ async def cb_confirm_parsed(cb: CallbackQuery, state: FSMContext) -> None:
         for (day, assigned_date), day_dict, norm_exs in zip(
             assignments, days_data, normalized_per_day
         ):
-            await create_planned_workout(
+            plan_id = await create_planned_workout(
                 user_id=uid,
                 planned_date=assigned_date,
                 focus_label=day_dict.get("focus_label"),
                 exercises=norm_exs,
             )
+            day_notes = day_dict.get("notes")
+            if day_notes:
+                from app.db import update_planned_workout_notes
+                try:
+                    await update_planned_workout_notes(plan_id, day_notes)
+                except Exception as exc:
+                    log.warning("save plan notes failed: %s", exc)
             saved += 1
 
         await state.clear()

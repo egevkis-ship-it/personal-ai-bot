@@ -62,8 +62,25 @@ def workout_active_menu() -> InlineKeyboardMarkup:
     """Persistent inline menu during active workout."""
     kb = InlineKeyboardBuilder()
     kb.button(text="👁 Показать сессию", callback_data="workout:show")
+    kb.button(text="✏️ Коммент к последнему", callback_data="workout:note_last")
     kb.button(text="↩️ Удалить последний", callback_data="workout:delete_last")
     kb.button(text="🏁 Завершить тренировку", callback_data="workout:finish")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def skip_or_cancel(skip_cb: str = "note:skip", cancel_cb: str = "note:cancel") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⏭ Пропустить", callback_data=skip_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb),
+    ]])
+
+
+def post_finish_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 AI-разбор тренировки", callback_data="finish:coach")
+    kb.button(text="📅 Запланировать новую", callback_data="finish:plan_next")
+    kb.button(text="✅ Готово", callback_data="finish:done")
     kb.adjust(1)
     return kb.as_markup()
 

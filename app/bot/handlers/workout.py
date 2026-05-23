@@ -144,6 +144,59 @@ async def cb_delete_last(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.message.answer(f"🗑 Удалён последний подход: <b>{name}</b>", parse_mode="HTML")
 
 
+# ─────────────────────────── note to last set ───────────────────────────────
+
+@router.callback_query(F.data == "workout:note_last", WorkoutStates.active)
+async def cb_note_last(cb: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    workout_id = data.get("workout_id")
+    if not workout_id:
+        await cb.answer("Нет активной тренировки", show_alert=True)
+        return
+    last = await get_last_set(workout_id)
+    if not last:
+        await cb.answer("Нет подходов", show_alert=True)
+        return
+    await cb.answer()
+    from app.bot.keyboards import skip_or_cancel
+    await state.update_data(note_target_set_id=last["id"])
+    await state.set_state(WorkoutStates.enter_set_note)
+    existing = last.get("notes") or ""
+    extra = f"\n\nТекущий: <i>{existing}</i>" if existing else ""
+    await cb.message.answer(
+        f"✏️ Комментарий к подходу <b>{last.get('exercise_name','?')}</b> "
+        f"(вес {last.get('weight_kg') or '?'}, повт {last.get('reps') or '?'})."
+        f"{extra}\n\nОтправь текст одним сообщением:",
+        parse_mode="HTML",
+        reply_markup=skip_or_cancel(),
+    )
+
+
+@router.message(WorkoutStates.enter_set_note, F.text)
+async def handle_set_note_text(message: Message, state: FSMContext) -> None:
+    from app.db import update_set
+    data = await state.get_data()
+    set_id = data.get("note_target_set_id")
+    if not set_id:
+        await message.answer("Не нашёл подход. Отменено.", reply_markup=workout_active_menu())
+        await state.set_state(WorkoutStates.active)
+        return
+    await update_set(set_id, notes=message.text.strip())
+    await state.update_data(note_target_set_id=None)
+    await state.set_state(WorkoutStates.active)
+    await message.answer("✅ Коммент сохранён.", reply_markup=workout_active_menu())
+
+
+@router.callback_query(F.data == "note:skip", WorkoutStates.enter_set_note)
+@router.callback_query(F.data == "note:cancel", WorkoutStates.enter_set_note)
+async def cb_set_note_skip(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    await state.update_data(note_target_set_id=None)
+    await state.set_state(WorkoutStates.active)
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("↩️ Без комментария.", reply_markup=workout_active_menu())
+
+
 # ─────────────────────────── set input (text) ────────────────────────────────
 
 @router.message(WorkoutStates.active, F.text)
@@ -323,12 +376,63 @@ async def cb_finish_yes(cb: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     workout_id = data.get("workout_id")
     await finish_workout(workout_id)
+
+    # Stay in flow so user can leave a comment, see AI coach, plan next.
+    await state.set_state(WorkoutStates.enter_workout_note)
+    await state.update_data(finished_workout_id=workout_id)
+
+    await cb.message.edit_reply_markup(reply_markup=None)
+    from app.bot.keyboards import skip_or_cancel
+    await cb.message.answer(
+        "🏁 Тренировка завершена! Отличная работа 💪\n\n"
+        "✏️ Оставить комментарий к тренировке? Отправь текстом, или нажми «Пропустить».",
+        reply_markup=skip_or_cancel(skip_cb="finish:note_skip", cancel_cb="finish:note_skip"),
+    )
+
+
+@router.message(WorkoutStates.enter_workout_note, F.text)
+async def handle_workout_note(message: Message, state: FSMContext) -> None:
+    from app.db import update_workout_notes
+    data = await state.get_data()
+    wid = data.get("finished_workout_id")
+    if wid:
+        try:
+            await update_workout_notes(wid, message.text.strip())
+        except Exception as exc:
+            log.warning("save workout note failed: %s", exc)
+    from app.bot.keyboards import post_finish_menu
+    await message.answer("✅ Комментарий сохранён.", reply_markup=post_finish_menu())
+
+
+@router.callback_query(F.data == "finish:note_skip", WorkoutStates.enter_workout_note)
+async def cb_finish_note_skip(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.keyboards import post_finish_menu
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("Без комментария.", reply_markup=post_finish_menu())
+
+
+# Final exit from post-finish flow (returns to main menu)
+@router.callback_query(F.data == "finish:done")
+async def cb_finish_done(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.clear()
     await cb.message.edit_reply_markup(reply_markup=None)
-    await cb.message.answer(
-        "🏁 Тренировка завершена! Отличная работа 💪",
-        reply_markup=main_menu(),
-    )
+    await cb.message.answer("Главное меню:", reply_markup=main_menu())
+
+
+@router.callback_query(F.data == "finish:coach")
+async def cb_finish_coach(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.keyboards import post_finish_menu
+    await cb.message.answer("🤖 AI-разбор скоро будет (Phase 4).", reply_markup=post_finish_menu())
+
+
+@router.callback_query(F.data == "finish:plan_next")
+async def cb_finish_plan_next(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.keyboards import post_finish_menu
+    await cb.message.answer("📅 AI-планирование скоро будет (Phase 5).", reply_markup=post_finish_menu())
 
 
 @router.callback_query(F.data == "workout:finish_no", WorkoutStates.confirm_finish)

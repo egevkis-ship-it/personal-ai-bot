@@ -47,6 +47,7 @@ class PlannedDay:
     """One training day from a parsed plan."""
     day_label: str                          # "Понедельник", "2026-05-26", "День 1"
     focus_label: str | None = None          # "Грудь / Трицепс"
+    notes: str | None = None                # day-level free-text comment
     exercises: list[PlannedExercise] = field(default_factory=list)
 
 
@@ -54,24 +55,25 @@ class PlannedDay:
 
 _PLAN_SYSTEM = """\
 Ты парсер тренировочных планов. Получаешь произвольный текст — еженедельный шаблон, \
-даты, периоды, просто список дней — и возвращаешь JSON.
+даты, периоды, просто список дней с заметками — и возвращаешь JSON.
 
 Формат ответа — ТОЛЬКО JSON, никакого другого текста:
 {
   "days": [
     {
-      "day_label": "Понедельник",          // или "2026-05-26", "День 1" — как в тексте
-      "focus_label": "Грудь / Трицепс",    // null если не указано
+      "day_label": "Понедельник",
+      "focus_label": "Грудь / Трицепс",
+      "notes": "Усиленный день. Перед жимом 5 мин разминка.",
       "exercises": [
         {
           "name": "Жим штанги лёжа",
           "target_sets": 4,
           "target_reps_min": 8,
           "target_reps_max": 12,
-          "target_weight": 80.0,           // null если не указано
-          "reps_text": null,               // "AMRAP", "до отказа" — если указано
-          "notes": null,
-          "superset_group": null           // "A", "B" — если суперсет
+          "target_weight": 80.0,
+          "reps_text": null,
+          "notes": "Постараться добавить 2.5кг к рабочему. Пауза в нижней точке 2 сек.",
+          "superset_group": null
         }
       ]
     }
@@ -85,6 +87,13 @@ _PLAN_SYSTEM = """\
 - "AMRAP" / "до отказа" → reps_text:"до отказа", target_reps_min:null
 - Суперсеты: помечай superset_group "A", "B"... для упражнений в паре
 - Если день = "Отдых" или пустой — добавляй с пустым exercises:[]
+- КОММЕНТАРИИ: любой свободный текст после упражнения или дня (после ":", "//", "—", или просто \
+текст без чисел рядом со счётом) клади в notes соответствующего уровня. \
+Примеры: "Комментарий: сидушка 1 дырка", "// сидушка 2 дырки", "не до отказа", \
+"в отказ", "если хуже чувствуешь — снизить вес", "опционально". \
+Не путай notes с упражнением — это пояснение.
+- notes для дня = общий комментарий на тренировку (разминка, цель)
+- notes для упражнения = комментарий именно к этому движению
 - Не добавляй пояснений, только JSON
 """
 
@@ -121,6 +130,7 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
             days.append(PlannedDay(
                 day_label=d.get("day_label", ""),
                 focus_label=d.get("focus_label"),
+                notes=d.get("notes"),
                 exercises=exercises,
             ))
         return days

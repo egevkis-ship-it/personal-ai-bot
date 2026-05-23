@@ -132,6 +132,22 @@ async def finish_workout(workout_id: int) -> None:
         )
 
 
+async def update_workout_notes(workout_id: int, notes: str) -> None:
+    async with get_session() as s:
+        await s.execute(
+            text("UPDATE workouts SET notes = :n WHERE id = :id"),
+            {"id": workout_id, "n": notes},
+        )
+
+
+async def update_planned_workout_notes(plan_id: int, notes: str) -> None:
+    async with get_session() as s:
+        await s.execute(
+            text("UPDATE planned_workouts SET notes = :n, updated_at = now() WHERE id = :id"),
+            {"id": plan_id, "n": notes},
+        )
+
+
 async def get_workout(workout_id: int) -> dict | None:
     async with get_session() as s:
         r = await s.execute(text("SELECT * FROM workouts WHERE id = :id"), {"id": workout_id})

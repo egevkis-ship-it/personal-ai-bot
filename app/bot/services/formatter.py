@@ -66,8 +66,11 @@ def format_planned_day(plan: dict[str, Any]) -> str:
     d = plan.get("planned_date")
     focus = plan.get("focus_label") or "тренировка"
     exercises: list[dict] = plan.get("exercises") or []
+    plan_notes = plan.get("notes")
 
     lines = [f"📅 <b>{fmt_date(d)} — {_esc(focus)}</b>"]
+    if plan_notes:
+        lines.append(f"💬 <i>{_esc(plan_notes)}</i>")
     if not exercises:
         lines.append("  <i>упражнения не добавлены</i>")
     else:
@@ -78,6 +81,7 @@ def format_planned_day(plan: dict[str, Any]) -> str:
             r_max = ex.get("target_reps_max")
             rt = ex.get("reps_text")
             w = ex.get("target_weight")
+            ex_notes = ex.get("notes")
 
             if rt:
                 reps_str = rt
@@ -91,6 +95,8 @@ def format_planned_day(plan: dict[str, Any]) -> str:
             w_str = f" · {w:g} кг" if w else ""
             sg = f" [{ex.get('superset_group')}]" if ex.get("superset_group") else ""
             lines.append(f"  • {name}{sg} — {sets}×{reps_str}{w_str}")
+            if ex_notes:
+                lines.append(f"    <i>💬 {_esc(ex_notes)}</i>")
     return "\n".join(lines)
 
 
@@ -173,6 +179,7 @@ def format_active_session(sets: list[dict[str, Any]], workout: dict[str, Any]) -
             fail = s.get("is_failure", False)
             warmup = s.get("is_warmup", False)
             sg = s.get("superset_group")
+            note = s.get("notes")
 
             tags = []
             if warmup:
@@ -182,13 +189,16 @@ def format_active_session(sets: list[dict[str, Any]], workout: dict[str, Any]) -
             tag_str = f" [{', '.join(tags)}]" if tags else ""
 
             if dur:
-                lines.append(f"  {i}.{tag_str} {fmt_duration(dur)}")
+                line = f"  {i}.{tag_str} {fmt_duration(dur)}"
             elif w is not None:
                 reps_str = fmt_reps(reps, rt, fail)
-                lines.append(f"  {i}.{tag_str} {w:g} кг × {reps_str}")
+                line = f"  {i}.{tag_str} {w:g} кг × {reps_str}"
             else:
                 reps_str = fmt_reps(reps, rt, fail)
-                lines.append(f"  {i}.{tag_str} {reps_str} повт")
+                line = f"  {i}.{tag_str} {reps_str} повт"
+            if note:
+                line += f" 💬 <i>{_esc(note)}</i>"
+            lines.append(line)
 
     total = len(sets)
     lines.append(f"\n<i>Всего подходов: {total}</i>")
@@ -238,6 +248,9 @@ def format_workout_summary(workout: dict, sets: list[dict]) -> str:
             pass
 
     lines = [f"🏋️ <b>{fmt_date(d)} — {_esc(focus)}</b>{time_range}"]
+    w_notes = workout.get("notes")
+    if w_notes:
+        lines.append(f"💬 <i>{_esc(w_notes)}</i>")
 
     seen: list[str] = []
     by_ex: dict[str, list] = {}
@@ -252,6 +265,7 @@ def format_workout_summary(workout: dict, sets: list[dict]) -> str:
         ex_sets = by_ex[ex]
         # Compact: "Жим — 80×10, 80×8, 75×6"
         pieces = []
+        notes_collected = []
         for s in ex_sets:
             w = s.get("weight_kg")
             reps = s.get("reps")
@@ -266,7 +280,12 @@ def format_workout_summary(workout: dict, sets: list[dict]) -> str:
             else:
                 reps_str = fmt_reps(reps, rt, fail)
                 pieces.append(reps_str)
+            n = s.get("notes")
+            if n:
+                notes_collected.append(n)
         lines.append(f"  • {_esc(ex)}: {', '.join(pieces)}")
+        for n in notes_collected:
+            lines.append(f"    <i>💬 {_esc(n)}</i>")
 
     return "\n".join(lines)
 
@@ -281,10 +300,11 @@ def format_history_list(workouts_with_sets: list[tuple[dict, list[dict]]]) -> st
 
 def format_csv(workouts_with_sets: list[tuple[dict, list[dict]]]) -> str:
     """Export all sets as CSV string."""
-    lines = ["date,focus,exercise,set_number,weight_kg,reps,reps_text,duration_seconds,is_warmup,is_failure,superset_group"]
+    lines = ["date,focus,workout_notes,exercise,set_number,weight_kg,reps,reps_text,duration_seconds,is_warmup,is_failure,superset_group,set_notes"]
     for workout, sets in workouts_with_sets:
         d = workout.get("workout_date", "")
         focus = (workout.get("focus_label") or "").replace(",", ";")
+        wn = (workout.get("notes") or "").replace(",", ";").replace("\n", " ")
         for s in sets:
             ex = (s.get("exercise_name") or "").replace(",", ";")
             sn = s.get("set_number", "")
@@ -295,5 +315,6 @@ def format_csv(workouts_with_sets: list[tuple[dict, list[dict]]]) -> str:
             iw = "1" if s.get("is_warmup") else "0"
             if_ = "1" if s.get("is_failure") else "0"
             sg = s.get("superset_group") or ""
-            lines.append(f"{d},{focus},{ex},{sn},{w},{r},{rt},{dur},{iw},{if_},{sg}")
+            sn_notes = (s.get("notes") or "").replace(",", ";").replace("\n", " ")
+            lines.append(f"{d},{focus},{wn},{ex},{sn},{w},{r},{rt},{dur},{iw},{if_},{sg},{sn_notes}")
     return "\n".join(lines)

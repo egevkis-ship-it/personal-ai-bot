@@ -7,6 +7,8 @@ class WorkoutStates(StatesGroup):
     active = State()              # default: waiting for set input
     confirm_set = State()         # waiting for confirm/cancel after parse
     confirm_finish = State()      # confirm ending the workout
+    enter_set_note = State()      # waiting for text comment to last set
+    enter_workout_note = State()  # post-finish: optional workout-level comment
 
 
 class PlanStates(StatesGroup):
