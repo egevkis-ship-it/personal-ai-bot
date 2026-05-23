@@ -113,24 +113,22 @@ async def show_active_session(
 
 @router.callback_query(F.data == "workout:show", WorkoutStates.active)
 async def cb_show_session(cb: CallbackQuery, state: FSMContext) -> None:
-    uid = str(cb.from_user.id)
     data = await state.get_data()
     workout_id = data.get("workout_id")
     if not workout_id:
         await cb.answer("Нет активной тренировки", show_alert=True)
         return
+    await cb.answer()
     workout = await get_workout(workout_id)
     sets = await get_workout_sets(workout_id)
     text = format_active_session(sets, workout)
     await cb.message.answer(text, parse_mode="HTML", reply_markup=workout_active_menu())
-    await cb.answer()
 
 
 # ─────────────────────────── delete last set ────────────────────────────────
 
 @router.callback_query(F.data == "workout:delete_last", WorkoutStates.active)
 async def cb_delete_last(cb: CallbackQuery, state: FSMContext) -> None:
-    uid = str(cb.from_user.id)
     data = await state.get_data()
     workout_id = data.get("workout_id")
     if not workout_id:
@@ -140,10 +138,10 @@ async def cb_delete_last(cb: CallbackQuery, state: FSMContext) -> None:
     if not last:
         await cb.answer("Нет подходов для удаления", show_alert=True)
         return
+    await cb.answer()
     await delete_set(last["id"])
     name = last.get("exercise_name", "?")
     await cb.message.answer(f"🗑 Удалён последний подход: <b>{name}</b>", parse_mode="HTML")
-    await cb.answer()
 
 
 # ─────────────────────────── set input (text) ────────────────────────────────
@@ -153,12 +151,19 @@ async def handle_set_text(message: Message, state: FSMContext) -> None:
     await _handle_set_input(message, message.text, state)
 
 
-@router.message(WorkoutStates.active, F.content_type == ContentType.VOICE)
+@router.message(WorkoutStates.active, F.voice)
 async def handle_set_voice(message: Message, state: FSMContext) -> None:
     voice = message.voice
     bot = message.bot
-    file = await bot.get_file(voice.file_id)
-    ogg_bytes = await (await bot.download_file(file.file_path)).read()
+    try:
+        file = await bot.get_file(voice.file_id)
+        file_io = await bot.download_file(file.file_path)  # BytesIO, NOT awaitable
+        ogg_bytes = file_io.read() if hasattr(file_io, "read") else bytes(file_io)
+    except Exception as exc:
+        log.exception("voice download error")
+        await message.answer(f"❌ Не удалось скачать аудио: {exc}")
+        return
+
     text = await transcribe_voice(ogg_bytes, filename="voice.ogg")
     if not text:
         await message.answer("❌ Не удалось распознать голос. Попробуй ещё раз.")
@@ -231,6 +236,7 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext) -> N
 
 @router.callback_query(F.data == "set:confirm", WorkoutStates.confirm_set)
 async def cb_confirm_set(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     data = await state.get_data()
     workout_id = data.get("workout_id")
     pending = data.get("pending_sets", [])
@@ -259,33 +265,33 @@ async def cb_confirm_set(cb: CallbackQuery, state: FSMContext) -> None:
         f"✅ Записано {count} подх." if count > 1 else "✅ Записано!",
         reply_markup=workout_active_menu(),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "set:edit", WorkoutStates.confirm_set)
 async def cb_edit_set(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.set_state(WorkoutStates.active)
     await cb.message.edit_reply_markup(reply_markup=None)
     await cb.message.answer(
         "✏️ Отправь исправленную запись:",
         reply_markup=workout_active_menu(),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "set:cancel", WorkoutStates.confirm_set)
 async def cb_cancel_set(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.update_data(pending_sets=[])
     await state.set_state(WorkoutStates.active)
     await cb.message.edit_reply_markup(reply_markup=None)
     await cb.message.answer("❌ Отменено.", reply_markup=workout_active_menu())
-    await cb.answer()
 
 
 # ─────────────────────────── finish workout ──────────────────────────────────
 
 @router.callback_query(F.data == "workout:finish", WorkoutStates.active)
 async def cb_finish_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     data = await state.get_data()
     workout_id = data.get("workout_id")
     sets = await get_workout_sets(workout_id)
@@ -295,11 +301,11 @@ async def cb_finish_prompt(cb: CallbackQuery, state: FSMContext) -> None:
         f"Завершить тренировку?\nЗаписано подходов: {count}",
         reply_markup=finish_workout_confirm(),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "workout:finish_yes", WorkoutStates.confirm_finish)
 async def cb_finish_yes(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     data = await state.get_data()
     workout_id = data.get("workout_id")
     await finish_workout(workout_id)
@@ -309,7 +315,6 @@ async def cb_finish_yes(cb: CallbackQuery, state: FSMContext) -> None:
         "🏁 Тренировка завершена! Отличная работа 💪",
         reply_markup=main_menu(),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "workout:finish_no", WorkoutStates.confirm_finish)

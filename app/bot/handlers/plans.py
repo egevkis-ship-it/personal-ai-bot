@@ -97,13 +97,13 @@ def _assign_dates(days: list[PlannedDay]) -> list[tuple[PlannedDay, date]]:
 
 @router.callback_query(F.data == "plan:load")
 async def cb_plan_load(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.clear()
     await state.set_state(PlanStates.choose_load_mode)
     await cb.message.edit_text(
         "📥 Как загрузить план?",
         reply_markup=plan_load_mode(),
     )
-    await cb.answer()
 
 
 # ────────────────────────── load via text paste ──────────────────────────────
@@ -244,6 +244,7 @@ async def cb_cancel_load(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "plan:view")
 async def cb_view_plan(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.clear()
     uid = str(cb.from_user.id)
     today = date.today()
@@ -254,7 +255,6 @@ async def cb_view_plan(cb: CallbackQuery, state: FSMContext) -> None:
             "📭 Нет запланированных тренировок на ближайшие 30 дней.",
             reply_markup=plan_menu(),
         )
-        await cb.answer()
         return
 
     await state.set_state(PlanStates.browsing)
@@ -266,20 +266,19 @@ async def cb_view_plan(cb: CallbackQuery, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=plan_navigate(plans[0]["id"], 0, len(plans)),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("plan:nav:"), PlanStates.browsing)
 async def cb_plan_nav(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     idx = int(cb.data.split(":")[-1])
     data = await state.get_data()
     plan_ids: list[int] = data.get("plan_ids", [])
     if idx < 0 or idx >= len(plan_ids):
-        await cb.answer()
         return
     plan = await get_planned_workout(plan_ids[idx])
     if not plan:
-        await cb.answer("День не найден")
+        await cb.message.answer("День не найден")
         return
     await state.update_data(plan_idx=idx)
     text = format_planned_day(plan)
@@ -288,7 +287,6 @@ async def cb_plan_nav(cb: CallbackQuery, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=plan_navigate(plan["id"], idx, len(plan_ids)),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "plan:noop")

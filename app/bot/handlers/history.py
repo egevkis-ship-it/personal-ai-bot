@@ -33,55 +33,56 @@ async def _load_workouts_with_sets(uid: str, from_date: date, to_date: date):
 
 @router.callback_query(F.data == "hist:today")
 async def cb_hist_today(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     uid = str(cb.from_user.id)
     today = date.today()
     data = await _load_workouts_with_sets(uid, today, today)
     text = format_history_list(data)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=history_menu())
-    await cb.answer()
 
 
 @router.callback_query(F.data == "hist:week")
 async def cb_hist_week(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     uid = str(cb.from_user.id)
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     data = await _load_workouts_with_sets(uid, week_start, today)
     text = format_history_list(data)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=history_menu())
-    await cb.answer()
 
 
 @router.callback_query(F.data == "hist:month")
 async def cb_hist_month(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     uid = str(cb.from_user.id)
     today = date.today()
     month_start = today.replace(day=1)
     data = await _load_workouts_with_sets(uid, month_start, today)
     text = format_history_list(data)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=history_menu())
-    await cb.answer()
 
 
 # ─────────────────────────── export ──────────────────────────────────────────
 
 @router.callback_query(F.data == "hist:export")
 async def cb_export_start(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.set_state(HistoryStates.choose_export)
     await cb.message.edit_text("📤 Выбери формат экспорта:", reply_markup=export_format())
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("export:"), HistoryStates.choose_export)
 async def cb_export_format(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     fmt = cb.data.split(":")[1]  # "text" or "csv"
     await state.update_data(export_fmt=fmt)
     await cb.message.edit_text("📆 За какой период?", reply_markup=export_period())
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("export_period:"))
 async def cb_export_period(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     period = cb.data.split(":")[1]  # "7", "30", "all"
     data = await state.get_data()
     fmt = data.get("export_fmt", "text")
@@ -99,7 +100,6 @@ async def cb_export_period(cb: CallbackQuery, state: FSMContext) -> None:
 
     if not workouts_with_sets:
         await cb.message.edit_text("📭 Нет данных за выбранный период.", reply_markup=history_menu())
-        await cb.answer()
         return
 
     if fmt == "csv":
@@ -130,4 +130,3 @@ async def cb_export_period(cb: CallbackQuery, state: FSMContext) -> None:
                 await cb.message.answer(chunk, parse_mode="HTML")
 
     await cb.message.answer("📖 История:", reply_markup=history_menu())
-    await cb.answer()

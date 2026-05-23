@@ -78,21 +78,21 @@ async def menu_history(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "back:main")
 async def back_to_main(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.clear()
     await cb.message.edit_text("Главное меню:", reply_markup=None)
     await cb.message.answer("Выбери раздел:", reply_markup=main_menu())
-    await cb.answer()
 
 
 @router.callback_query(F.data == "back:plan")
 async def back_to_plan(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.clear()
     await cb.message.edit_text("📅 Управление планами:", reply_markup=plan_menu())
-    await cb.answer()
 
 
 @router.callback_query(F.data == "back:history")
 async def back_to_history(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
     await state.clear()
     await cb.message.edit_text("📖 История тренировок:", reply_markup=history_menu())
-    await cb.answer()
