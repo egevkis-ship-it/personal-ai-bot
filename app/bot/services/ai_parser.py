@@ -98,25 +98,85 @@ _PLAN_SYSTEM = """\
 """
 
 
+def _extract_json(raw: str) -> str:
+    """Best-effort JSON extraction from Claude reply.
+
+    Handles:
+      - markdown ```json fences
+      - text before/after the JSON
+      - truncated tail by trimming back to the last well-balanced '}' / ']'.
+    """
+    s = raw.strip()
+    if s.startswith("```"):
+        # ```json\n{...}\n``` or just ```\n{...}\n```
+        try:
+            s = s.split("\n", 1)[1].rsplit("```", 1)[0]
+        except Exception:
+            pass
+    # Find first { or [
+    start_obj = s.find("{")
+    start_arr = s.find("[")
+    starts = [x for x in (start_obj, start_arr) if x >= 0]
+    if not starts:
+        return s
+    start = min(starts)
+    s = s[start:]
+    # Walk and find matching close
+    depth = 0
+    in_str = False
+    esc = False
+    last_good = -1
+    for i, ch in enumerate(s):
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0:
+                last_good = i + 1
+                break
+    if last_good > 0:
+        return s[:last_good]
+    return s
+
+
 async def parse_plan_text(text: str) -> list[PlannedDay]:
     """Parse free-form plan text → list of PlannedDay."""
+    raw = ""
     try:
         resp = await _anthropic.messages.create(
             model="claude-opus-4-7",
-            max_tokens=4096,
+            max_tokens=8192,
             system=_PLAN_SYSTEM,
             messages=[{"role": "user", "content": text}],
         )
-        raw = resp.content[0].text.strip()
-        # strip possible markdown fences
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-        data: dict[str, Any] = json.loads(raw)
+        raw = resp.content[0].text
+        candidate = _extract_json(raw)
+        try:
+            data: dict[str, Any] = json.loads(candidate)
+        except json.JSONDecodeError as je:
+            # One more attempt: maybe trailing comma / unterminated string. Try a
+            # conservative repair — drop everything after the last balanced ']' or '}'.
+            log.warning(
+                "parse_plan_text: JSON broken at %d:%d (%s). Raw len=%d. Snippet: %r",
+                je.lineno, je.colno, je.msg, len(raw), candidate[max(0, je.pos-80):je.pos+80],
+            )
+            return []
         days: list[PlannedDay] = []
         for d in data.get("days", []):
             exercises = [
                 PlannedExercise(
-                    name=e["name"],
+                    name=e.get("name", "?"),
                     target_sets=e.get("target_sets"),
                     target_reps_min=e.get("target_reps_min"),
                     target_reps_max=e.get("target_reps_max"),
@@ -126,6 +186,7 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
                     superset_group=e.get("superset_group"),
                 )
                 for e in d.get("exercises", [])
+                if e.get("name")
             ]
             days.append(PlannedDay(
                 day_label=d.get("day_label", ""),
