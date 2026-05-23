@@ -425,14 +425,367 @@ async def cb_finish_done(cb: CallbackQuery, state: FSMContext) -> None:
 async def cb_finish_coach(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     from app.bot.keyboards import post_finish_menu
-    await cb.message.answer("🤖 AI-разбор скоро будет (Phase 4).", reply_markup=post_finish_menu())
+    from app.bot.services.coach import build_coach_facts, opus_coach_summary
+
+    data = await state.get_data()
+    workout_id = data.get("finished_workout_id")
+    if not workout_id:
+        # fall back to user's most recent finished workout
+        from app.db import get_last_workout
+        last = await get_last_workout(str(cb.from_user.id))
+        if last:
+            workout_id = last["id"]
+    if not workout_id:
+        await cb.message.answer("Не нашёл тренировки для разбора.", reply_markup=post_finish_menu())
+        return
+
+    placeholder = await cb.message.answer("🧮 Считаю метрики…")
+    try:
+        facts = await build_coach_facts(str(cb.from_user.id), workout_id)
+        summary = await opus_coach_summary(facts)
+    except Exception as exc:
+        log.exception("coach error")
+        summary = f"Не удалось получить разбор: {exc}"
+
+    # Replace placeholder with the actual text + menu
+    try:
+        await placeholder.edit_text(summary, parse_mode=None, reply_markup=None)
+    except Exception:
+        await cb.message.answer(summary)
+    await cb.message.answer("Что дальше?", reply_markup=post_finish_menu())
 
 
 @router.callback_query(F.data == "finish:plan_next")
 async def cb_finish_plan_next(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
+    from app.bot.keyboards import plan_next_mode
+    await state.set_state(WorkoutStates.plan_next_mode)
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("Как спланировать?", reply_markup=plan_next_mode())
+
+
+@router.callback_query(F.data == "plan_next:manual")
+async def cb_plan_next_manual(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.keyboards import plan_menu
+    await state.clear()
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("📅 Управление планами:", reply_markup=plan_menu())
+
+
+@router.callback_query(F.data == "plan_next:ai")
+async def cb_plan_next_ai(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.keyboards import ai_plan_period
+    await state.set_state(WorkoutStates.ai_plan_period)
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("На какой период?", reply_markup=ai_plan_period())
+
+
+# ─── pick day ────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "ai_plan:day")
+async def cb_ai_plan_day(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.keyboards import ai_plan_day_picker
+    from app.db import get_planned_workouts_range
+    from datetime import date as _date, timedelta as _td
+    today = _date.today()
+    # Mon..Sun of *next* week
+    # weekday(): Mon=0 ... Sun=6 — compute start of next week
+    days_until_monday = (7 - today.weekday()) % 7
+    if days_until_monday == 0:
+        days_until_monday = 7
+    next_monday = today + _td(days=days_until_monday)
+    days = [next_monday + _td(days=i) for i in range(7)]
+
+    uid = str(cb.from_user.id)
+    plans = await get_planned_workouts_range(uid, days[0], days[-1])
+    busy = {p["planned_date"]: (p.get("focus_label") or "занят") for p in plans}
+
+    _DAYS_RU = {0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"}
+    items = []
+    for d in days:
+        label = f"{_DAYS_RU[d.weekday()]} {d.day:02d}.{d.month:02d}"
+        # convert busy key potentially being a date or string
+        b = busy.get(d) or busy.get(d.isoformat())
+        items.append((d.isoformat(), label, b))
+
+    await state.set_state(WorkoutStates.ai_plan_pick_day)
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("Выбери день следующей недели:", reply_markup=ai_plan_day_picker(items))
+
+
+@router.callback_query(F.data.startswith("ai_plan:date:"), WorkoutStates.ai_plan_pick_day)
+async def cb_ai_plan_pick(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.db import get_planned_workouts_range
+    from app.bot.keyboards import occupied_day_choice
+    from datetime import date as _date
+
+    iso = cb.data.split(":", 2)[2]
+    target = _date.fromisoformat(iso)
+    uid = str(cb.from_user.id)
+    existing = await get_planned_workouts_range(uid, target, target)
+    if existing:
+        focus = existing[0].get("focus_label") or "тренировка"
+        await cb.message.edit_reply_markup(reply_markup=None)
+        await cb.message.answer(
+            f"📌 На {iso} уже есть тренировка ({focus}). Что делаем?",
+            reply_markup=occupied_day_choice(iso),
+        )
+        return
+    await _generate_and_present_day(cb, state, target, replace=False)
+
+
+@router.callback_query(F.data.startswith("ai_plan:gen:"))
+async def cb_ai_plan_gen(cb: CallbackQuery, state: FSMContext) -> None:
+    """ai_plan:gen:<iso>:replace — regenerate over an occupied day."""
+    await cb.answer()
+    from datetime import date as _date
+    parts = cb.data.split(":")
+    iso = parts[2]
+    target = _date.fromisoformat(iso)
+    replace = parts[3] == "replace" if len(parts) > 3 else False
+    await _generate_and_present_day(cb, state, target, replace=replace)
+
+
+async def _generate_and_present_day(cb: CallbackQuery, state: FSMContext, target_date, replace: bool):
+    from app.bot.services.planner import generate_day_plan
+    from app.bot.services.formatter import fmt_date, _esc
+    from app.bot.keyboards import ai_plan_confirm
+
+    placeholder = await cb.message.answer("🧠 Генерирую тренировку…")
+    plan = await generate_day_plan(str(cb.from_user.id), target_date)
+    if not plan:
+        try:
+            await placeholder.edit_text("❌ Не удалось сгенерировать план.")
+        except Exception:
+            pass
+        from app.bot.keyboards import post_finish_menu
+        await cb.message.answer("Что дальше?", reply_markup=post_finish_menu())
+        return
+
+    # Build preview text
+    lines = [f"📅 <b>{fmt_date(target_date)} — {_esc(plan.focus_label or 'тренировка')}</b>"]
+    if plan.notes:
+        lines.append(f"💬 <i>{_esc(plan.notes)}</i>")
+    for ex in plan.exercises:
+        r_min, r_max = ex.target_reps_min, ex.target_reps_max
+        if r_min and r_max and r_min != r_max:
+            reps = f"{r_min}–{r_max}"
+        elif r_min:
+            reps = str(r_min)
+        else:
+            reps = ex.reps_text or "?"
+        w = f" · {ex.target_weight:g} кг" if ex.target_weight else ""
+        lines.append(f"  • {_esc(ex.name)} — {ex.target_sets or '?'}×{reps}{w}")
+        if ex.notes:
+            lines.append(f"    <i>💬 {_esc(ex.notes)}</i>")
+
+    # Persist the generated plan in FSM for save step
+    await state.update_data(ai_plan={
+        "focus_label": plan.focus_label,
+        "notes": plan.notes,
+        "exercises": [{
+            "name": e.name,
+            "target_sets": e.target_sets,
+            "target_reps_min": e.target_reps_min,
+            "target_reps_max": e.target_reps_max,
+            "target_weight": e.target_weight,
+            "reps_text": e.reps_text,
+            "notes": e.notes,
+            "superset_group": e.superset_group,
+        } for e in plan.exercises],
+    })
+    await state.set_state(WorkoutStates.ai_plan_confirm)
+
+    try:
+        await placeholder.edit_text("\n".join(lines), parse_mode="HTML",
+                                    reply_markup=ai_plan_confirm(target_date.isoformat(), replace=replace))
+    except Exception:
+        await cb.message.answer("\n".join(lines), parse_mode="HTML",
+                                reply_markup=ai_plan_confirm(target_date.isoformat(), replace=replace))
+
+
+@router.callback_query(F.data.startswith("ai_plan:save:"), WorkoutStates.ai_plan_confirm)
+async def cb_ai_plan_save(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.db import create_planned_workout, update_planned_workout_notes
+    from datetime import date as _date
+
+    iso = cb.data.split(":", 2)[2]
+    target = _date.fromisoformat(iso)
+    data = await state.get_data()
+    plan_data = data.get("ai_plan", {})
+    if not plan_data:
+        await cb.message.answer("План не найден. Попробуй заново.")
+        return
+    uid = str(cb.from_user.id)
+    plan_id = await create_planned_workout(
+        user_id=uid,
+        planned_date=target,
+        focus_label=plan_data.get("focus_label"),
+        exercises=plan_data.get("exercises", []),
+    )
+    if plan_data.get("notes"):
+        try:
+            await update_planned_workout_notes(plan_id, plan_data["notes"])
+        except Exception:
+            pass
+
     from app.bot.keyboards import post_finish_menu
-    await cb.message.answer("📅 AI-планирование скоро будет (Phase 5).", reply_markup=post_finish_menu())
+    await state.clear()
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer(f"✅ Тренировка на {iso} сохранена.", reply_markup=post_finish_menu())
+
+
+@router.callback_query(F.data.startswith("ai_plan:save_replace:"), WorkoutStates.ai_plan_confirm)
+async def cb_ai_plan_save_replace(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.db import create_planned_workout, update_planned_workout_notes, get_planned_workouts_range, delete_planned_workout
+    from datetime import date as _date
+
+    iso = cb.data.split(":", 2)[2]
+    target = _date.fromisoformat(iso)
+    uid = str(cb.from_user.id)
+    # Soft-delete existing
+    existing = await get_planned_workouts_range(uid, target, target)
+    for e in existing:
+        await delete_planned_workout(e["id"])
+
+    data = await state.get_data()
+    plan_data = data.get("ai_plan", {})
+    if plan_data:
+        plan_id = await create_planned_workout(
+            user_id=uid,
+            planned_date=target,
+            focus_label=plan_data.get("focus_label"),
+            exercises=plan_data.get("exercises", []),
+        )
+        if plan_data.get("notes"):
+            try:
+                await update_planned_workout_notes(plan_id, plan_data["notes"])
+            except Exception:
+                pass
+    from app.bot.keyboards import post_finish_menu
+    await state.clear()
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer(f"✅ Тренировка на {iso} заменена.", reply_markup=post_finish_menu())
+
+
+# ─── week ────────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "ai_plan:week")
+async def cb_ai_plan_week(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.bot.services.planner import generate_week_plan
+    from app.bot.services.formatter import fmt_date, _esc
+    from app.bot.keyboards import ai_plan_week_confirm
+    from datetime import date as _date, timedelta as _td
+
+    today = _date.today()
+    days_until_monday = (7 - today.weekday()) % 7
+    if days_until_monday == 0:
+        days_until_monday = 7
+    next_monday = today + _td(days=days_until_monday)
+
+    placeholder = await cb.message.answer("🧠 Генерирую неделю…")
+    week = await generate_week_plan(str(cb.from_user.id), next_monday)
+    if not week:
+        try:
+            await placeholder.edit_text("❌ Не удалось сгенерировать неделю.")
+        except Exception:
+            pass
+        from app.bot.keyboards import post_finish_menu
+        await cb.message.answer("Что дальше?", reply_markup=post_finish_menu())
+        return
+
+    # Preview
+    text_blocks = []
+    days_assigned = []
+    for i, day in enumerate(week[:7]):
+        d = next_monday + _td(days=i)
+        days_assigned.append(d.isoformat())
+        focus = day.focus_label or ("отдых" if not day.exercises else "тренировка")
+        block = [f"📅 <b>{fmt_date(d)} — {_esc(focus)}</b>"]
+        if day.notes:
+            block.append(f"💬 <i>{_esc(day.notes)}</i>")
+        if not day.exercises:
+            block.append("  <i>отдых</i>")
+        for ex in day.exercises:
+            r_min, r_max = ex.target_reps_min, ex.target_reps_max
+            if r_min and r_max and r_min != r_max:
+                reps = f"{r_min}–{r_max}"
+            elif r_min:
+                reps = str(r_min)
+            else:
+                reps = ex.reps_text or "?"
+            w = f" · {ex.target_weight:g} кг" if ex.target_weight else ""
+            block.append(f"  • {_esc(ex.name)} — {ex.target_sets or '?'}×{reps}{w}")
+        text_blocks.append("\n".join(block))
+
+    await state.update_data(ai_week={
+        "start_date": next_monday.isoformat(),
+        "days": [{
+            "date": days_assigned[i],
+            "focus_label": d.focus_label,
+            "notes": d.notes,
+            "exercises": [{
+                "name": e.name,
+                "target_sets": e.target_sets,
+                "target_reps_min": e.target_reps_min,
+                "target_reps_max": e.target_reps_max,
+                "target_weight": e.target_weight,
+                "reps_text": e.reps_text,
+                "notes": e.notes,
+                "superset_group": e.superset_group,
+            } for e in d.exercises],
+        } for i, d in enumerate(week[:7])],
+    })
+    await state.set_state(WorkoutStates.ai_plan_confirm)
+    text = "\n\n".join(text_blocks)
+    try:
+        await placeholder.edit_text(text[:4000], parse_mode="HTML", reply_markup=ai_plan_week_confirm())
+    except Exception:
+        await cb.message.answer(text[:4000], parse_mode="HTML", reply_markup=ai_plan_week_confirm())
+
+
+@router.callback_query(F.data == "ai_plan:save_week", WorkoutStates.ai_plan_confirm)
+async def cb_ai_plan_save_week(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    from app.db import create_planned_workout, update_planned_workout_notes, get_planned_workouts_range, delete_planned_workout
+    from datetime import date as _date
+
+    data = await state.get_data()
+    week = (data.get("ai_week") or {}).get("days", [])
+    uid = str(cb.from_user.id)
+    saved = 0
+    for d in week:
+        target = _date.fromisoformat(d["date"])
+        # Replace any existing planned workout on that date
+        existing = await get_planned_workouts_range(uid, target, target)
+        for e in existing:
+            await delete_planned_workout(e["id"])
+        # Skip empty (rest) days
+        if not d.get("exercises"):
+            continue
+        plan_id = await create_planned_workout(
+            user_id=uid,
+            planned_date=target,
+            focus_label=d.get("focus_label"),
+            exercises=d.get("exercises", []),
+        )
+        if d.get("notes"):
+            try:
+                await update_planned_workout_notes(plan_id, d["notes"])
+            except Exception:
+                pass
+        saved += 1
+    from app.bot.keyboards import post_finish_menu
+    await state.clear()
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer(f"✅ Неделя сохранена: {saved} тренировок.", reply_markup=post_finish_menu())
 
 
 @router.callback_query(F.data == "workout:finish_no", WorkoutStates.confirm_finish)

@@ -85,6 +85,68 @@ def post_finish_menu() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def plan_next_mode() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✍️ Вручную", callback_data="plan_next:manual")
+    kb.button(text="🤖 Через AI", callback_data="plan_next:ai")
+    kb.button(text="🔙 Назад", callback_data="finish:done")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def ai_plan_period() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📆 1 день", callback_data="ai_plan:day")
+    kb.button(text="🗓 Неделя", callback_data="ai_plan:week")
+    kb.button(text="🔙 Назад", callback_data="finish:plan_next")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def ai_plan_day_picker(days: list[tuple[str, str, str | None]]) -> InlineKeyboardMarkup:
+    """days = list of (iso_date, label, busy_with_focus_or_None)."""
+    kb = InlineKeyboardBuilder()
+    for iso, label, busy in days:
+        prefix = "🔒 " if busy else ""
+        suffix = f" ({busy})" if busy else ""
+        kb.button(text=f"{prefix}{label}{suffix}", callback_data=f"ai_plan:date:{iso}")
+    kb.button(text="🔙 Назад", callback_data="finish:plan_next")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def ai_plan_confirm(date_iso: str, replace: bool = False) -> InlineKeyboardMarkup:
+    """Confirm-or-discard for a generated single-day plan.
+    `replace=True` adds the explicit replace button when the day was busy.
+    """
+    kb = InlineKeyboardBuilder()
+    if replace:
+        kb.button(text="🔁 Заменить существующую", callback_data=f"ai_plan:save_replace:{date_iso}")
+    else:
+        kb.button(text="✅ Сохранить", callback_data=f"ai_plan:save:{date_iso}")
+    kb.button(text="🔄 Другой день", callback_data="ai_plan:day")
+    kb.button(text="❌ Отмена", callback_data="finish:done")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def ai_plan_week_confirm() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Сохранить неделю", callback_data="ai_plan:save_week")
+    kb.button(text="❌ Отмена", callback_data="finish:done")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def occupied_day_choice(date_iso: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔁 Заменить", callback_data=f"ai_plan:gen:{date_iso}:replace")
+    kb.button(text="📆 Другой день", callback_data="ai_plan:day")
+    kb.button(text="❌ Отмена", callback_data="finish:done")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def confirm_sets(sets_summary: str) -> InlineKeyboardMarkup:
     """Confirm or discard parsed sets."""
     kb = InlineKeyboardBuilder()
