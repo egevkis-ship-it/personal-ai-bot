@@ -130,8 +130,11 @@ def plan_navigate(plan_id: int, idx: int, total: int) -> InlineKeyboardMarkup:
     if idx < total - 1:
         kb.button(text="▶️", callback_data=f"plan:nav:{idx+1}")
     kb.adjust(3)
-    kb.row(InlineKeyboardButton(text="▶️ Начать", callback_data=f"plan:start:{plan_id}"))
-    kb.row(InlineKeyboardButton(text="🔙 Назад к планам", callback_data="plan:view"))
+    kb.row(
+        InlineKeyboardButton(text="▶️ Начать", callback_data=f"plan:start:{plan_id}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"plan:delete:{plan_id}"),
+    )
+    kb.row(InlineKeyboardButton(text="🔙 К меню планов", callback_data="back:plan"))
     return kb.as_markup()
 
 
