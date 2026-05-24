@@ -288,7 +288,7 @@ async def get_last_set(workout_id: int) -> dict | None:
 # ─────────────────────────── service ops ───────────────────────────────────
 
 async def db_stats(user_id: str) -> dict:
-    """Counts per table for the user (planned, workouts) + global rows for cache."""
+    """Counts per table for the user (planned, workouts, measurements, photos)."""
     async with get_session() as s:
         r = await s.execute(
             text("""
@@ -299,6 +299,8 @@ async def db_stats(user_id: str) -> dict:
                     (SELECT COUNT(*) FROM workouts WHERE user_id = :uid AND finished_at IS NOT NULL) AS workouts_finished,
                     (SELECT COUNT(*) FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
                        WHERE w.user_id = :uid) AS sets_total,
+                    (SELECT COUNT(*) FROM body_measurements WHERE user_id = :uid) AS measurements_total,
+                    (SELECT COUNT(*) FROM progress_photos WHERE user_id = :uid) AS photos_total,
                     (SELECT COUNT(*) FROM exercise_aliases) AS aliases_total
             """),
             {"uid": user_id},
@@ -337,4 +339,145 @@ async def wipe_all_user_data(user_id: str) -> dict:
     """Wipe everything for this user. Returns counts deleted."""
     plans = await wipe_planned_workouts(user_id)
     workouts = await wipe_workouts(user_id)
-    return {"planned": plans, "workouts": workouts}
+    measurements = await wipe_measurements(user_id)
+    photos = await wipe_photos(user_id)
+    return {
+        "planned": plans,
+        "workouts": workouts,
+        "measurements": measurements,
+        "photos": photos,
+    }
+
+
+# ─────────────────────────── body measurements ─────────────────────────────
+
+_M_FIELDS = (
+    "weight_kg", "calf_cm", "thigh_cm", "hips_cm", "belly_cm",
+    "waist_cm", "chest_cm", "arm_cm", "neck_cm",
+)
+
+
+async def create_measurement(
+    user_id: str,
+    taken_on: str | date,
+    values: dict,
+    notes: str | None = None,
+) -> int:
+    d = _to_date(taken_on)
+    cols = ["user_id", "taken_on", "notes"]
+    params: dict = {"uid": user_id, "d": d, "notes": notes}
+    placeholders = [":uid", ":d", ":notes"]
+    for f in _M_FIELDS:
+        if f in values and values[f] is not None:
+            cols.append(f); placeholders.append(f":{f}"); params[f] = values[f]
+    sql = (
+        f"INSERT INTO body_measurements ({', '.join(cols)}) "
+        f"VALUES ({', '.join(placeholders)}) RETURNING id"
+    )
+    async with get_session() as s:
+        r = await s.execute(text(sql), params)
+        return r.scalar_one()
+
+
+async def get_measurements(user_id: str, limit: int = 30) -> list[dict]:
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                SELECT * FROM body_measurements
+                WHERE user_id = :uid
+                ORDER BY taken_on DESC, id DESC
+                LIMIT :lim
+            """),
+            {"uid": user_id, "lim": limit},
+        )
+        return [dict(x) for x in r.mappings().all()]
+
+
+async def get_last_measurement(user_id: str) -> dict | None:
+    rows = await get_measurements(user_id, limit=1)
+    return rows[0] if rows else None
+
+
+async def delete_measurement(measurement_id: int) -> None:
+    async with get_session() as s:
+        await s.execute(text("DELETE FROM body_measurements WHERE id = :id"), {"id": measurement_id})
+
+
+async def wipe_measurements(user_id: str) -> int:
+    async with get_session() as s:
+        r = await s.execute(
+            text("DELETE FROM body_measurements WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        return r.rowcount or 0
+
+
+# ─────────────────────────── progress photos ──────────────────────────────
+
+async def create_photo(
+    user_id: str,
+    taken_on: str | date,
+    telegram_file_id: str,
+    telegram_file_unique_id: str | None = None,
+    ai_description: str | None = None,
+    notes: str | None = None,
+) -> int:
+    d = _to_date(taken_on)
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                INSERT INTO progress_photos
+                    (user_id, taken_on, telegram_file_id, telegram_file_unique_id,
+                     ai_description, notes)
+                VALUES (:uid, :d, :fid, :fuid, :desc, :notes)
+                RETURNING id
+            """),
+            {
+                "uid": user_id, "d": d, "fid": telegram_file_id,
+                "fuid": telegram_file_unique_id, "desc": ai_description, "notes": notes,
+            },
+        )
+        return r.scalar_one()
+
+
+async def get_photos(user_id: str, limit: int = 30) -> list[dict]:
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                SELECT * FROM progress_photos
+                WHERE user_id = :uid
+                ORDER BY taken_on DESC, id DESC
+                LIMIT :lim
+            """),
+            {"uid": user_id, "lim": limit},
+        )
+        return [dict(x) for x in r.mappings().all()]
+
+
+async def get_photo(photo_id: int) -> dict | None:
+    async with get_session() as s:
+        r = await s.execute(text("SELECT * FROM progress_photos WHERE id = :id"), {"id": photo_id})
+        row = r.mappings().first()
+        return dict(row) if row else None
+
+
+async def update_photo_notes(photo_id: int, notes: str) -> None:
+    async with get_session() as s:
+        await s.execute(
+            text("UPDATE progress_photos SET notes = :n WHERE id = :id"),
+            {"id": photo_id, "n": notes},
+        )
+
+
+async def delete_photo(photo_id: int) -> None:
+    async with get_session() as s:
+        await s.execute(text("DELETE FROM progress_photos WHERE id = :id"), {"id": photo_id})
+
+
+async def wipe_photos(user_id: str) -> int:
+    async with get_session() as s:
+        r = await s.execute(
+            text("DELETE FROM progress_photos WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        return r.rowcount or 0

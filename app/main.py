@@ -13,7 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 
-from app.bot.handlers import history, menu, plans, service, workout
+from app.bot.handlers import history, measurements, menu, photos, plans, service, workout
 from app.config import settings
 from app.db.engine import init_db, engine
 
@@ -88,6 +88,34 @@ CREATE TABLE IF NOT EXISTS exercise_aliases (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS body_measurements (
+    id           SERIAL PRIMARY KEY,
+    user_id      TEXT        NOT NULL,
+    taken_on     DATE        NOT NULL,
+    weight_kg    NUMERIC,
+    calf_cm      NUMERIC,
+    thigh_cm     NUMERIC,
+    hips_cm      NUMERIC,
+    belly_cm     NUMERIC,
+    waist_cm     NUMERIC,
+    chest_cm     NUMERIC,
+    arm_cm       NUMERIC,
+    neck_cm      NUMERIC,
+    notes        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS progress_photos (
+    id                       SERIAL PRIMARY KEY,
+    user_id                  TEXT        NOT NULL,
+    taken_on                 DATE        NOT NULL,
+    telegram_file_id         TEXT        NOT NULL,
+    telegram_file_unique_id  TEXT,
+    ai_description           TEXT,
+    notes                    TEXT,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 ALTER TABLE planned_workouts ADD COLUMN IF NOT EXISTS notes TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_pw_user_date ON planned_workouts(user_id, planned_date);
@@ -95,6 +123,8 @@ CREATE INDEX IF NOT EXISTS idx_w_user_date  ON workouts(user_id, workout_date);
 CREATE INDEX IF NOT EXISTS idx_es_workout   ON exercise_sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_es_name      ON exercise_sets(workout_id, exercise_name);
 CREATE INDEX IF NOT EXISTS idx_ea_clean     ON exercise_aliases(alias_clean);
+CREATE INDEX IF NOT EXISTS idx_bm_user_date ON body_measurements(user_id, taken_on DESC);
+CREATE INDEX IF NOT EXISTS idx_pp_user_date ON progress_photos(user_id, taken_on DESC);
 """
 
 
@@ -135,6 +165,8 @@ async def main() -> None:
     dp.include_router(workout.router)
     dp.include_router(plans.router)
     dp.include_router(history.router)
+    dp.include_router(measurements.router)
+    dp.include_router(photos.router)
     dp.include_router(service.router)
     dp.include_router(menu.router)   # catch-all last
 

@@ -33,3 +33,14 @@ class PlanStates(StatesGroup):
 class HistoryStates(StatesGroup):
     browsing = State()            # browsing history list
     choose_export = State()       # text vs CSV
+
+
+class MeasurementStates(StatesGroup):
+    enter_input = State()         # waiting for free-text or voice
+    confirm = State()             # showing parsed values, confirm or fill
+    fill_field = State()          # asking for one specific missing field
+
+
+class PhotoStates(StatesGroup):
+    waiting_photo = State()       # user pressed "New photo", waiting for upload
+    waiting_note = State()        # optional note after upload

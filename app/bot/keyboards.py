@@ -22,9 +22,73 @@ def main_menu() -> ReplyKeyboardMarkup:
     kb.button(text="💪 Тренировка")
     kb.button(text="📅 Планы")
     kb.button(text="📖 История")
+    kb.button(text="📏 Замеры")
+    kb.button(text="📸 Фото")
     kb.button(text="⚙️ Сервис")
-    kb.adjust(3, 1)
+    kb.adjust(3, 2, 1)
     return kb.as_markup(resize_keyboard=True)
+
+
+# ─────────────────────────── measurements ───────────────────────────────────
+
+def measurements_menu(has_history: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Новые замеры", callback_data="meas:new")
+    if has_history:
+        kb.button(text="📊 История замеров", callback_data="meas:history")
+    kb.button(text="🔙 Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def measurement_confirm(missing_count: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if missing_count > 0:
+        kb.button(text=f"➕ Дозаполнить ({missing_count})", callback_data="meas:fill_next")
+    kb.button(text="✅ Сохранить как есть", callback_data="meas:save")
+    kb.button(text="✏️ Ввести заново", callback_data="meas:new")
+    kb.button(text="❌ Отмена", callback_data="meas:cancel")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def measurement_skip_field() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⏭ Пропустить", callback_data="meas:skip_field"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="meas:cancel"),
+    ]])
+
+
+# ─────────────────────────── photos ────────────────────────────────────────
+
+def photos_menu(has_history: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📷 Новое фото", callback_data="photo:new")
+    if has_history:
+        kb.button(text="🖼 История фото", callback_data="photo:history")
+    kb.button(text="🔙 Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def photo_after_upload() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⏭ Без комментария", callback_data="photo:skip_note"),
+        InlineKeyboardButton(text="❌ Удалить", callback_data="photo:delete_last"),
+    ]])
+
+
+def photo_nav(photo_id: int, idx: int, total: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if idx > 0:
+        kb.button(text="◀️", callback_data=f"photo:nav:{idx-1}")
+    kb.button(text=f"{idx+1}/{total}", callback_data="photo:noop")
+    if idx < total - 1:
+        kb.button(text="▶️", callback_data=f"photo:nav:{idx+1}")
+    kb.adjust(3)
+    kb.row(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"photo:delete:{photo_id}"))
+    kb.row(InlineKeyboardButton(text="🔙 К меню фото", callback_data="photo:back"))
+    return kb.as_markup()
 
 
 def service_menu() -> InlineKeyboardMarkup:
@@ -32,6 +96,8 @@ def service_menu() -> InlineKeyboardMarkup:
     kb.button(text="📊 Статистика БД", callback_data="svc:stats")
     kb.button(text="🗑 Очистить запланированные", callback_data="svc:wipe_plans")
     kb.button(text="🗑 Очистить историю", callback_data="svc:wipe_history")
+    kb.button(text="🗑 Очистить замеры", callback_data="svc:wipe_measurements")
+    kb.button(text="🗑 Очистить фото", callback_data="svc:wipe_photos")
     kb.button(text="🧹 Очистить AI-кэш упражнений", callback_data="svc:wipe_aliases")
     kb.button(text="⚠️ ПОЛНЫЙ СБРОС (всё)", callback_data="svc:wipe_all")
     kb.button(text="🔙 Назад", callback_data="back:main")
