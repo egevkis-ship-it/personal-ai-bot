@@ -28,6 +28,7 @@ from app.bot.services.measurement_parser import (
     field_label_ru,
     missing_fields,
     parse_measurement,
+    parse_measurement_batch,
 )
 from app.bot.states import MeasurementStates
 from app.db import (
@@ -95,12 +96,15 @@ async def cb_meas_new(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(MeasurementStates.enter_input)
     await cb.message.edit_reply_markup(reply_markup=None)
     await cb.message.answer(
-        "📏 Отправь замеры одним сообщением (текст или голос).\n\n"
-        "Пример:\n"
+        "📏 Отправь замеры (текст или голос).\n\n"
+        "<b>Одна запись:</b>\n"
         "<i>сегодня вес 102.7, голень 44.5, бедро 68, бёдра 104, "
         "живот 95, талия 92.5, грудь 106, рука 41, шея 40</i>\n\n"
-        "Можно указать дату (<i>24.05.2026: ...</i> или <i>вчера: ...</i>) "
-        "или пропустить — возьмём сегодня.",
+        "<b>Пачка за разные даты — по одной строке на дату:</b>\n"
+        "<i>04.01.2026: вес 106, бедро 71, бёдра 109, ...</i>\n"
+        "<i>25.01.2026: вес 105.3, бедро 70.5, ...</i>\n\n"
+        "Если пачка — сохраню всё сразу, не спрашивая дозаполнения.\n"
+        "Если одна запись — спрошу про недостающие параметры.",
         parse_mode="HTML",
     )
 
@@ -131,12 +135,46 @@ async def handle_meas_voice(message: Message, state: FSMContext) -> None:
 
 
 async def _process_measurement_text(message: Message, state: FSMContext, text: str) -> None:
-    parsed = await parse_measurement(text)
-    if not parsed.get("values"):
+    entries = await parse_measurement_batch(text)
+    valid = [e for e in entries if e.get("values")]
+    if not valid:
         await message.answer(
             "❌ Не нашёл ни одного замера в сообщении. Попробуй ещё раз или нажми /start."
         )
         return
+
+    # BATCH mode — multiple dated entries: save all without asking for fills
+    if len(valid) > 1:
+        uid = str(message.from_user.id)
+        saved = 0
+        skipped = 0
+        per_day_summary = []
+        for e in valid:
+            d_iso = e.get("date") or date.today().isoformat()
+            try:
+                await create_measurement(uid, d_iso, e["values"], notes=e.get("notes"))
+                saved += 1
+                per_day_summary.append(
+                    f"  • <b>{d_iso}</b>: {len(e['values'])} парам."
+                )
+            except Exception as exc:
+                log.warning("save batch entry failed for %s: %s", d_iso, exc)
+                skipped += 1
+        await state.clear()
+        body = "\n".join(per_day_summary[:20])
+        if len(per_day_summary) > 20:
+            body += f"\n  …ещё {len(per_day_summary) - 20}"
+        msg = (
+            f"✅ Сохранено замеров: <b>{saved}</b>"
+            + (f"  · ошибок: {skipped}" if skipped else "")
+            + f"\n\n{body}"
+        )
+        await message.answer(msg, parse_mode="HTML",
+                              reply_markup=measurements_menu(has_history=True))
+        return
+
+    # SINGLE mode — current flow with fill-missing prompt
+    parsed = valid[0]
     await state.update_data(meas_parsed=parsed)
     await state.set_state(MeasurementStates.confirm)
     miss = missing_fields(parsed["values"])

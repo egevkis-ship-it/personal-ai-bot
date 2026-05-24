@@ -296,5 +296,148 @@ async def parse_measurement(raw: str) -> dict:
     }
 
 
+# ─────────────────────────── batch parsing ────────────────────────────────
+
+_AI_BATCH_SYSTEM = """\
+Ты парсер пачки замеров тела из дневника. На вход — текст где может быть \
+ОДИН или НЕСКОЛЬКО блоков с замерами (часто по одному на строку, с разными датами).
+
+Пример входа:
+  04.01.2026: вес 106.0, голень 46, бедро 71, бёдра 109, живот 106, талия 99
+  25.01.2026: вес 105.3, голень 46, бедро 70.5, бёдра 112
+  ...
+
+Верни строго JSON:
+{"entries":[
+  {"date":"2026-01-04","values":{"weight_kg":106.0,"calf_cm":46,"thigh_cm":71,"hips_cm":109,"belly_cm":106,"waist_cm":99},"notes":null},
+  {"date":"2026-01-25","values":{"weight_kg":105.3,"calf_cm":46,"thigh_cm":70.5,"hips_cm":112},"notes":null}
+]}
+
+Правила (применяй к каждой записи):
+  values содержит только указанные параметры. Не ставь null, просто опусти ключ.
+  date — ISO YYYY-MM-DD. Если в блоке нет даты — date=null (вызывающий код подставит).
+
+ПОЛЯ values:
+  weight_kg, calf_cm, thigh_cm (бедро — одна нога, 50-80см),
+  hips_cm (бёдра — обхват таза, 90-130см),
+  belly_cm, waist_cm, chest_cm, arm_cm, neck_cm
+
+ИСПРАВЛЯЙ опечатки/ошибки распознавания (Талмя→талия, кандели→…, беодра→бёдра и т.п.)
+
+РАЗРЕШАЙ "бедро vs бёдра" без ё:
+  - порядок: первое = thigh_cm, второе = hips_cm
+  - значение > 85 см → hips_cm, < 80 см → thigh_cm
+
+Если запись только одна — entries содержит ровно один элемент.
+Только JSON, никаких пояснений.
+"""
+
+
+async def ai_parse_measurement_batch(raw: str) -> list[dict] | None:
+    """AI parser for batch input. Returns list of {date, values, notes, raw} or None."""
+    try:
+        resp = await _anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=_AI_BATCH_SYSTEM,
+            messages=[{"role": "user", "content": raw}],
+        )
+        text_out = resp.content[0].text.strip()
+        if text_out.startswith("```"):
+            text_out = text_out.split("\n", 1)[1].rsplit("```", 1)[0]
+        i = text_out.find("{")
+        j = text_out.rfind("}")
+        if i < 0 or j < 0:
+            return None
+        data = json.loads(text_out[i:j + 1])
+        entries = data.get("entries") or []
+        if not isinstance(entries, list):
+            return None
+        out = []
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            vals = e.get("values") or {}
+            # drop nulls and non-numeric
+            cleaned = {}
+            for k, v in vals.items():
+                if v is None:
+                    continue
+                try:
+                    cleaned[k] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            if not cleaned:
+                continue
+            out.append({
+                "date": e.get("date"),
+                "values": cleaned,
+                "notes": e.get("notes"),
+                "raw": raw,
+            })
+        return out or None
+    except Exception as exc:
+        log.error("ai_parse_measurement_batch error: %s", exc)
+        return None
+
+
+async def parse_measurement_batch(raw: str) -> list[dict]:
+    """Returns one or more parsed measurement entries.
+
+    Always returns a list. Length 1 == single-entry mode (caller can ask
+    user to fill missing fields). Length > 1 == batch mode (caller should
+    save all without asking for missing data).
+    """
+    if not raw or not raw.strip():
+        return []
+    # Detect "looks like batch": ≥2 separate dates in the input
+    date_tokens_seen = set()
+    for pat, _ in _DATE_PATTERNS:
+        for m in re.finditer(pat, raw.lower()):
+            date_tokens_seen.add(m.group(1))
+    looks_like_batch = len(date_tokens_seen) >= 2 or _is_multiline_with_metrics(raw)
+
+    if looks_like_batch:
+        ai_batch = await ai_parse_measurement_batch(raw)
+        if ai_batch:
+            return ai_batch
+        # Fallback: split by lines and parse each
+        return _regex_split_batch(raw)
+
+    # Single-entry — use existing hybrid pipeline
+    single = await parse_measurement(raw)
+    if single and (single.get("values") or single.get("date")):
+        return [single]
+    return []
+
+
+def _is_multiline_with_metrics(raw: str) -> bool:
+    """True if there are ≥3 lines and at least 2 contain measurement keywords."""
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 3:
+        return False
+    metric_word = re.compile(r"\b(вес|голен|бедр|бёдр|живот|тали|груд|рук|шея)\w*\b",
+                              re.IGNORECASE)
+    hits = sum(1 for l in lines if metric_word.search(l))
+    return hits >= 2
+
+
+def _regex_split_batch(raw: str) -> list[dict]:
+    """Fallback: split text into per-line blocks and run the synchronous pure
+    parser on each. Each line with both a date and at least one metric becomes
+    its own entry.
+    """
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Skip header-only lines / pure comments
+        parsed = parse_measurement_text(line)
+        if parsed.get("values"):
+            out.append(parsed)
+    return out
+
+
 def missing_fields(values: dict) -> list[str]:
     return [f for f in ALL_FIELDS if f not in values]

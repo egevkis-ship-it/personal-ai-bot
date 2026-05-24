@@ -97,8 +97,12 @@ async def cb_photo_new(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.message.edit_reply_markup(reply_markup=None)
     await cb.message.answer(
         "📷 Отправь фото (можно серию — несколько подряд или альбомом).\n\n"
-        "Я подожду 5 секунд после последнего и пошлю всё в фитнес-анализ "
-        "одним пакетом. Или нажми «Готово» когда закончишь.",
+        "Я подожду 5-8 секунд после последнего и пошлю всё в фитнес-анализ "
+        "одним пакетом. Или нажми «Готово» когда закончишь.\n\n"
+        "💡 В подписи к фото можно указать дату: <i>15.05.2026</i>, "
+        "<i>вчера</i>, <i>03.02.2026 после отпуска</i>. Дата применится "
+        "ко всей серии. Без подписи — сегодня.",
+        parse_mode="HTML",
     )
 
 
@@ -108,6 +112,22 @@ async def handle_photo_upload(message: Message, state: FSMContext) -> None:
     photo = message.photo[-1]
     is_album = bool(message.media_group_id)
     debounce_s = _DEBOUNCE_SECONDS_ALBUM if is_album else _DEBOUNCE_SECONDS_SINGLE
+
+    # Caption may carry a date ("15.05.2026", "вчера", "03.02.2026 после отпуска")
+    # and a free-form note. We pull both out.
+    from app.bot.services.measurement_parser import _parse_date as _parse_caption_date
+    caption_raw = (message.caption or "").strip()
+    caption_date_iso: str | None = None
+    caption_note: str | None = None
+    if caption_raw:
+        d, span = _parse_caption_date(caption_raw)
+        if d:
+            caption_date_iso = d.isoformat()
+            # remove date token from caption to use rest as note
+            remainder = (caption_raw[:span[0]] + " " + caption_raw[span[1]:]).strip(" :,-—").strip()
+            caption_note = remainder or None
+        else:
+            caption_note = caption_raw
 
     async with _lock(uid):
         data = await state.get_data()
@@ -119,13 +139,30 @@ async def handle_photo_upload(message: Message, state: FSMContext) -> None:
                 "file_unique_id": photo.file_unique_id,
             })
         token = int(data.get("debounce_token") or 0) + 1
+        # Series-level date: first photo with a recognised caption-date wins.
+        existing_date = data.get("series_date")
+        series_date = existing_date or caption_date_iso
+        # Concatenate non-empty captions (first non-empty wins as base, append others)
+        existing_caption = (data.get("series_caption_note") or "").strip()
+        if caption_note:
+            if existing_caption and caption_note not in existing_caption:
+                series_caption = f"{existing_caption} · {caption_note}"
+            else:
+                series_caption = existing_caption or caption_note
+        else:
+            series_caption = existing_caption or None
         await state.update_data(
             photo_buffer=buf, debounce_token=token, _uid=uid,
-            is_album=is_album,
+            is_album=is_album, series_date=series_date,
+            series_caption_note=series_caption,
         )
         status_id = data.get("status_msg_id")
+        date_hint = ""
+        if series_date:
+            date_hint = f"\n📅 Привязано к дате: <b>{series_date}</b>"
         status_text = (
-            f"📸 Получено фото: <b>{len(buf)}</b>\n"
+            f"📸 Получено фото: <b>{len(buf)}</b>"
+            f"{date_hint}\n"
             f"⏳ Жду ещё {int(debounce_s)}с или нажми Готово."
         )
         try:
@@ -245,12 +282,22 @@ async def _process_snapshot(message: Message, state: FSMContext,
     uid = state_data.get("_uid") or (
         str(message.from_user.id) if message.from_user else str(message.chat.id)
     )
+    # Date from caption if any photo had one; otherwise today.
+    series_date_iso = state_data.get("series_date")
+    if series_date_iso:
+        try:
+            taken_on = date.fromisoformat(series_date_iso)
+        except ValueError:
+            taken_on = date.today()
+    else:
+        taken_on = date.today()
+    caption_note = state_data.get("series_caption_note")
     saved_ids: list[int] = []
     for item in buf:
         try:
             pid = await _create_photo_with_series(
                 user_id=uid,
-                taken_on=date.today(),
+                taken_on=taken_on,
                 telegram_file_id=item["file_id"],
                 telegram_file_unique_id=item.get("file_unique_id"),
                 ai_description=report,
@@ -263,9 +310,19 @@ async def _process_snapshot(message: Message, state: FSMContext,
     last_pid = saved_ids[-1] if saved_ids else None
     await state.update_data(last_photo_id=last_pid, photo_series_id=series_id)
 
+    # If caption-derived note exists, attach it now to the most recent photo
+    if caption_note and last_pid:
+        try:
+            from app.db import update_photo_notes
+            await update_photo_notes(last_pid, caption_note)
+        except Exception as exc:
+            log.warning("save caption note failed: %s", exc)
+
+    date_line = f"📅 Дата: <b>{taken_on.isoformat()}</b>\n"
     final_text = (
-        f"✅ Сохранено фото: <b>{len(saved_ids)}</b>\n\n"
-        f"<b>Фитнес-анализ серии:</b>\n{report}\n\n"
+        f"✅ Сохранено фото: <b>{len(saved_ids)}</b>\n"
+        f"{date_line}"
+        f"\n<b>Фитнес-анализ серии:</b>\n{report}\n\n"
         "Можешь дописать комментарий (текст или голос) или пропустить."
     )
     try:
