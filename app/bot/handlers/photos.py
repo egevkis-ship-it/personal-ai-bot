@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+from collections import defaultdict
 from datetime import date
 
 from aiogram import F, Router
@@ -44,7 +45,19 @@ from app.db import (
 log = logging.getLogger(__name__)
 router = Router(name="photos")
 
-_DEBOUNCE_SECONDS = 5.0
+# Debounce. For Telegram albums (media_group_id present) we wait longer so
+# all photos of the album have time to arrive — TG sends them sequentially
+# with 1-3s gaps and a 4-pic album can stretch over 5+ seconds.
+_DEBOUNCE_SECONDS_SINGLE = 4.0
+_DEBOUNCE_SECONDS_ALBUM = 8.0
+
+# Per-user lock so handle_photo_upload and _commit_series cannot race
+# (read state → modify → write) against each other.
+_user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+def _lock(uid: str) -> asyncio.Lock:
+    return _user_locks[uid]
 
 
 # ─────────────────────────── entry ────────────────────────────────────────
@@ -91,59 +104,87 @@ async def cb_photo_new(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(PhotoStates.waiting_photo, F.photo)
 async def handle_photo_upload(message: Message, state: FSMContext) -> None:
+    uid = str(message.from_user.id)
     photo = message.photo[-1]
-    data = await state.get_data()
-    buf: list[dict] = list(data.get("photo_buffer") or [])
-    buf.append({
-        "file_id": photo.file_id,
-        "file_unique_id": photo.file_unique_id,
-    })
-    token = int(data.get("debounce_token") or 0) + 1
-    await state.update_data(photo_buffer=buf, debounce_token=token,
-                            _uid=str(message.from_user.id))
+    is_album = bool(message.media_group_id)
+    debounce_s = _DEBOUNCE_SECONDS_ALBUM if is_album else _DEBOUNCE_SECONDS_SINGLE
 
-    # Show / update single status message
-    status_id = data.get("status_msg_id")
-    status_text = (
-        f"📸 Получено фото: <b>{len(buf)}</b>\n"
-        f"⏳ Жду ещё {int(_DEBOUNCE_SECONDS)}с или нажми Готово."
-    )
-    try:
-        if status_id:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id, message_id=status_id,
-                text=status_text, parse_mode="HTML", reply_markup=_collecting_kb(),
-            )
-        else:
+    async with _lock(uid):
+        data = await state.get_data()
+        buf: list[dict] = list(data.get("photo_buffer") or [])
+        # Skip duplicates by file_unique_id (Telegram may resend during retries)
+        if not any(b.get("file_unique_id") == photo.file_unique_id for b in buf):
+            buf.append({
+                "file_id": photo.file_id,
+                "file_unique_id": photo.file_unique_id,
+            })
+        token = int(data.get("debounce_token") or 0) + 1
+        await state.update_data(
+            photo_buffer=buf, debounce_token=token, _uid=uid,
+            is_album=is_album,
+        )
+        status_id = data.get("status_msg_id")
+        status_text = (
+            f"📸 Получено фото: <b>{len(buf)}</b>\n"
+            f"⏳ Жду ещё {int(debounce_s)}с или нажми Готово."
+        )
+        try:
+            if status_id:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id, message_id=status_id,
+                    text=status_text, parse_mode="HTML", reply_markup=_collecting_kb(),
+                )
+            else:
+                sent = await message.answer(status_text, parse_mode="HTML",
+                                            reply_markup=_collecting_kb())
+                await state.update_data(status_msg_id=sent.message_id)
+        except Exception:
             sent = await message.answer(status_text, parse_mode="HTML",
                                         reply_markup=_collecting_kb())
             await state.update_data(status_msg_id=sent.message_id)
-    except Exception:
-        # If edit fails (e.g. message too old) — send fresh
-        sent = await message.answer(status_text, parse_mode="HTML",
-                                    reply_markup=_collecting_kb())
-        await state.update_data(status_msg_id=sent.message_id)
 
-    # Fire-and-forget debounce
-    asyncio.create_task(_debounce_and_commit(message, state, token))
+    # Fire-and-forget debounce (outside lock so other uploads can update buf)
+    asyncio.create_task(_debounce_and_commit(message, state, token, debounce_s))
 
 
-async def _debounce_and_commit(message: Message, state: FSMContext, my_token: int) -> None:
-    await asyncio.sleep(_DEBOUNCE_SECONDS)
-    data = await state.get_data()
-    if int(data.get("debounce_token") or 0) != my_token:
-        return  # superseded by a newer photo
-    await _commit_series(message, state)
+async def _debounce_and_commit(message: Message, state: FSMContext,
+                                my_token: int, sleep_s: float) -> None:
+    await asyncio.sleep(sleep_s)
+    uid_data = await state.get_data()
+    uid = uid_data.get("_uid") or (str(message.from_user.id) if message.from_user
+                                    else str(message.chat.id))
+    async with _lock(uid):
+        data = await state.get_data()
+        if int(data.get("debounce_token") or 0) != my_token:
+            return  # superseded by a newer photo
+        # Snapshot + atomically flip state so subsequent photos go to a fresh buffer
+        buf = list(data.get("photo_buffer") or [])
+        status_id = data.get("status_msg_id")
+        if not buf:
+            return
+        await state.update_data(photo_buffer=[], status_msg_id=None, debounce_token=0)
+        await state.set_state(PhotoStates.waiting_note)
+    # Process outside the lock — vision call is slow
+    await _process_snapshot(message, state, buf, status_id)
 
 
 @router.callback_query(F.data == "photo:commit", PhotoStates.waiting_photo)
 async def cb_photo_commit(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
-    # Bump token so any pending debounce is cancelled
-    data = await state.get_data()
-    token = int(data.get("debounce_token") or 0) + 100
-    await state.update_data(debounce_token=token)
-    await _commit_series(cb.message, state)
+    uid = str(cb.from_user.id)
+    async with _lock(uid):
+        data = await state.get_data()
+        buf = list(data.get("photo_buffer") or [])
+        status_id = data.get("status_msg_id")
+        if not buf:
+            await cb.message.answer("Нет фото для анализа.",
+                                    reply_markup=photos_menu(False))
+            await state.clear()
+            return
+        # Bump token so any pending debounce is cancelled
+        await state.update_data(photo_buffer=[], status_msg_id=None, debounce_token=0)
+        await state.set_state(PhotoStates.waiting_note)
+    await _process_snapshot(cb.message, state, buf, status_id)
 
 
 @router.callback_query(F.data == "photo:cancel", PhotoStates.waiting_photo)
@@ -154,17 +195,11 @@ async def cb_photo_cancel(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.message.answer("❌ Отменено.", reply_markup=photos_menu(has_history=True))
 
 
-async def _commit_series(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    buf: list[dict] = list(data.get("photo_buffer") or [])
-    if not buf:
-        await message.answer("Нет фото для анализа.", reply_markup=photos_menu(False))
-        await state.clear()
-        return
-    status_id = data.get("status_msg_id")
+async def _process_snapshot(message: Message, state: FSMContext,
+                             buf: list[dict], status_id: int | None) -> None:
+    """Process a snapshot of photos that was taken atomically inside the lock."""
     bot = message.bot
 
-    # Update status — analysing
     analyzing_text = (
         f"🧠 Анализирую серию ({len(buf)} фото) через AI Vision…\n"
         "Это занимает 10-30 секунд."
@@ -175,10 +210,11 @@ async def _commit_series(message: Message, state: FSMContext) -> None:
                 chat_id=message.chat.id, message_id=status_id,
                 text=analyzing_text, reply_markup=None,
             )
+        else:
+            await message.answer(analyzing_text)
     except Exception:
         await message.answer(analyzing_text)
 
-    # Download every photo
     images: list[tuple[bytes, str]] = []
     for item in buf:
         try:
@@ -193,8 +229,8 @@ async def _commit_series(message: Message, state: FSMContext) -> None:
         msg = "❌ Не удалось скачать ни одно фото."
         try:
             if status_id:
-                await bot.edit_message_text(chat_id=message.chat.id, message_id=status_id,
-                                            text=msg)
+                await bot.edit_message_text(chat_id=message.chat.id,
+                                            message_id=status_id, text=msg)
             else:
                 await message.answer(msg)
         except Exception:
@@ -202,13 +238,9 @@ async def _commit_series(message: Message, state: FSMContext) -> None:
         await state.clear()
         return
 
-    # ONE vision call for the whole series
     report = await describe_photo_series(images) or "<i>описание не получено</i>"
 
-    # Persist every photo with the same series_id and the shared report
     series_id = secrets.token_hex(8)
-    # message here can be either the user's photo message or the bot's status
-    # message (from cb_photo_commit). Prefer FSM-stored user id if present.
     state_data = await state.get_data()
     uid = state_data.get("_uid") or (
         str(message.from_user.id) if message.from_user else str(message.chat.id)
@@ -229,16 +261,13 @@ async def _commit_series(message: Message, state: FSMContext) -> None:
             log.exception("save photo failed: %s", exc)
 
     last_pid = saved_ids[-1] if saved_ids else None
-    await state.update_data(last_photo_id=last_pid, photo_series_id=series_id,
-                            photo_buffer=[], status_msg_id=None)
-    await state.set_state(PhotoStates.waiting_note)
+    await state.update_data(last_photo_id=last_pid, photo_series_id=series_id)
 
     final_text = (
         f"✅ Сохранено фото: <b>{len(saved_ids)}</b>\n\n"
         f"<b>Фитнес-анализ серии:</b>\n{report}\n\n"
         "Можешь дописать комментарий (текст или голос) или пропустить."
     )
-    # Telegram caption limit irrelevant here — sending as text message
     try:
         if status_id:
             await bot.edit_message_text(
