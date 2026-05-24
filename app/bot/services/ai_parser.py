@@ -203,8 +203,12 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
 # ──────────────────────────── set fallback parser ─────────────────────────────
 
 _SET_SYSTEM = """\
-Ты парсер одного подхода в тренировке. Пользователь пишет на русском или смеси.
-Верни JSON с полями (все необязательные кроме exercise_name):
+Ты парсер подходов в тренировке. Пользователь пишет ИЛИ диктует голосом \
+(текст уже распознан Whisper, могут быть ошибки распознавания).
+
+Верни МАССИВ JSON-объектов — по объекту на каждый ПОДХОД (set), не на каждое число.
+
+Поля объекта (все опциональны кроме exercise_name):
 {
   "exercise_name": "Жим штанги лёжа",
   "weight_kg": 80.0,
@@ -214,10 +218,29 @@ _SET_SYSTEM = """\
   "is_warmup": false,
   "is_failure": false
 }
-- Если несколько подходов — верни массив объектов
+
+КРИТИЧНО:
+- "первый подход 12 повторений 25 килограмм" = ОДИН подход: weight_kg=25, reps=12
+- "первый подход X повт Y кг 2 подход A повт B кг" = ДВА подхода
+- "12 повт 25 кг" = один подход, НЕ ДВА (12 ≠ подход, это повторения)
+- Голосовая речь часто такого формата: "[номер подхода] подход [число] повторений [число] килограмм"
+- Если вес не назван — weight_kg:null; если повторения не названы — reps:null
 - "до отказа" / "AMRAP" → is_failure:true, reps_text:"до отказа"
 - Планка/велосипед + секунды/минуты → duration_seconds (секунды)
-- Только JSON, никакого текста вокруг
+
+ИСПРАВЛЯЙ очевидные ошибки распознавания речи:
+- "сжим" → "жим"
+- "кандели" → "гантели"
+- "подьёмы"/"падъёмы" → "подъёмы"
+- "штанги" / "штанга" нормально
+- "стоя"/"сидя"/"под углом" — это уточнения, оставляй
+
+Используй стандартные имена упражнений (на русском, с заглавной буквы):
+"Жим штанги лёжа", "Жим гантелей под углом", "Тяга верхнего блока", \
+"Приседания со штангой", "Становая тяга", "Подъём гантелей на бицепс", "Молот", \
+"Французский жим", "Махи в стороны", "Подтягивания", "Отжимания на брусьях" и т.п.
+
+Только JSON-массив. Никакого текста вокруг. Никаких пояснений.
 """
 
 
@@ -225,26 +248,36 @@ async def parse_set_text_ai(
     text: str,
     exercise_hint: str | None = None,
 ) -> list[dict[str, Any]]:
-    """AI fallback for set parsing. Returns list of raw dicts."""
+    """AI fallback for set parsing. Returns list of raw dicts (one per set)."""
     user_msg = text
     if exercise_hint:
-        user_msg = f"Упражнение (подсказка): {exercise_hint}\nЗапись: {text}"
+        user_msg = f"Подсказка (предыдущее упражнение): {exercise_hint}\n\nРаспознанный текст: {text}"
     try:
         resp = await _anthropic.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=512,
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
             system=_SET_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
         )
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+        # Find first '[' or '{' — model may wrap with prose
+        i_arr = raw.find("[")
+        i_obj = raw.find("{")
+        starts = [x for x in (i_arr, i_obj) if x >= 0]
+        if starts:
+            raw = raw[min(starts):]
+            # Trim trailing prose after last ']' or '}'
+            end = max(raw.rfind("]"), raw.rfind("}"))
+            if end > 0:
+                raw = raw[:end + 1]
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
             parsed = [parsed]
         return parsed
     except Exception as exc:
-        log.error("parse_set_text_ai error: %s", exc)
+        log.error("parse_set_text_ai error: %s. Raw=%r", exc, locals().get("raw","")[:300])
         return []
 
 

@@ -172,8 +172,26 @@ async def cb_note_last(cb: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.message(WorkoutStates.enter_set_note, F.text)
-async def handle_set_note_text(message: Message, state: FSMContext) -> None:
+async def _download_voice_text(message: Message) -> str | None:
+    """Telethon-/aiogram-3 voice → ogg bytes → Whisper text."""
+    voice = message.voice
+    bot = message.bot
+    try:
+        file = await bot.get_file(voice.file_id)
+        file_io = await bot.download_file(file.file_path)
+        ogg_bytes = file_io.read() if hasattr(file_io, "read") else bytes(file_io)
+    except Exception as exc:
+        log.exception("voice download error")
+        await message.answer(f"❌ Не удалось скачать аудио: {exc}")
+        return None
+    text = await transcribe_voice(ogg_bytes, filename="voice.ogg")
+    if not text:
+        await message.answer("❌ Не удалось распознать голос. Попробуй ещё раз.")
+        return None
+    return text
+
+
+async def _save_set_note(state: FSMContext, message: Message, text: str) -> None:
     from app.db import update_set
     data = await state.get_data()
     set_id = data.get("note_target_set_id")
@@ -181,10 +199,28 @@ async def handle_set_note_text(message: Message, state: FSMContext) -> None:
         await message.answer("Не нашёл подход. Отменено.", reply_markup=workout_active_menu())
         await state.set_state(WorkoutStates.active)
         return
-    await update_set(set_id, notes=message.text.strip())
+    await update_set(set_id, notes=text.strip())
     await state.update_data(note_target_set_id=None)
     await state.set_state(WorkoutStates.active)
-    await message.answer("✅ Коммент сохранён.", reply_markup=workout_active_menu())
+    await message.answer(
+        f"✅ Коммент сохранён: <i>{text.strip()}</i>",
+        parse_mode="HTML",
+        reply_markup=workout_active_menu(),
+    )
+
+
+@router.message(WorkoutStates.enter_set_note, F.text)
+async def handle_set_note_text(message: Message, state: FSMContext) -> None:
+    await _save_set_note(state, message, message.text)
+
+
+@router.message(WorkoutStates.enter_set_note, F.voice)
+async def handle_set_note_voice(message: Message, state: FSMContext) -> None:
+    text = await _download_voice_text(message)
+    if not text:
+        return
+    await message.answer(f"🎤 Распознано: <i>{text}</i>", parse_mode="HTML")
+    await _save_set_note(state, message, text)
 
 
 @router.callback_query(F.data == "note:skip", WorkoutStates.enter_set_note)
@@ -206,36 +242,39 @@ async def handle_set_text(message: Message, state: FSMContext) -> None:
 
 @router.message(WorkoutStates.active, F.voice)
 async def handle_set_voice(message: Message, state: FSMContext) -> None:
-    voice = message.voice
-    bot = message.bot
-    try:
-        file = await bot.get_file(voice.file_id)
-        file_io = await bot.download_file(file.file_path)  # BytesIO, NOT awaitable
-        ogg_bytes = file_io.read() if hasattr(file_io, "read") else bytes(file_io)
-    except Exception as exc:
-        log.exception("voice download error")
-        await message.answer(f"❌ Не удалось скачать аудио: {exc}")
-        return
-
-    text = await transcribe_voice(ogg_bytes, filename="voice.ogg")
+    text = await _download_voice_text(message)
     if not text:
-        await message.answer("❌ Не удалось распознать голос. Попробуй ещё раз.")
         return
     await message.answer(f"🎤 Распознано: <i>{text}</i>", parse_mode="HTML")
-    await _handle_set_input(message, text, state)
+    # Voice → conversational speech with "первый подход / повторений / килограмм"
+    # → pure-text parser misreads. Force AI-first for voice input.
+    await _handle_set_input(message, text, state, prefer_ai=True)
 
 
-async def _handle_set_input(message: Message, text: str, state: FSMContext) -> None:
+# Conversational-speech markers that signal AI must do the parsing
+import re as _re
+_SPEECH_MARKERS = _re.compile(
+    r"\b(первый|второй|третий|четвертый|пятый|шестой|"
+    r"подход|подхода|подходов|"
+    r"повторение|повторения|повторений|"
+    r"килограмм\w*)\b",
+    _re.IGNORECASE,
+)
+
+
+async def _handle_set_input(message: Message, text: str, state: FSMContext, *, prefer_ai: bool = False) -> None:
     data = await state.get_data()
     workout_id = data.get("workout_id")
     last_exercise = data.get("last_exercise")
 
-    # Quick-parse with pure-text parser
+    # Voice / conversational input → AI-first path
+    is_conversational = prefer_ai or bool(_SPEECH_MARKERS.search(text))
+
     sets = None
-    if looks_like_exercise_input(text):
+    if not is_conversational and looks_like_exercise_input(text):
         sets = parse_exercise_input(text, last_exercise=last_exercise)
 
-    # AI fallback if pure-text failed
+    # AI fallback (or AI-first when conversational)
     if not sets:
         ai_results = await parse_set_text_ai(text, exercise_hint=last_exercise)
         if ai_results:
@@ -251,6 +290,10 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext) -> N
                     is_warmup=d.get("is_warmup", False),
                     is_failure=d.get("is_failure", False),
                 ))
+
+    # Last-resort: try pure parser even on conversational text
+    if not sets and is_conversational and looks_like_exercise_input(text):
+        sets = parse_exercise_input(text, last_exercise=last_exercise)
 
     if not sets:
         await message.answer(
@@ -390,18 +433,35 @@ async def cb_finish_yes(cb: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.message(WorkoutStates.enter_workout_note, F.text)
-async def handle_workout_note(message: Message, state: FSMContext) -> None:
+async def _save_workout_note(state: FSMContext, message: Message, text: str) -> None:
     from app.db import update_workout_notes
+    from app.bot.keyboards import post_finish_menu
     data = await state.get_data()
     wid = data.get("finished_workout_id")
     if wid:
         try:
-            await update_workout_notes(wid, message.text.strip())
+            await update_workout_notes(wid, text.strip())
         except Exception as exc:
             log.warning("save workout note failed: %s", exc)
-    from app.bot.keyboards import post_finish_menu
-    await message.answer("✅ Комментарий сохранён.", reply_markup=post_finish_menu())
+    await message.answer(
+        f"✅ Комментарий сохранён: <i>{text.strip()}</i>",
+        parse_mode="HTML",
+        reply_markup=post_finish_menu(),
+    )
+
+
+@router.message(WorkoutStates.enter_workout_note, F.text)
+async def handle_workout_note(message: Message, state: FSMContext) -> None:
+    await _save_workout_note(state, message, message.text)
+
+
+@router.message(WorkoutStates.enter_workout_note, F.voice)
+async def handle_workout_note_voice(message: Message, state: FSMContext) -> None:
+    text = await _download_voice_text(message)
+    if not text:
+        return
+    await message.answer(f"🎤 Распознано: <i>{text}</i>", parse_mode="HTML")
+    await _save_workout_note(state, message, text)
 
 
 @router.callback_query(F.data == "finish:note_skip", WorkoutStates.enter_workout_note)
