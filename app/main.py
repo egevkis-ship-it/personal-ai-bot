@@ -113,8 +113,11 @@ CREATE TABLE IF NOT EXISTS progress_photos (
     telegram_file_unique_id  TEXT,
     ai_description           TEXT,
     notes                    TEXT,
+    series_id                TEXT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS series_id TEXT;
 
 ALTER TABLE planned_workouts ADD COLUMN IF NOT EXISTS notes TEXT;
 
