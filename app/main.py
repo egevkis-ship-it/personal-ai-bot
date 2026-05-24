@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS progress_photos (
 );
 
 ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS series_id TEXT;
+ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS ai_description_short TEXT;
 
 ALTER TABLE planned_workouts ADD COLUMN IF NOT EXISTS notes TEXT;
 

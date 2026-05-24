@@ -469,6 +469,73 @@ async def update_photo_notes(photo_id: int, notes: str) -> None:
         )
 
 
+async def get_photo_series(user_id: str, limit: int = 30) -> list[dict]:
+    """Group photos by series_id, return one row per series ordered newest-first.
+
+    Each returned dict contains:
+      - series_id (may equal the photo id when series_id is NULL)
+      - taken_on
+      - ai_description, ai_description_short, notes (taken from any photo in
+        the series — they are duplicated by design)
+      - photo_count
+      - photo_ids (list of int in insertion order)
+      - first_file_id (first telegram_file_id for preview)
+    """
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                SELECT * FROM progress_photos
+                WHERE user_id = :uid
+                ORDER BY taken_on DESC, id DESC
+            """),
+            {"uid": user_id},
+        )
+        rows = [dict(x) for x in r.mappings().all()]
+    series: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        key = row.get("series_id") or f"_solo_{row['id']}"
+        if key not in series:
+            series[key] = {
+                "series_id": key,
+                "taken_on": row["taken_on"],
+                "ai_description": row.get("ai_description"),
+                "ai_description_short": row.get("ai_description_short"),
+                "notes": row.get("notes"),
+                "photo_ids": [],
+                "telegram_file_ids": [],
+                "first_file_id": row["telegram_file_id"],
+            }
+            order.append(key)
+        series[key]["photo_ids"].append(row["id"])
+        series[key]["telegram_file_ids"].append(row["telegram_file_id"])
+        # If this row has notes but series doesn't yet, take them
+        if not series[key]["notes"] and row.get("notes"):
+            series[key]["notes"] = row["notes"]
+        if not series[key]["ai_description_short"] and row.get("ai_description_short"):
+            series[key]["ai_description_short"] = row["ai_description_short"]
+    out = [series[k] for k in order[:limit]]
+    for s_ in out:
+        s_["photo_count"] = len(s_["photo_ids"])
+    return out
+
+
+async def delete_photo_series(user_id: str, series_id: str) -> int:
+    async with get_session() as s:
+        if series_id.startswith("_solo_"):
+            pid = int(series_id.split("_", 2)[2])
+            r = await s.execute(
+                text("DELETE FROM progress_photos WHERE id = :id AND user_id = :uid"),
+                {"id": pid, "uid": user_id},
+            )
+        else:
+            r = await s.execute(
+                text("DELETE FROM progress_photos WHERE series_id = :sid AND user_id = :uid"),
+                {"sid": series_id, "uid": user_id},
+            )
+        return r.rowcount or 0
+
+
 async def delete_photo(photo_id: int) -> None:
     async with get_session() as s:
         await s.execute(text("DELETE FROM progress_photos WHERE id = :id"), {"id": photo_id})

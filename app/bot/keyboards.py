@@ -84,6 +84,16 @@ def photos_menu(has_history: bool) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def photo_collecting() -> InlineKeyboardMarkup:
+    """Buttons shown while bot is buffering photos before commit."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 Готово, проанализировать", callback_data="photo:commit")
+    kb.button(text="📤 Загрузить без анализа", callback_data="photo:commit_raw")
+    kb.button(text="❌ Отмена", callback_data="photo:cancel")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def photo_after_upload() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="⏭ Без комментария", callback_data="photo:skip_note"),
@@ -91,7 +101,7 @@ def photo_after_upload() -> InlineKeyboardMarkup:
     ]])
 
 
-def photo_nav(photo_id: int, idx: int, total: int) -> InlineKeyboardMarkup:
+def photo_series_nav(series_key: str, idx: int, total: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if idx > 0:
         kb.button(text="◀️", callback_data=f"photo:nav:{idx-1}")
@@ -99,7 +109,7 @@ def photo_nav(photo_id: int, idx: int, total: int) -> InlineKeyboardMarkup:
     if idx < total - 1:
         kb.button(text="▶️", callback_data=f"photo:nav:{idx+1}")
     kb.adjust(3)
-    kb.row(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"photo:delete:{photo_id}"))
+    kb.row(InlineKeyboardButton(text="🗑 Удалить серию", callback_data=f"photo:delete:{series_key}"))
     kb.row(InlineKeyboardButton(text="🔙 К меню фото", callback_data="photo:back"))
     return kb.as_markup()
 

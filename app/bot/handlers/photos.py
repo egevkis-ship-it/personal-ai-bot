@@ -23,21 +23,24 @@ from datetime import date
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+    InputMediaPhoto, Message,
+)
 
 from app.bot.keyboards import (
     main_menu,
     photo_after_upload,
-    photo_nav,
+    photo_collecting,
+    photo_series_nav,
     photos_menu,
 )
 from app.bot.services.ai_parser import transcribe_voice
 from app.bot.services.photo_vision import describe_photo_series
 from app.bot.states import PhotoStates
 from app.db import (
-    create_photo,
-    delete_photo,
-    get_photo,
+    delete_photo_series,
+    get_photo_series,
     get_photos,
     update_photo_notes,
 )
@@ -66,26 +69,28 @@ def _lock(uid: str) -> asyncio.Lock:
 async def menu_photos(message: Message, state: FSMContext) -> None:
     await state.clear()
     uid = str(message.from_user.id)
-    photos = await get_photos(uid, limit=1)
+    series = await get_photo_series(uid, limit=1)
     intro = "📸 <b>Прогресс-фото</b>"
-    if photos:
-        last = photos[0]
-        intro += f"\n\nПоследнее: {last['taken_on']}"
-        if last.get("ai_description"):
-            intro += f"\n<i>{last['ai_description'][:200]}...</i>"
+    if series:
+        last = series[0]
+        intro += f"\n\nПоследняя серия: {last['taken_on']} ({last['photo_count']} фото)"
+        short = last.get("ai_description_short")
+        if short:
+            intro += f"\n<i>{_escape(short)}</i>"
     await message.answer(
         intro, parse_mode="HTML",
-        reply_markup=photos_menu(has_history=bool(photos)),
+        reply_markup=photos_menu(has_history=bool(series)),
     )
+
+
+def _escape(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 # ─────────────────────────── new flow ────────────────────────────────────
 
 def _collecting_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Готово, проанализировать", callback_data="photo:commit"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="photo:cancel"),
-    ]])
+    return photo_collecting()
 
 
 @router.callback_query(F.data == "photo:new")
@@ -221,7 +226,26 @@ async def cb_photo_commit(cb: CallbackQuery, state: FSMContext) -> None:
         # Bump token so any pending debounce is cancelled
         await state.update_data(photo_buffer=[], status_msg_id=None, debounce_token=0)
         await state.set_state(PhotoStates.waiting_note)
-    await _process_snapshot(cb.message, state, buf, status_id)
+    await _process_snapshot(cb.message, state, buf, status_id, skip_ai=False)
+
+
+@router.callback_query(F.data == "photo:commit_raw", PhotoStates.waiting_photo)
+async def cb_photo_commit_raw(cb: CallbackQuery, state: FSMContext) -> None:
+    """Save the buffered series WITHOUT running AI Vision (for archival uploads)."""
+    await cb.answer()
+    uid = str(cb.from_user.id)
+    async with _lock(uid):
+        data = await state.get_data()
+        buf = list(data.get("photo_buffer") or [])
+        status_id = data.get("status_msg_id")
+        if not buf:
+            await cb.message.answer("Нет фото для сохранения.",
+                                    reply_markup=photos_menu(False))
+            await state.clear()
+            return
+        await state.update_data(photo_buffer=[], status_msg_id=None, debounce_token=0)
+        await state.set_state(PhotoStates.waiting_note)
+    await _process_snapshot(cb.message, state, buf, status_id, skip_ai=True)
 
 
 @router.callback_query(F.data == "photo:cancel", PhotoStates.waiting_photo)
@@ -233,14 +257,18 @@ async def cb_photo_cancel(cb: CallbackQuery, state: FSMContext) -> None:
 
 
 async def _process_snapshot(message: Message, state: FSMContext,
-                             buf: list[dict], status_id: int | None) -> None:
+                             buf: list[dict], status_id: int | None,
+                             skip_ai: bool = False) -> None:
     """Process a snapshot of photos that was taken atomically inside the lock."""
     bot = message.bot
 
-    analyzing_text = (
-        f"🧠 Анализирую серию ({len(buf)} фото) через AI Vision…\n"
-        "Это занимает 10-30 секунд."
-    )
+    if skip_ai:
+        analyzing_text = f"💾 Сохраняю серию ({len(buf)} фото) без AI-анализа…"
+    else:
+        analyzing_text = (
+            f"🧠 Анализирую серию ({len(buf)} фото) через AI Vision…\n"
+            "Это занимает 10-30 секунд."
+        )
     try:
         if status_id:
             await bot.edit_message_text(
@@ -252,37 +280,44 @@ async def _process_snapshot(message: Message, state: FSMContext,
     except Exception:
         await message.answer(analyzing_text)
 
-    images: list[tuple[bytes, str]] = []
-    for item in buf:
-        try:
-            file = await bot.get_file(item["file_id"])
-            file_io = await bot.download_file(file.file_path)
-            img = file_io.read() if hasattr(file_io, "read") else bytes(file_io)
-            images.append((img, "image/jpeg"))
-        except Exception as exc:
-            log.warning("photo %s download failed: %s", item.get("file_id"), exc)
-
-    if not images:
-        msg = "❌ Не удалось скачать ни одно фото."
-        try:
-            if status_id:
-                await bot.edit_message_text(chat_id=message.chat.id,
-                                            message_id=status_id, text=msg)
-            else:
+    # Download images only if we need to run vision
+    short_desc = None
+    full_desc = None
+    if not skip_ai:
+        images: list[tuple[bytes, str]] = []
+        for item in buf:
+            try:
+                file = await bot.get_file(item["file_id"])
+                file_io = await bot.download_file(file.file_path)
+                img = file_io.read() if hasattr(file_io, "read") else bytes(file_io)
+                images.append((img, "image/jpeg"))
+            except Exception as exc:
+                log.warning("photo %s download failed: %s", item.get("file_id"), exc)
+        if not images:
+            msg = "❌ Не удалось скачать ни одно фото."
+            try:
+                if status_id:
+                    await bot.edit_message_text(chat_id=message.chat.id,
+                                                message_id=status_id, text=msg)
+                else:
+                    await message.answer(msg)
+            except Exception:
                 await message.answer(msg)
-        except Exception:
-            await message.answer(msg)
-        await state.clear()
-        return
+            await state.clear()
+            return
 
-    report = await describe_photo_series(images) or "<i>описание не получено</i>"
+        report = await describe_photo_series(images)
+        if report:
+            short_desc = report.get("short")
+            full_desc = report.get("detailed")
+        else:
+            full_desc = "<i>описание не получено</i>"
 
     series_id = secrets.token_hex(8)
     state_data = await state.get_data()
     uid = state_data.get("_uid") or (
         str(message.from_user.id) if message.from_user else str(message.chat.id)
     )
-    # Date from caption if any photo had one; otherwise today.
     series_date_iso = state_data.get("series_date")
     if series_date_iso:
         try:
@@ -292,6 +327,7 @@ async def _process_snapshot(message: Message, state: FSMContext,
     else:
         taken_on = date.today()
     caption_note = state_data.get("series_caption_note")
+
     saved_ids: list[int] = []
     for item in buf:
         try:
@@ -300,7 +336,8 @@ async def _process_snapshot(message: Message, state: FSMContext,
                 taken_on=taken_on,
                 telegram_file_id=item["file_id"],
                 telegram_file_unique_id=item.get("file_unique_id"),
-                ai_description=report,
+                ai_description=full_desc,
+                ai_description_short=short_desc,
                 series_id=series_id,
             )
             saved_ids.append(pid)
@@ -310,21 +347,24 @@ async def _process_snapshot(message: Message, state: FSMContext,
     last_pid = saved_ids[-1] if saved_ids else None
     await state.update_data(last_photo_id=last_pid, photo_series_id=series_id)
 
-    # If caption-derived note exists, attach it now to the most recent photo
     if caption_note and last_pid:
         try:
-            from app.db import update_photo_notes
             await update_photo_notes(last_pid, caption_note)
         except Exception as exc:
             log.warning("save caption note failed: %s", exc)
 
-    date_line = f"📅 Дата: <b>{taken_on.isoformat()}</b>\n"
-    final_text = (
-        f"✅ Сохранено фото: <b>{len(saved_ids)}</b>\n"
-        f"{date_line}"
-        f"\n<b>Фитнес-анализ серии:</b>\n{report}\n\n"
-        "Можешь дописать комментарий (текст или голос) или пропустить."
-    )
+    # Chat message: short description (or nothing if skip_ai)
+    lines = [f"✅ Сохранено фото: <b>{len(saved_ids)}</b>",
+             f"📅 Дата: <b>{taken_on.isoformat()}</b>"]
+    if skip_ai:
+        lines.append("\n<i>Без AI-анализа.</i>")
+    elif short_desc:
+        lines.append(f"\n{_escape(short_desc)}")
+    if caption_note:
+        lines.append(f"💬 {_escape(caption_note)}")
+    lines.append("\nМожешь добавить комментарий или пропустить.")
+    final_text = "\n".join(lines)
+
     try:
         if status_id:
             await bot.edit_message_text(
@@ -346,9 +386,10 @@ async def _create_photo_with_series(
     telegram_file_id: str,
     telegram_file_unique_id: str | None,
     ai_description: str | None,
+    ai_description_short: str | None,
     series_id: str,
 ) -> int:
-    """Like db.create_photo but also writes series_id."""
+    """Like db.create_photo but writes series_id and both description tiers."""
     from datetime import date as _date
     from sqlalchemy import text
     from app.db.engine import get_session
@@ -358,12 +399,13 @@ async def _create_photo_with_series(
             text("""
                 INSERT INTO progress_photos
                     (user_id, taken_on, telegram_file_id, telegram_file_unique_id,
-                     ai_description, series_id)
-                VALUES (:uid, :d, :fid, :fuid, :desc, :sid)
+                     ai_description, ai_description_short, series_id)
+                VALUES (:uid, :d, :fid, :fuid, :desc, :short, :sid)
                 RETURNING id
             """),
             {"uid": user_id, "d": d, "fid": telegram_file_id,
-             "fuid": telegram_file_unique_id, "desc": ai_description, "sid": series_id},
+             "fuid": telegram_file_unique_id, "desc": ai_description,
+             "short": ai_description_short, "sid": series_id},
         )
         return r.scalar_one()
 
@@ -438,18 +480,30 @@ async def cb_photo_delete_last(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.message.answer("🗑 Серия удалена.", reply_markup=photos_menu(has_history=False))
 
 
-# ───────────────────────── history ───────────────────────────────────────
+# ───────────────────────── history (series-aware) ─────────────────────────
 
 @router.callback_query(F.data == "photo:history")
 async def cb_photo_history(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     uid = str(cb.from_user.id)
-    rows = await get_photos(uid, limit=60)
-    if not rows:
+    series = await get_photo_series(uid, limit=60)
+    if not series:
         await cb.message.edit_text("📭 Нет фото.", reply_markup=photos_menu(has_history=False))
         return
-    await state.update_data(photo_ids=[r["id"] for r in rows], photo_idx=0)
-    await _show_photo(cb.message, rows[0], idx=0, total=len(rows), edit=True)
+    # Store a lightweight projection — keys + file_ids + caption — to render
+    # subsequent series without re-querying the DB.
+    proj = []
+    for s_ in series:
+        proj.append({
+            "key": s_["series_id"],
+            "date": s_["taken_on"].isoformat() if hasattr(s_["taken_on"], "isoformat") else str(s_["taken_on"]),
+            "file_ids": s_["telegram_file_ids"],
+            "short": s_.get("ai_description_short"),
+            "notes": s_.get("notes"),
+            "count": s_["photo_count"],
+        })
+    await state.update_data(series_proj=proj, series_idx=0)
+    await _show_series(cb.message, proj, 0)
 
 
 @router.callback_query(F.data.startswith("photo:nav:"))
@@ -457,71 +511,83 @@ async def cb_photo_nav(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     idx = int(cb.data.split(":")[-1])
     data = await state.get_data()
-    photo_ids: list[int] = data.get("photo_ids", [])
-    if not photo_ids or idx < 0 or idx >= len(photo_ids):
+    proj: list[dict] = data.get("series_proj") or []
+    if not proj or idx < 0 or idx >= len(proj):
         return
-    p = await get_photo(photo_ids[idx])
-    if not p:
-        await cb.message.answer("Фото не найдено")
-        return
-    await state.update_data(photo_idx=idx)
-    await _show_photo(cb.message, p, idx=idx, total=len(photo_ids), edit=False)
+    await state.update_data(series_idx=idx)
+    await _show_series(cb.message, proj, idx)
 
 
 @router.callback_query(F.data == "photo:back")
 async def cb_photo_back(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     uid = str(cb.from_user.id)
-    photos = await get_photos(uid, limit=1)
+    series = await get_photo_series(uid, limit=1)
     await state.clear()
     await cb.message.answer(
         "📸 Прогресс-фото",
-        reply_markup=photos_menu(has_history=bool(photos)),
+        reply_markup=photos_menu(has_history=bool(series)),
     )
+
+
+async def _show_series(message: Message, proj: list[dict], idx: int) -> None:
+    """Send a series as a media group (album) + a separate text message with nav."""
+    item = proj[idx]
+    file_ids: list[str] = item["file_ids"]
+    bot = message.bot
+    chat_id = message.chat.id
+
+    # Telegram media_group: 2..10 items. Single → answer_photo. >10 → first 10.
+    capped = file_ids[:10]
+    try:
+        if len(capped) == 1:
+            await bot.send_photo(chat_id=chat_id, photo=capped[0])
+        else:
+            media = [InputMediaPhoto(media=fid) for fid in capped]
+            await bot.send_media_group(chat_id=chat_id, media=media)
+    except Exception as exc:
+        log.exception("send series photos failed: %s", exc)
+
+    # Caption / metadata in a separate text message with nav buttons
+    caption_lines = [
+        f"📅 <b>{item['date']}</b>  ·  серия из {item['count']} фото"
+    ]
+    if item.get("short"):
+        caption_lines.append(f"\n{_escape(item['short'])}")
+    if item.get("notes"):
+        caption_lines.append(f"\n💬 {_escape(item['notes'])}")
+    caption_text = "\n".join(caption_lines)
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=caption_text[:4000],
+            parse_mode="HTML",
+            reply_markup=photo_series_nav(item["key"], idx, len(proj)),
+        )
+    except Exception as exc:
+        log.exception("send series caption failed: %s", exc)
 
 
 @router.callback_query(F.data.startswith("photo:delete:"))
 async def cb_photo_delete(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
-    pid = int(cb.data.split(":")[-1])
-    await delete_photo(pid)
+    series_key = cb.data.split(":", 2)[2]
+    uid = str(cb.from_user.id)
+    n = await delete_photo_series(uid, series_key)
     data = await state.get_data()
-    photo_ids: list[int] = [x for x in data.get("photo_ids", []) if x != pid]
-    if not photo_ids:
+    proj: list[dict] = [s for s in (data.get("series_proj") or []) if s["key"] != series_key]
+    if not proj:
         await state.clear()
-        await cb.message.answer("🗑 Удалено. Больше фото нет.",
-                                reply_markup=photos_menu(has_history=False))
+        await cb.message.answer(
+            f"🗑 Серия удалена ({n} фото). Больше серий нет.",
+            reply_markup=photos_menu(has_history=False),
+        )
         return
-    await state.update_data(photo_ids=photo_ids, photo_idx=0)
-    p = await get_photo(photo_ids[0])
-    if p:
-        await _show_photo(cb.message, p, idx=0, total=len(photo_ids), edit=False)
+    await state.update_data(series_proj=proj, series_idx=0)
+    await cb.message.answer(f"🗑 Серия удалена ({n} фото).")
+    await _show_series(cb.message, proj, 0)
 
 
 @router.callback_query(F.data == "photo:noop")
 async def cb_photo_noop(cb: CallbackQuery) -> None:
     await cb.answer()
-
-
-async def _show_photo(message: Message, p: dict, idx: int, total: int, edit: bool) -> None:
-    caption_lines = [f"📅 <b>{p['taken_on']}</b>"]
-    if p.get("ai_description"):
-        caption_lines.append(p["ai_description"][:850])
-    if p.get("notes"):
-        caption_lines.append(f"💬 {p['notes']}")
-    caption = "\n\n".join(caption_lines)
-    if len(caption) > 1000:
-        caption = caption[:1000] + "..."
-    try:
-        await message.answer_photo(
-            photo=p["telegram_file_id"],
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=photo_nav(p["id"], idx, total),
-        )
-    except Exception as exc:
-        log.exception("send photo failed: %s", exc)
-        await message.answer(
-            f"❌ Не удалось показать фото: {exc}",
-            reply_markup=photos_menu(has_history=True),
-        )
