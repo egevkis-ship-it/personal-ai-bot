@@ -199,27 +199,46 @@ def parse_measurement_text(raw: str) -> dict:
 
 _AI_SYSTEM = """\
 Ты парсер замеров тела из тренировочного дневника. На вход — текст или \
-голосовое распознавание (возможны ошибки Whisper). На выход — строгий JSON:
+голос (распознан Whisper, возможны опечатки и фонетические ошибки). \
+На выход — строгий JSON:
 
 {"date":"2026-05-24","values":{"weight_kg":102.7,"calf_cm":44.5,"thigh_cm":68,"hips_cm":104,"belly_cm":95,"waist_cm":92.5,"chest_cm":106,"arm_cm":41,"neck_cm":40},"notes":null}
 
 Поля values:
   weight_kg — вес (кг)
   calf_cm   — голень/икра (см)
-  thigh_cm  — бедро ОДНА нога вверху (см) — слово "бедро" единственное число
-  hips_cm   — бёдра/обхват таза-ягодиц (см) — слово "бёдра" множественное
-  belly_cm  — живот
-  waist_cm  — талия
+  thigh_cm  — бедро (ОДНА нога, верхняя часть, обычно 50-80 см)
+  hips_cm   — бёдра/обхват таза-ягодиц (обычно 90-130 см)
+  belly_cm  — живот (на уровне пупка)
+  waist_cm  — талия (самое узкое место)
   chest_cm  — грудь
   arm_cm    — рука/бицепс
   neck_cm   — шея
 
 Правила:
 - ISO дата если есть, иначе null (вызывающий код подставит сегодня)
-- Пропущенные параметры — не указывай в values (НЕ ставь null)
+- Пропущенные параметры — НЕ указывай в values (НЕ ставь null, просто опусти)
 - "сегодня"/"вчера" → конкретная дата ISO
-- Whisper-ошибки исправляй: "бёдро"/"бёдра" различай по числу
-- Никаких пояснений вне JSON
+
+ИСПРАВЛЯЙ опечатки/ошибки распознавания:
+  "Талмя"/"талея"/"талиа"/"таля" → talia → waist_cm
+  "телия" → waist_cm
+  "беодра"/"бёдра"/"бёдер" → hips_cm
+  "бёдро"/"бедро" → thigh_cm
+  "галень"/"голеень" → calf_cm
+  "жывот" → belly_cm
+  "шея"/"шейя" → neck_cm
+  "руко"/"рука" → arm_cm
+  "грудя"/"груд" → chest_cm
+  "виес"/"весь" → weight_kg
+
+РАЗРЕШАЙ АМБИГУИТЕТ "бедро vs бёдра" когда пользователь забыл "ё":
+  Если в тексте обе формы ("бедро 68" + "бедра 104") — ПЕРВАЯ = thigh_cm, \
+  ВТОРАЯ = hips_cm (это типовой порядок: сначала одна нога, потом обхват таза)
+  Если значение > 85 см — это hips_cm (бёдра-обхват), даже если написано "бедро"
+  Если значение < 80 см — это thigh_cm (одна нога)
+
+Никаких пояснений вне JSON. Только JSON-объект.
 """
 
 
@@ -253,21 +272,24 @@ async def ai_parse_measurement(raw: str) -> dict | None:
 
 
 async def parse_measurement(raw: str) -> dict:
-    """Hybrid pipeline: pure-text first, AI fallback for sparse results."""
-    pure = parse_measurement_text(raw)
-    # Threshold: if at least 3 metrics parsed → trust pure parser.
-    if len(pure["values"]) >= 3:
-        return pure
-    # Otherwise try AI to recover missed fields.
+    """AI-first hybrid. AI handles typos ("Талмя"→талия), same-word ambiguity
+    (бедро vs бёдра), and partial input. Regex is the safety net if AI fails.
+    """
     ai = await ai_parse_measurement(raw)
+    pure = parse_measurement_text(raw)
+
     if not ai:
+        # AI unavailable — fall back to regex.
         return pure
-    # Merge: AI fills only what pure missed.
+
+    # Merge: AI is source of truth, but regex can fill in fields AI missed
+    # (e.g. if AI returns 5 values and regex picked up 6, take the extras).
     merged = dict(ai.get("values") or {})
     for k, v in pure["values"].items():
-        merged[k] = v
+        if k not in merged:
+            merged[k] = v
     return {
-        "date": pure["date"] or ai.get("date"),
+        "date": ai.get("date") or pure["date"],
         "values": merged,
         "raw": raw,
         "notes": ai.get("notes"),

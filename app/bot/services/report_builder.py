@@ -165,8 +165,12 @@ def _workout_tonnage(sets: list[dict]) -> float:
     return total
 
 
-def _resize_photo(img_bytes: bytes, max_dim: int = 600, quality: int = 70) -> bytes | None:
-    """Shrink to max_dim on the long side, JPEG, return bytes. None on failure."""
+def _resize_photo(img_bytes: bytes, max_dim: int = 1280, quality: int = 82) -> bytes | None:
+    """Shrink to max_dim on the long side, JPEG, return bytes. None on failure.
+
+    1280px @ q82 keeps photos large enough that a downstream AI can re-analyze
+    them from the PDF (rough estimate: 200-400 KB per shot).
+    """
     try:
         img = PILImage.open(io.BytesIO(img_bytes))
         if img.mode != "RGB":
@@ -181,6 +185,18 @@ def _resize_photo(img_bytes: bytes, max_dim: int = 600, quality: int = 70) -> by
     except Exception as exc:
         log.warning("resize_photo failed: %s", exc)
         return None
+
+
+def _fmt_duration(secs) -> str:
+    if secs is None:
+        return "—"
+    s = int(secs)
+    m, r = divmod(s, 60)
+    if m == 0:
+        return f"{r}с"
+    if r == 0:
+        return f"{m} мин"
+    return f"{m}:{r:02d}"
 
 
 # ─────────────────────────── main builder ───────────────────────────────────
@@ -208,84 +224,122 @@ async def build_period_report(bot, user_id: str, from_date: date, to_date: date)
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        leftMargin=1.5 * cm, rightMargin=1.5 * cm,
-        topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+        leftMargin=1.6 * cm, rightMargin=1.6 * cm,
+        topMargin=1.4 * cm, bottomMargin=1.4 * cm,
         title=f"Workout report {from_date} - {to_date}",
         author="StonedBot",
     )
 
+    INK = colors.HexColor("#111827")        # primary text
+    INK_SOFT = colors.HexColor("#374151")   # secondary text
+    INK_MUTE = colors.HexColor("#6b7280")   # tertiary
+    BG_HEAD  = colors.HexColor("#f3f4f6")
+    LINE     = colors.HexColor("#d1d5db")
+    ACCENT   = colors.HexColor("#2563eb")
+
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "Title", parent=styles["Heading1"], fontName=_FONT_BOLD,
-        fontSize=18, leading=22, spaceAfter=12,
+        fontSize=22, leading=26, spaceAfter=2, textColor=INK,
     )
-    h2 = ParagraphStyle(
-        "H2", parent=styles["Heading2"], fontName=_FONT_BOLD,
-        fontSize=14, leading=18, spaceBefore=14, spaceAfter=6,
-        textColor=colors.HexColor("#1f2937"),
+    subtitle = ParagraphStyle(
+        "Sub", parent=styles["BodyText"], fontName=_FONT_NAME,
+        fontSize=10, leading=12, textColor=INK_MUTE, spaceAfter=14,
+    )
+    section = ParagraphStyle(
+        "Section", parent=styles["Heading2"], fontName=_FONT_BOLD,
+        fontSize=13, leading=16, spaceBefore=16, spaceAfter=8,
+        textColor=ACCENT,
     )
     h3 = ParagraphStyle(
         "H3", parent=styles["Heading3"], fontName=_FONT_BOLD,
-        fontSize=11, leading=14, spaceBefore=8, spaceAfter=2,
+        fontSize=11, leading=14, spaceBefore=10, spaceAfter=3,
+        textColor=INK,
     )
     body = ParagraphStyle(
         "Body", parent=styles["BodyText"], fontName=_FONT_NAME,
-        fontSize=10, leading=13,
+        fontSize=10, leading=13, textColor=INK_SOFT,
     )
     small = ParagraphStyle(
         "Small", parent=styles["BodyText"], fontName=_FONT_NAME,
-        fontSize=8, leading=10, textColor=colors.grey,
+        fontSize=8, leading=10, textColor=INK_MUTE,
     )
     note_style = ParagraphStyle(
         "Note", parent=body, fontName=_FONT_NAME, fontSize=9,
-        leading=12, textColor=colors.HexColor("#4b5563"),
-        leftIndent=18,
+        leading=12, textColor=INK_MUTE, leftIndent=14,
+    )
+    delta_pos = ParagraphStyle(
+        "DPos", parent=body, fontName=_FONT_NAME, fontSize=9,
+        leading=12, textColor=colors.HexColor("#047857"),
+    )
+    delta_neg = ParagraphStyle(
+        "DNeg", parent=body, fontName=_FONT_NAME, fontSize=9,
+        leading=12, textColor=colors.HexColor("#b91c1c"),
     )
 
     story = []
-    story.append(Paragraph(f"Отчёт за период {from_date} — {to_date}", title_style))
+    # Header block
+    story.append(Paragraph(f"Тренировочный отчёт", title_style))
+    story.append(Paragraph(
+        f"Период: <b>{_fmt_date(from_date)}</b> — <b>{_fmt_date(to_date)}</b>  "
+        f"·  всего {(to_date - from_date).days + 1} дн.",
+        subtitle,
+    ))
 
     # ─── Summary ───────────────────────────────────────────────────────────
     total_tonnage = sum(_workout_tonnage(s) for _, s in workouts)
     total_sets = sum(len(s) for _, s in workouts)
     n_unique_dates = len({w["workout_date"] for w, _ in workouts})
 
-    summary_data = [
-        ["Тренировок", str(len(workouts))],
-        ["Уникальных дней", str(n_unique_dates)],
-        ["Подходов всего", str(total_sets)],
-        ["Тоннаж, кг", f"{total_tonnage:,.0f}".replace(",", " ")],
-        ["Замеров", str(len(measurements))],
-        ["Фото", str(len(photos))],
+    # Two columns, label-value pairs
+    summary_pairs = [
+        ("Тренировок", str(len(workouts))),
+        ("Тренировочных дней", str(n_unique_dates)),
+        ("Подходов всего", str(total_sets)),
+        ("Тоннаж, кг", f"{total_tonnage:,.0f}".replace(",", " ")),
+        ("Замеров", str(len(measurements))),
+        ("Серий фото", str(len({(p.get('series_id') or p['id']) for p in photos}))),
     ]
-    summary_table = Table(summary_data, colWidths=[5 * cm, 4 * cm])
+    rows_2col = []
+    for i in range(0, len(summary_pairs), 2):
+        left = summary_pairs[i]
+        right = summary_pairs[i + 1] if i + 1 < len(summary_pairs) else ("", "")
+        rows_2col.append([left[0], left[1], right[0], right[1]])
+    summary_table = Table(rows_2col, colWidths=[4.5 * cm, 3 * cm, 4.5 * cm, 3 * cm])
     summary_table.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, -1), _FONT_NAME, 10),
         ("FONT", (0, 0), (0, -1), _FONT_BOLD, 10),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#374151")),
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f4f6")),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.2, colors.HexColor("#d1d5db")),
+        ("FONT", (2, 0), (2, -1), _FONT_BOLD, 10),
+        ("TEXTCOLOR", (0, 0), (-1, -1), INK_SOFT),
+        ("TEXTCOLOR", (1, 0), (1, -1), INK),
+        ("TEXTCOLOR", (3, 0), (3, -1), INK),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4, LINE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
-    story.append(Paragraph("📊 Сводка", h2))
+    story.append(Paragraph("Сводка", section))
     story.append(summary_table)
 
     # ─── Workouts ──────────────────────────────────────────────────────────
-    story.append(Paragraph("🏋️ Тренировки", h2))
+    story.append(Paragraph("Тренировки", section))
     if not workouts:
         story.append(Paragraph("<i>Нет завершённых тренировок за период.</i>", body))
     else:
         for w, sets in workouts:
             focus = w.get("focus_label") or "тренировка"
             tonn = _workout_tonnage(sets)
-            header = f"{_fmt_date(w['workout_date'])} — <b>{_escape(focus)}</b>  ·  {len(sets)} подх, {tonn:.0f} кг"
+            header = (
+                f"<font color='#2563eb'>{_fmt_date(w['workout_date'])}</font>"
+                f"  ·  <b>{_escape(focus)}</b>"
+                f"  ·  <font color='#6b7280'>{len(sets)} подх · {tonn:.0f} кг</font>"
+            )
             story.append(Paragraph(header, h3))
             if w.get("notes"):
-                story.append(Paragraph(f"💬 <i>{_escape(w['notes'])}</i>", note_style))
+                story.append(Paragraph(f"<i>{_escape(w['notes'])}</i>", note_style))
 
             # Group sets by exercise
             seen: list[str] = []
@@ -305,25 +359,26 @@ async def build_period_report(bot, user_id: str, from_date: date, to_date: date)
                     rps = s.get("reps")
                     dur = s.get("duration_seconds")
                     if dur:
-                        pieces.append(f"{int(dur)}с")
+                        pieces.append(_fmt_duration(dur))
                     elif wkg is not None and rps is not None:
-                        suffix = " 🔥" if s.get("is_failure") else ""
-                        pref = "разм " if s.get("is_warmup") else ""
+                        suffix = "*" if s.get("is_failure") else ""
+                        pref = "(р) " if s.get("is_warmup") else ""
                         pieces.append(f"{pref}{float(wkg):g}×{int(rps)}{suffix}")
                     elif rps is not None:
                         pieces.append(str(int(rps)))
                     n = s.get("notes")
                     if n:
                         notes_collected.append(n)
-                line = f"• <b>{_escape(ex)}</b>: {', '.join(pieces)}"
+                line = f"<b>{_escape(ex)}</b>: <font color='#374151'>{', '.join(pieces)}</font>"
                 story.append(Paragraph(line, body))
                 for n in notes_collected:
-                    story.append(Paragraph(f"💬 {_escape(n)}", note_style))
+                    story.append(Paragraph(f"— {_escape(n)}", note_style))
             story.append(Spacer(1, 4))
+        story.append(Paragraph("<i>* — до отказа; (р) — разминка</i>", small))
 
     # ─── Measurements ──────────────────────────────────────────────────────
     story.append(PageBreak())
-    story.append(Paragraph("📏 Замеры", h2))
+    story.append(Paragraph("Замеры тела", section))
     if not measurements:
         story.append(Paragraph("<i>Нет замеров за период.</i>", body))
     else:
@@ -340,35 +395,58 @@ async def build_period_report(bot, user_id: str, from_date: date, to_date: date)
         tab.setStyle(TableStyle([
             ("FONT", (0, 0), (-1, -1), _FONT_NAME, 8),
             ("FONT", (0, 0), (-1, 0), _FONT_BOLD, 8),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
-            ("GRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#d1d5db")),
+            ("BACKGROUND", (0, 0), (-1, 0), BG_HEAD),
+            ("TEXTCOLOR", (0, 0), (-1, 0), INK),
+            ("TEXTCOLOR", (0, 1), (-1, -1), INK_SOFT),
+            ("GRID", (0, 0), (-1, -1), 0.2, LINE),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (1, 1), (-1, -1), "CENTER"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#fafafa")]),
         ]))
         story.append(tab)
 
-        # Period delta
+        # Period delta — coloured per direction
         if len(measurements) >= 2:
             first = measurements[0]; last = measurements[-1]
-            deltas = []
+            story.append(Spacer(1, 8))
+            story.append(Paragraph("<b>Изменение за период</b>", body))
+            delta_rows = []
             for f, label in _M_FIELDS:
                 a, b = first.get(f), last.get(f)
-                if a is not None and b is not None:
-                    diff = float(b) - float(a)
-                    if abs(diff) >= 0.05:
-                        sign = "+" if diff > 0 else ""
-                        deltas.append(f"{label}: <b>{sign}{diff:g}</b>")
-            if deltas:
-                story.append(Spacer(1, 6))
-                story.append(Paragraph("Изменение за период: " + "  ·  ".join(deltas), body))
+                if a is None or b is None:
+                    continue
+                diff = float(b) - float(a)
+                if abs(diff) < 0.05:
+                    continue
+                sign = "+" if diff > 0 else ""
+                # weight: '-' is good (depends on goal). For body parts: + is muscle, - is fat.
+                # We don't know goal — just paint by direction.
+                delta_rows.append([label, f"{float(a):g}", f"{float(b):g}",
+                                   f"{sign}{diff:g}"])
+            if delta_rows:
+                dt = Table([["Параметр", "Было", "Стало", "Δ"]] + delta_rows,
+                           colWidths=[3.5 * cm, 2.2 * cm, 2.2 * cm, 2.5 * cm])
+                dt.setStyle(TableStyle([
+                    ("FONT", (0, 0), (-1, -1), _FONT_NAME, 9),
+                    ("FONT", (0, 0), (-1, 0), _FONT_BOLD, 9),
+                    ("BACKGROUND", (0, 0), (-1, 0), BG_HEAD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), INK),
+                    ("GRID", (0, 0), (-1, -1), 0.2, LINE),
+                    ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]))
+                story.append(dt)
 
     # ─── Photos ────────────────────────────────────────────────────────────
     story.append(PageBreak())
-    story.append(Paragraph("📸 Фото", h2))
+    story.append(Paragraph("Фотографии и AI-анализ", section))
     if not photos:
         story.append(Paragraph("<i>Нет фото за период.</i>", body))
     else:
@@ -386,49 +464,47 @@ async def build_period_report(bot, user_id: str, from_date: date, to_date: date)
             grp = series[sid]
             first = grp[0]
             story.append(Paragraph(
-                f"{_fmt_date(first['taken_on'])} — серия из {len(grp)} фото",
+                f"<font color='#2563eb'>{_fmt_date(first['taken_on'])}</font>"
+                f"  ·  серия из {len(grp)} фото",
                 h3,
             ))
             ai_desc = first.get("ai_description") or ""
             if ai_desc:
-                # Strip Telegram-only HTML tags reportlab doesn't understand;
-                # keep <b></b>/<i></i> only.
-                clean = ai_desc
-                story.append(Paragraph(_safe_html_for_pdf(clean), body))
+                clean = _safe_html_for_pdf(_strip_emoji_section_headers(ai_desc))
+                story.append(Paragraph(clean, body))
             notes = [g.get("notes") for g in grp if g.get("notes")]
             for n in notes:
-                story.append(Paragraph(f"💬 <i>{_escape(n)}</i>", note_style))
+                story.append(Paragraph(f"— {_escape(n)}", note_style))
 
-            # Thumbnails in a row (3 per row max)
+            # Thumbnails: 2 per row, larger (8 cm wide)
             thumbs = []
             for p in grp:
                 if p["id"] in photo_blobs:
                     try:
                         thumbs.append(Image(io.BytesIO(photo_blobs[p["id"]]),
-                                            width=5 * cm, height=5 * cm,
+                                            width=8 * cm, height=8 * cm,
                                             kind="proportional"))
                     except Exception as exc:
                         log.warning("embed image %s failed: %s", p["id"], exc)
             if thumbs:
-                # 3 per row
                 rows = []
-                for i in range(0, len(thumbs), 3):
-                    row = thumbs[i:i + 3]
-                    while len(row) < 3:
+                for i in range(0, len(thumbs), 2):
+                    row = thumbs[i:i + 2]
+                    while len(row) < 2:
                         row.append("")
                     rows.append(row)
-                t = Table(rows, colWidths=[5.5 * cm] * 3)
+                t = Table(rows, colWidths=[8.5 * cm] * 2)
                 t.setStyle(TableStyle([
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 2),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ]))
                 story.append(t)
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 10))
 
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 16))
     story.append(Paragraph(
         f"Сгенерировано {date.today().isoformat()} · StonedBot",
         small,
@@ -436,6 +512,38 @@ async def build_period_report(bot, user_id: str, from_date: date, to_date: date)
 
     doc.build(story)
     return buf.getvalue()
+
+
+# Map Telegram emoji section markers back to plain bold text so DejaVu doesn't
+# render them as tofu boxes.
+_EMOJI_HEADER_MAP = {
+    "📐": "•",
+    "💪": "•",
+    "🔥": "•",
+    "⚠️": "•",
+    "⚖️": "•",
+    "🧍": "•",
+    "📊": "•",
+    "📅": "",
+    "📏": "•",
+    "📸": "•",
+    "🏋️": "•",
+    "💬": "—",
+    "✏️": "—",
+    "🎤": "—",
+    "🤖": "—",
+    "🧠": "—",
+}
+
+
+def _strip_emoji_section_headers(s: str) -> str:
+    """Replace the leading emoji used in our Vision/Coach prompts with a plain
+    bullet so the PDF renders cleanly even on fonts without emoji glyphs.
+    """
+    out = s
+    for emo, repl in _EMOJI_HEADER_MAP.items():
+        out = out.replace(emo, repl)
+    return out
 
 
 # ─────────────────────────── HTML escape helpers ───────────────────────────
