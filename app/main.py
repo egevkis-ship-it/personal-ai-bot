@@ -164,14 +164,18 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=storage)
 
-    # Register routers (order matters — more specific first)
+    # Register routers. menu.router goes FIRST so that reply-keyboard
+    # taps (💪 Тренировка / 📅 Планы / 📖 История / 📏 Замеры / 📸 Фото /
+    # ⚙️ Сервис) and /start always preempt whatever FSM state the user
+    # was in. Reply-button texts are exact-match so they never steal
+    # set-input / note-input / measurement-input messages.
+    dp.include_router(menu.router)
     dp.include_router(workout.router)
     dp.include_router(plans.router)
     dp.include_router(history.router)
     dp.include_router(measurements.router)
     dp.include_router(photos.router)
     dp.include_router(service.router)
-    dp.include_router(menu.router)   # catch-all last
 
     log.info("Bot polling started.")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
