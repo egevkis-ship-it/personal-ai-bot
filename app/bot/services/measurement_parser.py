@@ -67,37 +67,39 @@ def field_label_ru(field: str) -> str:
 
 # Match a number followed/preceded by a unit
 _NUMBER = r"(\d+(?:[.,]\d+)?)"
+
+# Only full-date patterns: must include a year (4 digits) or 2-digit year via DD.MM.YY.
+# This avoids stealing measurements like "102.7" or "44.5".
 _DATE_PATTERNS = [
-    r"\b(\d{4}-\d{2}-\d{2})\b",                  # 2026-05-24
-    r"\b(\d{2}[./-]\d{2}[./-]\d{4})\b",          # 24.05.2026
-    r"\b(\d{1,2}[./-]\d{1,2})\b",                # 24.05
+    (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),            # 2026-05-24
+    (r"\b(\d{1,2}\.\d{1,2}\.\d{4})\b", "%d.%m.%Y"),      # 24.05.2026
+    (r"\b(\d{1,2}/\d{1,2}/\d{4})\b", "%d/%m/%Y"),
+    (r"\b(\d{1,2}-\d{1,2}-\d{4})\b", "%d-%m-%Y"),
+    (r"\b(\d{1,2}\.\d{1,2}\.\d{2})\b", "%d.%m.%y"),      # 24.05.26
 ]
 
 
-def _parse_date(text: str) -> date | None:
+def _parse_date(text: str) -> tuple[date | None, tuple[int, int] | None]:
+    """Returns (date, (start,end) of date token in original text)."""
     s = text.lower()
-    # words
     today = date.today()
-    if re.search(r"\bсегодня\b", s):
-        return today
-    if re.search(r"\bвчера\b", s):
-        return today - timedelta(days=1)
-    if re.search(r"\bпозавчера\b", s):
-        return today - timedelta(days=2)
-    for pat in _DATE_PATTERNS:
+    if m := re.search(r"\bсегодня\b", s):
+        return today, m.span()
+    if m := re.search(r"\bвчера\b", s):
+        return today - timedelta(days=1), m.span()
+    if m := re.search(r"\bпозавчера\b", s):
+        return today - timedelta(days=2), m.span()
+    for pat, fmt in _DATE_PATTERNS:
         m = re.search(pat, s)
         if not m:
             continue
         token = m.group(1)
-        for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%d.%m", "%d/%m"):
-            try:
-                d = datetime.strptime(token, fmt).date()
-                if d.year < 2000:
-                    d = d.replace(year=today.year)
-                return d
-            except ValueError:
-                continue
-    return None
+        try:
+            d = datetime.strptime(token, fmt).date()
+            return d, m.span()
+        except ValueError:
+            continue
+    return None, None
 
 
 def _normalize_text(s: str) -> str:
@@ -117,13 +119,15 @@ def parse_measurement_text(raw: str) -> dict:
     text = raw or ""
     out_values: dict[str, float] = {}
 
-    # Date extraction first (so the digits in "24.05.2026" don't get mistaken for a metric).
-    d = _parse_date(text)
-    if d:
-        text_for_metrics = re.sub(r"\b\d{1,4}[./-]\d{1,2}([./-]\d{1,4})?\b", " ", text)
+    # Date extraction first — only blank out the EXACT date token so we don't
+    # eat measurement numbers like "102.7" / "44.5".
+    d, date_span = _parse_date(text)
+    if date_span:
+        text_for_metrics = (
+            text[: date_span[0]] + " " * (date_span[1] - date_span[0]) + text[date_span[1]:]
+        )
     else:
         text_for_metrics = text
-    text_for_metrics = re.sub(r"\b(сегодня|вчера|позавчера)\b", " ", text_for_metrics, flags=re.I)
 
     # Walk every occurrence of every alias; pick the closest number.
     norm = _normalize_text(text_for_metrics)
