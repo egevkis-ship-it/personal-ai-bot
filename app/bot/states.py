@@ -44,3 +44,7 @@ class MeasurementStates(StatesGroup):
 class PhotoStates(StatesGroup):
     waiting_photo = State()       # user pressed "New photo", waiting for upload
     waiting_note = State()        # optional note after upload
+
+
+class ReportStates(StatesGroup):
+    waiting_custom_range = State()  # custom from-to date

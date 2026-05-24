@@ -13,7 +13,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 
-from app.bot.handlers import history, measurements, menu, photos, plans, service, workout
+from app.bot.handlers import (
+    history, measurements, menu, photos, plans, reports, service, workout,
+)
 from app.config import settings
 from app.db.engine import init_db, engine
 
@@ -175,6 +177,7 @@ async def main() -> None:
     dp.include_router(history.router)
     dp.include_router(measurements.router)
     dp.include_router(photos.router)
+    dp.include_router(reports.router)
     dp.include_router(service.router)
 
     log.info("Bot polling started.")

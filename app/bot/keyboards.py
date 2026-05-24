@@ -24,9 +24,22 @@ def main_menu() -> ReplyKeyboardMarkup:
     kb.button(text="📖 История")
     kb.button(text="📏 Замеры")
     kb.button(text="📸 Фото")
+    kb.button(text="📋 Отчёты")
     kb.button(text="⚙️ Сервис")
-    kb.adjust(3, 2, 1)
+    kb.adjust(3, 2, 2)
     return kb.as_markup(resize_keyboard=True)
+
+
+def reports_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📅 1 неделя", callback_data="rep:7")
+    kb.button(text="📅 2 недели", callback_data="rep:14")
+    kb.button(text="📅 Месяц", callback_data="rep:30")
+    kb.button(text="📅 2 месяца", callback_data="rep:60")
+    kb.button(text="✍️ Произвольный период", callback_data="rep:custom")
+    kb.button(text="🔙 Назад", callback_data="back:main")
+    kb.adjust(2, 2, 1, 1)
+    return kb.as_markup()
 
 
 # ─────────────────────────── measurements ───────────────────────────────────

@@ -9,3 +9,5 @@ asyncpg>=0.29.0
 redis>=5.0.7
 python-dotenv>=1.0.1
 greenlet
+reportlab>=4.2.0
+Pillow>=10.4.0
