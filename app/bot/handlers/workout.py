@@ -303,6 +303,24 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext, *, p
         )
         return
 
+    # Normalize exercise names through the catalog BEFORE showing the confirm
+    # dialog. This way user sees the canonical name ("Жим на грудь в тренажёре")
+    # in the preview, not the raw guess from the AI parser ("Жим в тренажёре"),
+    # and can catch wrong-catalog mappings before saving.
+    from app.bot.services.exercise_catalog import resolve_or_register
+    name_cache: dict[str, str] = {}
+    unique_names = {s.exercise_name for s in sets if s.exercise_name}
+    for raw_name in unique_names:
+        try:
+            r = await resolve_or_register(raw_name)
+            name_cache[raw_name] = r.get("canonical") or raw_name
+        except Exception as exc:
+            log.warning("normalize failed for %r: %s", raw_name, exc)
+            name_cache[raw_name] = raw_name
+    for s in sets:
+        if s.exercise_name in name_cache:
+            s.exercise_name = name_cache[s.exercise_name]
+
     # Save parsed sets to state for confirmation
     sets_dicts = [
         {
@@ -337,22 +355,11 @@ async def cb_confirm_set(cb: CallbackQuery, state: FSMContext) -> None:
     workout_id = data.get("workout_id")
     pending = data.get("pending_sets", [])
 
-    # Normalize each unique exercise_name once through the catalog.
-    from app.bot.services.exercise_catalog import resolve_or_register
-    name_cache: dict[str, str] = {}
-    for s in pending:
-        raw = s["exercise_name"]
-        if raw not in name_cache:
-            try:
-                r = await resolve_or_register(raw)
-                name_cache[raw] = r.get("canonical") or raw
-            except Exception as exc:
-                log.warning("normalize failed for %r: %s", raw, exc)
-                name_cache[raw] = raw
-
+    # Exercise names were already normalized in _handle_set_input before
+    # the confirm dialog was shown — write them as-is.
     last_ex = None
     for s in pending:
-        ex_name = name_cache.get(s["exercise_name"], s["exercise_name"])
+        ex_name = s["exercise_name"]
         await add_set(
             workout_id=workout_id,
             exercise_name=ex_name,
