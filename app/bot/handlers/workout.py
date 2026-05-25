@@ -303,26 +303,26 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext, *, p
         )
         return
 
-    # Normalize exercise names through the catalog BEFORE showing the confirm
-    # dialog. This way user sees the canonical name ("Жим на грудь в тренажёре")
-    # in the preview, not the raw guess from the AI parser ("Жим в тренажёре"),
-    # and can catch wrong-catalog mappings before saving.
-    from app.bot.services.exercise_catalog import resolve_or_register
-    name_cache: dict[str, str] = {}
-    unique_names = {s.exercise_name for s in sets if s.exercise_name}
+    # Resolve names via static lib + DB cache ONLY (no AI auto-write).
+    # If something is unknown — we'll ask the user before showing set-confirm.
+    from app.bot.services.exercise_catalog import resolve_known, ai_suggest_canonical
+    name_cache: dict[str, str] = {}      # raw → canonical (already known)
+    new_unknown: list[str] = []          # raw names that need user confirmation
+    unique_names = list({s.exercise_name for s in sets if s.exercise_name})
     for raw_name in unique_names:
         try:
-            r = await resolve_or_register(raw_name)
-            name_cache[raw_name] = r.get("canonical") or raw_name
+            r = await resolve_known(raw_name)
         except Exception as exc:
-            log.warning("normalize failed for %r: %s", raw_name, exc)
-            name_cache[raw_name] = raw_name
-    for s in sets:
-        if s.exercise_name in name_cache:
-            s.exercise_name = name_cache[s.exercise_name]
+            log.warning("resolve_known failed for %r: %s", raw_name, exc)
+            r = None
+        if r:
+            name_cache[raw_name] = r.get("canonical") or raw_name
+        else:
+            new_unknown.append(raw_name)
 
-    # Save parsed sets to state for confirmation
-    sets_dicts = [
+    # Pre-build pending set-dicts but do NOT rename yet — we'll patch them
+    # after the user confirms each unknown exercise (or now if there are none).
+    raw_sets_dicts = [
         {
             "exercise_name": s.exercise_name,
             "weight_kg": s.weight_kg,
@@ -335,15 +335,185 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext, *, p
         }
         for s in sets
     ]
+
+    if new_unknown:
+        # Need user confirmation for these — ask AI for suggestions but DO NOT
+        # persist them yet. Queue them up in state and prompt one by one.
+        ai_suggestions: dict[str, dict | None] = {}
+        for raw in new_unknown:
+            try:
+                ai_suggestions[raw] = await ai_suggest_canonical(raw)
+            except Exception as exc:
+                log.warning("ai_suggest failed for %r: %s", raw, exc)
+                ai_suggestions[raw] = None
+
+        await state.update_data(
+            pending_raw_sets=raw_sets_dicts,
+            pending_name_cache=name_cache,
+            pending_new_queue=[
+                {
+                    "raw": raw,
+                    "ai_canonical": (ai_suggestions[raw] or {}).get("canonical"),
+                    "ai_muscle": (ai_suggestions[raw] or {}).get("muscle_group"),
+                }
+                for raw in new_unknown
+            ],
+        )
+        await state.set_state(WorkoutStates.confirm_new_exercise)
+        await _prompt_next_new_exercise(message, state)
+        return
+
+    # All names known — apply cache and proceed to set-confirm directly.
+    for sd in raw_sets_dicts:
+        if sd["exercise_name"] in name_cache:
+            sd["exercise_name"] = name_cache[sd["exercise_name"]]
+    await _show_set_confirm(message, state, raw_sets_dicts)
+
+
+async def _show_set_confirm(message: Message, state: FSMContext,
+                              sets_dicts: list[dict]) -> None:
     await state.update_data(pending_sets=sets_dicts)
     await state.set_state(WorkoutStates.confirm_set)
-
     summary = format_set_confirmation(sets_dicts)
     await message.answer(
         f"{summary}\n\nЗаписать?",
         parse_mode="HTML",
         reply_markup=confirm_sets(summary),
     )
+
+
+async def _prompt_next_new_exercise(message: Message, state: FSMContext) -> None:
+    """Show the next exercise in pending_new_queue. If empty — finalize."""
+    from app.bot.keyboards import confirm_new_exercise as _kb
+    data = await state.get_data()
+    queue: list[dict] = data.get("pending_new_queue") or []
+    if not queue:
+        await _finalize_new_exercise_queue(message, state)
+        return
+    item = queue[0]
+    raw = item["raw"]
+    ai_canonical = item.get("ai_canonical")
+    suggest_text = ""
+    if ai_canonical and ai_canonical.strip().lower() != raw.strip().lower():
+        suggest_text = f"\n\nAI предлагает: <b>{ai_canonical}</b>"
+    else:
+        suggest_text = "\n\nAI не уверен в названии."
+    await message.answer(
+        f"🆕 Новое упражнение: <b>«{raw}»</b>{suggest_text}\n\n"
+        "Сохранить в каталог?",
+        parse_mode="HTML",
+        reply_markup=_kb(ai_canonical),
+    )
+
+
+async def _finalize_new_exercise_queue(message: Message, state: FSMContext) -> None:
+    """All unknowns resolved → patch pending_raw_sets and show set-confirm."""
+    data = await state.get_data()
+    raw_sets: list[dict] = data.get("pending_raw_sets") or []
+    name_cache: dict[str, str] = dict(data.get("pending_name_cache") or {})
+    for sd in raw_sets:
+        if sd["exercise_name"] in name_cache:
+            sd["exercise_name"] = name_cache[sd["exercise_name"]]
+    # Clear queue-related data
+    await state.update_data(
+        pending_new_queue=None, pending_raw_sets=None, pending_name_cache=None,
+    )
+    await _show_set_confirm(message, state, raw_sets)
+
+
+async def _pop_queue_with_resolution(state: FSMContext, raw: str,
+                                       canonical: str, muscle_group: str | None,
+                                       source: str) -> None:
+    """Persist alias, push resolution into name_cache, drop head of queue."""
+    from app.bot.services.exercise_catalog import register_alias
+    try:
+        await register_alias(raw, canonical, muscle_group, source=source)
+    except Exception as exc:
+        log.warning("register_alias failed: %s", exc)
+    data = await state.get_data()
+    name_cache = dict(data.get("pending_name_cache") or {})
+    name_cache[raw] = canonical
+    queue = list(data.get("pending_new_queue") or [])
+    if queue and queue[0]["raw"] == raw:
+        queue.pop(0)
+    await state.update_data(pending_name_cache=name_cache, pending_new_queue=queue)
+
+
+@router.callback_query(F.data == "new_ex:accept_ai", WorkoutStates.confirm_new_exercise)
+async def cb_new_ex_accept_ai(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    data = await state.get_data()
+    queue = list(data.get("pending_new_queue") or [])
+    if not queue:
+        await _finalize_new_exercise_queue(cb.message, state)
+        return
+    head = queue[0]
+    raw = head["raw"]
+    canonical = head.get("ai_canonical") or raw
+    muscle = head.get("ai_muscle")
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer(
+        f"✅ Сохранено: <b>{raw}</b> → <b>{canonical}</b>",
+        parse_mode="HTML",
+    )
+    await _pop_queue_with_resolution(state, raw, canonical, muscle, source="user_ai")
+    await _prompt_next_new_exercise(cb.message, state)
+
+
+@router.callback_query(F.data == "new_ex:rename", WorkoutStates.confirm_new_exercise)
+async def cb_new_ex_rename(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    data = await state.get_data()
+    queue = list(data.get("pending_new_queue") or [])
+    if not queue:
+        await _finalize_new_exercise_queue(cb.message, state)
+        return
+    raw = queue[0]["raw"]
+    await state.set_state(WorkoutStates.enter_new_exercise_name)
+    await state.update_data(pending_rename_raw=raw)
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer(
+        f"✏️ Введи канонический название для <b>«{raw}»</b> одним сообщением.\n"
+        f"Например: <i>Жим штанги лёжа</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(WorkoutStates.enter_new_exercise_name, F.text)
+async def handle_new_exercise_rename(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    raw = data.get("pending_rename_raw")
+    if not raw:
+        await state.set_state(WorkoutStates.confirm_new_exercise)
+        await _prompt_next_new_exercise(message, state)
+        return
+    canonical = (message.text or "").strip()
+    if len(canonical) < 2:
+        await message.answer("Слишком короткое название. Попробуй ещё раз.")
+        return
+    # First letter uppercase
+    canonical = canonical[0].upper() + canonical[1:]
+    await message.answer(
+        f"✅ Сохранено: <b>{raw}</b> → <b>{canonical}</b>",
+        parse_mode="HTML",
+    )
+    await _pop_queue_with_resolution(state, raw, canonical, None, source="user")
+    await state.set_state(WorkoutStates.confirm_new_exercise)
+    await state.update_data(pending_rename_raw=None)
+    await _prompt_next_new_exercise(message, state)
+
+
+@router.callback_query(F.data == "new_ex:cancel", WorkoutStates.confirm_new_exercise)
+async def cb_new_ex_cancel(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    await state.set_state(WorkoutStates.active)
+    await state.update_data(
+        pending_raw_sets=None, pending_name_cache=None,
+        pending_new_queue=None, pending_rename_raw=None,
+    )
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("❌ Запись отменена. Подходы не сохранены.",
+                             reply_markup=workout_active_menu())
 
 
 # ─────────────────────────── confirm set ────────────────────────────────────

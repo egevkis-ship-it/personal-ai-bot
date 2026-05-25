@@ -267,6 +267,17 @@ def confirm_sets(sets_summary: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def confirm_new_exercise(ai_suggestion: str | None) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if ai_suggestion:
+        label = ai_suggestion if len(ai_suggestion) <= 40 else ai_suggestion[:37] + "…"
+        kb.button(text=f"✅ Принять «{label}»", callback_data="new_ex:accept_ai")
+    kb.button(text="✏️ Ввести своё название", callback_data="new_ex:rename")
+    kb.button(text="❌ Отмена", callback_data="new_ex:cancel")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def finish_workout_confirm() -> InlineKeyboardMarkup:
     return yes_no("workout:finish_yes", "workout:finish_no",
                   yes_label="🏁 Завершить", no_label="↩️ Продолжить")

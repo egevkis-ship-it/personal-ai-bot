@@ -10,6 +10,10 @@ class WorkoutStates(StatesGroup):
     enter_set_note = State()      # waiting for text comment to last set
     enter_workout_note = State()  # post-finish: optional workout-level comment
 
+    # confirm new (unknown) exercises before set save
+    confirm_new_exercise = State()    # user accepts/renames AI-suggested canonical
+    enter_new_exercise_name = State() # user types correct canonical name
+
     # post-finish AI planning flow
     plan_next_mode = State()      # manual / AI
     ai_plan_period = State()      # 1 day / week

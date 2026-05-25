@@ -251,3 +251,41 @@ async def resolve_or_register(name: str) -> dict:
         return ai
 
     return {"canonical": name, "muscle_group": None, "source": "unknown"}
+
+
+# ─────────────────────────── confirmation-aware lookup ─────────────────────
+
+async def resolve_known(name: str) -> dict | None:
+    """Like resolve_or_register but ONLY checks static library and DB cache.
+    Returns None if the name is unknown (caller should ask the user before
+    we generate a new alias).
+    """
+    if not name or not name.strip():
+        return None
+    static = normalize_exercise(name)
+    if static["source"] != "unknown":
+        return static
+    cached = await _lookup_alias_cache(name)
+    if cached:
+        return {
+            "canonical": cached["canonical"],
+            "muscle_group": cached.get("muscle_group"),
+            "source": "db_cache",
+        }
+    return None
+
+
+async def ai_suggest_canonical(name: str) -> dict | None:
+    """Run AI normalize WITHOUT writing the result to the cache. Caller is
+    expected to confirm with the user and call register_alias() if accepted.
+    """
+    return await _ai_normalize(name)
+
+
+async def register_alias(raw_name: str, canonical: str, muscle_group: str | None,
+                          source: str = "user") -> None:
+    """Persist a user-confirmed alias to the cache so future inputs resolve."""
+    try:
+        await _save_alias(raw_name, canonical, muscle_group, source)
+    except Exception as exc:
+        log.warning("register_alias failed: %s", exc)
