@@ -60,15 +60,17 @@ def _exercises_to_db(exercises) -> list[dict]:
     return result
 
 
-def _assign_dates(days: list[PlannedDay]) -> list[tuple[PlannedDay, date]]:
+def _assign_dates(days: list[PlannedDay], today: date | None = None) -> list[tuple[PlannedDay, date]]:
     """
     Assign real dates to parsed days.
     Logic:
     - If day_label looks like a weekday name → find next occurrence from today
     - If day_label looks like ISO date → parse directly
     - Otherwise: today + index
+    `today` should be the user-local date (caller passes tz.today(uid)).
     """
-    today = date.today()
+    if today is None:
+        today = date.today()
     result = []
     for i, day in enumerate(days):
         label_lower = day.day_label.lower().strip()
@@ -198,7 +200,8 @@ async def cb_confirm_parsed(cb: CallbackQuery, state: FSMContext) -> None:
             )
             for d in days_data
         ]
-        assignments = _assign_dates(days)
+        from app.bot.services import tz as _tz
+        assignments = _assign_dates(days, today=await _tz.today(uid))
 
         # Normalize exercise names through the catalog (parallel per day).
         # Failures fall back to the raw name — never block plan saving.
@@ -284,7 +287,8 @@ async def cb_view_plan(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     await state.clear()
     uid = str(cb.from_user.id)
-    today = date.today()
+    from app.bot.services import tz as _tz
+    today = await _tz.today(uid)
     # Show next 30 days
     plans = await get_planned_workouts_range(uid, today, today + timedelta(days=30))
     if not plans:
@@ -342,9 +346,10 @@ async def cb_start_from_plan(cb: CallbackQuery, state: FSMContext) -> None:
         return
 
     uid = str(cb.from_user.id)
+    from app.bot.services import tz as _tz
     workout_id = await create_workout(
         user_id=uid,
-        workout_date=date.today(),
+        workout_date=await _tz.today(uid),
         focus_label=plan.get("focus_label"),
         planned_workout_id=plan_id,
     )

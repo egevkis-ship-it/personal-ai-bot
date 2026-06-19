@@ -135,7 +135,10 @@ async def handle_meas_voice(message: Message, state: FSMContext) -> None:
 
 
 async def _process_measurement_text(message: Message, state: FSMContext, text: str) -> None:
-    entries = await parse_measurement_batch(text)
+    from app.bot.services import tz as _tz
+    uid0 = str(message.from_user.id)
+    user_today = await _tz.today(uid0)
+    entries = await parse_measurement_batch(text, today=user_today)
     valid = [e for e in entries if e.get("values")]
     if not valid:
         await message.answer(
@@ -150,7 +153,7 @@ async def _process_measurement_text(message: Message, state: FSMContext, text: s
         skipped = 0
         per_day_summary = []
         for e in valid:
-            d_iso = e.get("date") or date.today().isoformat()
+            d_iso = e.get("date") or user_today.isoformat()
             try:
                 await create_measurement(uid, d_iso, e["values"], notes=e.get("notes"))
                 saved += 1
@@ -285,7 +288,8 @@ async def _save_and_finish(message: Message, state: FSMContext, user_id: str | N
         await state.clear()
         return
     uid = user_id or str(message.from_user.id)
-    taken_on = parsed.get("date") or date.today().isoformat()
+    from app.bot.services import tz as _tz
+    taken_on = parsed.get("date") or (await _tz.today(uid)).isoformat()
     values = parsed.get("values", {})
     notes = parsed.get("notes")
     try:

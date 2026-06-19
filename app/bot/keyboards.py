@@ -114,8 +114,35 @@ def photo_series_nav(series_key: str, idx: int, total: int) -> InlineKeyboardMar
     return kb.as_markup()
 
 
+_TZ_PRESETS = [
+    ("Калининград (UTC+2)", "Europe/Kaliningrad"),
+    ("Москва (UTC+3)", "Europe/Moscow"),
+    ("Самара (UTC+4)", "Europe/Samara"),
+    ("Екатеринбург (UTC+5)", "Asia/Yekaterinburg"),
+    ("Новосибирск (UTC+7)", "Asia/Novosibirsk"),
+    ("Владивосток (UTC+10)", "Asia/Vladivostok"),
+    ("Лиссабон (UTC+1)", "Europe/Lisbon"),
+    ("Лондон (UTC+0/1)", "Europe/London"),
+    ("Дубай (UTC+4)", "Asia/Dubai"),
+    ("Бангкок (UTC+7)", "Asia/Bangkok"),
+    ("Нью-Йорк (UTC-5/4)", "America/New_York"),
+    ("UTC", "UTC"),
+]
+
+
+def tz_menu(current: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for label, name in _TZ_PRESETS:
+        mark = "✅ " if name == current else ""
+        kb.button(text=f"{mark}{label}", callback_data=f"svc:tz_set:{name}")
+    kb.button(text="🔙 Назад", callback_data="svc:back")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
 def service_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(text="🌍 Часовой пояс", callback_data="svc:tz")
     kb.button(text="📊 Статистика БД", callback_data="svc:stats")
     kb.button(text="🗑 Очистить запланированные", callback_data="svc:wipe_plans")
     kb.button(text="🗑 Очистить историю", callback_data="svc:wipe_history")
@@ -171,11 +198,12 @@ def workout_start(has_plan: bool) -> InlineKeyboardMarkup:
 def workout_active_menu() -> InlineKeyboardMarkup:
     """Persistent inline menu during active workout."""
     kb = InlineKeyboardBuilder()
-    kb.button(text="👁 Показать сессию", callback_data="workout:show")
+    kb.button(text="📋 Показать выполненное", callback_data="workout:show")
+    kb.button(text="📅 Показать тренировку", callback_data="workout:show_plan")
     kb.button(text="✏️ Коммент к последнему", callback_data="workout:note_last")
     kb.button(text="↩️ Удалить последний", callback_data="workout:delete_last")
     kb.button(text="🏁 Завершить тренировку", callback_data="workout:finish")
-    kb.adjust(1)
+    kb.adjust(2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -265,6 +293,13 @@ def confirm_sets(sets_summary: str) -> InlineKeyboardMarkup:
     kb.button(text="❌ Отмена", callback_data="set:cancel")
     kb.adjust(3)
     return kb.as_markup()
+
+
+def missing_reps_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔢 Без повторов", callback_data="missing_reps:skip"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="missing_reps:cancel"),
+    ]])
 
 
 def confirm_new_exercise(ai_suggestion: str | None) -> InlineKeyboardMarkup:

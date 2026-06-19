@@ -90,6 +90,12 @@ CREATE TABLE IF NOT EXISTS exercise_aliases (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id     TEXT        PRIMARY KEY,
+    tz_name     TEXT        NOT NULL DEFAULT 'UTC',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS body_measurements (
     id           SERIAL PRIMARY KEY,
     user_id      TEXT        NOT NULL,

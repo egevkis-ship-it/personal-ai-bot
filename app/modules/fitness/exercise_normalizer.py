@@ -179,7 +179,7 @@ EXERCISE_LIBRARY = {
         "aliases": [
             "махи на среднюю дельту сидя", "махи в стороны сидя",
             "разведение гантелей в стороны сидя", "разводка гантелей в сторону",
-            "махи", "lateral raise seated",
+            "lateral raise seated",
         ],
     },
     "front_dumbbell_raise": {
@@ -496,20 +496,12 @@ def normalize_exercise_name(name: str | None, context: dict | None = None) -> di
             "muscle_group": item.get("muscle_group"),
         }
 
-    sorted_aliases = sorted(index.keys(), key=len, reverse=True)
-    for alias in sorted_aliases:
-        if len(alias) < 4:
-            continue
-        if alias in cleaned or cleaned in alias:
-            key = index[alias]
-            item = EXERCISE_LIBRARY[key]
-            return {
-                "exercise_key": key,
-                "canonical_ru": item["canonical_ru"],
-                "confidence": 0.82,
-                "source": "contains_alias",
-                "muscle_group": item.get("muscle_group"),
-            }
+    # NOTE: fuzzy "contains" matching was removed (variant C). It used to
+    # collapse distinct exercises — e.g. "махи в кроссовере" → "Махи на
+    # среднюю дельту сидя" — because any alias appearing as a substring
+    # matched. Now only exact-alias matches above are accepted; everything
+    # else falls through to the caller, which asks the user (AI suggestion +
+    # confirmation) before inventing a canonical name.
 
     if context:
         current_key = context.get("current_exercise_key")

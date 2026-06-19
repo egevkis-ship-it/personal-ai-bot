@@ -30,6 +30,7 @@ from app.bot.keyboards import (
 from app.bot.services.ai_parser import parse_set_text_ai, transcribe_voice
 from app.bot.services.formatter import (
     format_active_session,
+    format_planned_day,
     format_set_confirmation,
 )
 from app.bot.services.set_parser import looks_like_exercise_input, parse_exercise_input
@@ -40,11 +41,13 @@ from app.db import (
     finish_workout,
     get_active_workout,
     get_last_set,
+    get_planned_workout,
     get_today_plan,
     get_workout,
     get_workout_sets,
     delete_set,
 )
+from app.bot.services import tz
 
 log = logging.getLogger(__name__)
 router = Router(name="workout")
@@ -65,7 +68,7 @@ async def _start_workout(
 
     workout_id = await create_workout(
         user_id=uid,
-        workout_date=date.today(),
+        workout_date=await tz.today(uid),
         focus_label=focus,
         planned_workout_id=plan_id,
     )
@@ -107,7 +110,8 @@ async def show_active_session(
 ) -> None:
     """Display current session state and the workout menu."""
     sets = await get_workout_sets(workout["id"])
-    text = format_active_session(sets, workout)
+    zone = await tz.user_zone(uid)
+    text = format_active_session(sets, workout, zone=zone)
     await message.answer(text, parse_mode="HTML", reply_markup=workout_active_menu())
 
 
@@ -121,7 +125,33 @@ async def cb_show_session(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     workout = await get_workout(workout_id)
     sets = await get_workout_sets(workout_id)
-    text = format_active_session(sets, workout)
+    zone = await tz.user_zone(str(cb.from_user.id))
+    text = format_active_session(sets, workout, zone=zone)
+    await cb.message.answer(text, parse_mode="HTML", reply_markup=workout_active_menu())
+
+
+@router.callback_query(F.data == "workout:show_plan", WorkoutStates.active)
+async def cb_show_plan(cb: CallbackQuery, state: FSMContext) -> None:
+    """Show today's planned workout (the program) without scrolling up."""
+    data = await state.get_data()
+    workout_id = data.get("workout_id")
+    if not workout_id:
+        await cb.answer("Нет активной тренировки", show_alert=True)
+        return
+    await cb.answer()
+    workout = await get_workout(workout_id)
+    planned_id = workout.get("planned_workout_id") if workout else None
+    if not planned_id:
+        await cb.message.answer(
+            "📌 Свободная тренировка — плана нет.",
+            reply_markup=workout_active_menu(),
+        )
+        return
+    plan = await get_planned_workout(planned_id)
+    if not plan:
+        await cb.message.answer("❌ План не найден.", reply_markup=workout_active_menu())
+        return
+    text = format_planned_day(plan)
     await cb.message.answer(text, parse_mode="HTML", reply_markup=workout_active_menu())
 
 
@@ -372,6 +402,25 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext, *, p
 
 async def _show_set_confirm(message: Message, state: FSMContext,
                               sets_dicts: list[dict]) -> None:
+    # Bug 4 guard: a set with neither reps nor duration nor an explicit
+    # reps_text marker is incomplete ("Махи 9кг" → "9 кг × —"). Ask for reps
+    # instead of silently saving a blank.
+    incomplete = [s for s in sets_dicts
+                  if s.get("reps") is None and s.get("duration_seconds") is None
+                  and not s.get("reps_text")]
+    if incomplete:
+        names = ", ".join(dict.fromkeys(s["exercise_name"] for s in incomplete))
+        await state.update_data(pending_sets=sets_dicts)
+        await state.set_state(WorkoutStates.enter_missing_reps)
+        from app.bot.keyboards import missing_reps_kb
+        await message.answer(
+            f"⚠️ Для <b>{names}</b> не указаны повторения.\n\n"
+            "Отправь число (или несколько через пробел: <i>10 8 7</i>), "
+            "либо нажми «Без повторов» чтобы записать как есть.",
+            parse_mode="HTML",
+            reply_markup=missing_reps_kb(),
+        )
+        return
     await state.update_data(pending_sets=sets_dicts)
     await state.set_state(WorkoutStates.confirm_set)
     summary = format_set_confirmation(sets_dicts)
@@ -380,6 +429,57 @@ async def _show_set_confirm(message: Message, state: FSMContext,
         parse_mode="HTML",
         reply_markup=confirm_sets(summary),
     )
+
+
+@router.message(WorkoutStates.enter_missing_reps, F.text)
+async def handle_missing_reps(message: Message, state: FSMContext) -> None:
+    import re as _re
+    nums = [int(x) for x in _re.findall(r"\d+", message.text or "")]
+    data = await state.get_data()
+    sets_dicts: list[dict] = data.get("pending_sets") or []
+    if not sets_dicts:
+        await state.set_state(WorkoutStates.active)
+        await message.answer("Подходы потеряны, отправь заново.",
+                             reply_markup=workout_active_menu())
+        return
+    if not nums:
+        from app.bot.keyboards import missing_reps_kb
+        await message.answer("Не понял число. Отправь, например, <i>12</i> или <i>10 8 7</i>.",
+                             parse_mode="HTML", reply_markup=missing_reps_kb())
+        return
+    incomplete_idx = [i for i, s in enumerate(sets_dicts)
+                      if s.get("reps") is None and s.get("duration_seconds") is None]
+    # Apply: one number → all; many → positional (last repeats if fewer).
+    for n, i in enumerate(incomplete_idx):
+        sets_dicts[i]["reps"] = nums[n] if n < len(nums) else nums[-1]
+    await state.update_data(pending_sets=sets_dicts)
+    await _show_set_confirm(message, state, sets_dicts)
+
+
+@router.callback_query(F.data == "missing_reps:skip", WorkoutStates.enter_missing_reps)
+async def cb_missing_reps_skip(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    data = await state.get_data()
+    sets_dicts: list[dict] = data.get("pending_sets") or []
+    await cb.message.edit_reply_markup(reply_markup=None)
+    # Mark as bodyweight/no-count so the confirm guard doesn't loop.
+    for s in sets_dicts:
+        if s.get("reps") is None and s.get("duration_seconds") is None:
+            s["reps_text"] = s.get("reps_text") or "—"
+    await state.update_data(pending_sets=sets_dicts)
+    await state.set_state(WorkoutStates.confirm_set)
+    summary = format_set_confirmation(sets_dicts)
+    await cb.message.answer(f"{summary}\n\nЗаписать?", parse_mode="HTML",
+                            reply_markup=confirm_sets(summary))
+
+
+@router.callback_query(F.data == "missing_reps:cancel", WorkoutStates.enter_missing_reps)
+async def cb_missing_reps_cancel(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    await state.update_data(pending_sets=[])
+    await state.set_state(WorkoutStates.active)
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.message.answer("❌ Отменено.", reply_markup=workout_active_menu())
 
 
 async def _prompt_next_new_exercise(message: Message, state: FSMContext) -> None:
@@ -500,6 +600,30 @@ async def handle_new_exercise_rename(message: Message, state: FSMContext) -> Non
     await _pop_queue_with_resolution(state, raw, canonical, None, source="user")
     await state.set_state(WorkoutStates.confirm_new_exercise)
     await state.update_data(pending_rename_raw=None)
+    await _prompt_next_new_exercise(message, state)
+
+
+@router.message(WorkoutStates.confirm_new_exercise, F.text)
+async def handle_new_exercise_typed(message: Message, state: FSMContext) -> None:
+    """Bug 3: user typed text instead of pressing a button at the
+    "🆕 Новое упражнение" prompt. Treat the text as the canonical name for the
+    current queued item (same as pressing "Ввести своё" then typing).
+    """
+    data = await state.get_data()
+    queue = list(data.get("pending_new_queue") or [])
+    if not queue:
+        await _finalize_new_exercise_queue(message, state)
+        return
+    raw = queue[0]["raw"]
+    canonical = (message.text or "").strip()
+    if len(canonical) < 2:
+        await message.answer("Слишком короткое название. Нажми кнопку или введи название упражнения.")
+        return
+    canonical = canonical[0].upper() + canonical[1:]
+    await message.answer(
+        f"✅ Сохранено: <b>{raw}</b> → <b>{canonical}</b>", parse_mode="HTML",
+    )
+    await _pop_queue_with_resolution(state, raw, canonical, None, source="user")
     await _prompt_next_new_exercise(message, state)
 
 
@@ -727,7 +851,7 @@ async def cb_ai_plan_day(cb: CallbackQuery, state: FSMContext) -> None:
     from app.bot.keyboards import ai_plan_day_picker
     from app.db import get_planned_workouts_range
     from datetime import date as _date, timedelta as _td
-    today = _date.today()
+    today = await tz.today(str(cb.from_user.id))
     # Mon..Sun of *next* week
     # weekday(): Mon=0 ... Sun=6 — compute start of next week
     days_until_monday = (7 - today.weekday()) % 7
@@ -921,7 +1045,7 @@ async def cb_ai_plan_week(cb: CallbackQuery, state: FSMContext) -> None:
     from app.bot.keyboards import ai_plan_week_confirm
     from datetime import date as _date, timedelta as _td
 
-    today = _date.today()
+    today = await tz.today(str(cb.from_user.id))
     days_until_monday = (7 - today.weekday()) % 7
     if days_until_monday == 0:
         days_until_monday = 7

@@ -121,11 +121,13 @@ async def handle_photo_upload(message: Message, state: FSMContext) -> None:
     # Caption may carry a date ("15.05.2026", "вчера", "03.02.2026 после отпуска")
     # and a free-form note. We pull both out.
     from app.bot.services.measurement_parser import _parse_date as _parse_caption_date
+    from app.bot.services import tz as _tz
+    _user_today = await _tz.today(uid)
     caption_raw = (message.caption or "").strip()
     caption_date_iso: str | None = None
     caption_note: str | None = None
     if caption_raw:
-        d, span = _parse_caption_date(caption_raw)
+        d, span = _parse_caption_date(caption_raw, _user_today)
         if d:
             caption_date_iso = d.isoformat()
             # remove date token from caption to use rest as note
@@ -318,14 +320,16 @@ async def _process_snapshot(message: Message, state: FSMContext,
     uid = state_data.get("_uid") or (
         str(message.from_user.id) if message.from_user else str(message.chat.id)
     )
+    from app.bot.services import tz as _tz
+    _user_today = await _tz.today(uid)
     series_date_iso = state_data.get("series_date")
     if series_date_iso:
         try:
             taken_on = date.fromisoformat(series_date_iso)
         except ValueError:
-            taken_on = date.today()
+            taken_on = _user_today
     else:
-        taken_on = date.today()
+        taken_on = _user_today
     caption_note = state_data.get("series_caption_note")
 
     saved_ids: list[int] = []

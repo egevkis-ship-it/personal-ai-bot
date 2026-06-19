@@ -99,21 +99,25 @@ def normalize_exercise(name: str | None) -> dict:
     if not name:
         return {"canonical": "", "muscle_group": None, "source": "empty"}
 
-    # 1. RU static lib
+    # Variant C: EXACT matches only. No fuzzy/contains/partial matching — those
+    # collapse distinct exercises ("Махи в кроссовере" → "Махи на среднюю
+    # дельту сидя"). Anything not exactly known returns "unknown" so the caller
+    # asks the user (AI suggestion + confirmation) before creating an alias.
+
+    # 1. RU static lib — accept ONLY a 1.0 exact-alias hit.
     r = normalize_exercise_name(name)
-    if r["confidence"] >= 0.8:
+    if r["confidence"] >= 1.0 and r["source"] == "exact_alias":
         return {
             "canonical": r["canonical_ru"],
             "muscle_group": r.get("muscle_group"),
-            "source": "exact" if r["source"] == "exact_alias" else "contains",
+            "source": "exact",
         }
 
-    # 2. EN aliases
+    # 2. EN aliases — exact only.
     cleaned = clean_text(name)
     en_idx = _en_alias_index()
     if cleaned in en_idx:
         canonical = en_idx[cleaned]
-        # Look up muscle group from EXERCISE_LIBRARY
         for key, item in EXERCISE_LIBRARY.items():
             if item["canonical_ru"] == canonical:
                 return {
@@ -122,17 +126,6 @@ def normalize_exercise(name: str | None) -> dict:
                     "source": "english",
                 }
         return {"canonical": canonical, "muscle_group": None, "source": "english"}
-
-    # Partial EN match
-    for alias_clean, canonical in en_idx.items():
-        if len(alias_clean) >= 5 and (alias_clean in cleaned or cleaned in alias_clean):
-            for key, item in EXERCISE_LIBRARY.items():
-                if item["canonical_ru"] == canonical:
-                    return {
-                        "canonical": canonical,
-                        "muscle_group": item.get("muscle_group"),
-                        "source": "english_partial",
-                    }
 
     return {"canonical": name, "muscle_group": None, "source": "unknown"}
 

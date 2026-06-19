@@ -124,7 +124,8 @@ async def build_coach_facts(user_id: str, workout_id: int) -> dict:
         sets = [dict(r) for r in sr.mappings().all()]
 
     focus = (workout.get("focus_label") or "").strip()
-    today = workout.get("workout_date") or date.today()
+    from app.bot.services.tz import today as _today
+    today = workout.get("workout_date") or await _today(user_id)
     if isinstance(today, str):
         today = date.fromisoformat(today)
 

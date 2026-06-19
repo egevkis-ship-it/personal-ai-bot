@@ -13,6 +13,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery
 
 from app.bot.keyboards import export_format, export_period, history_menu
 from app.bot.services.formatter import format_csv, format_history_list, format_workout_summary
+from app.bot.services import tz
 from app.bot.states import HistoryStates
 from app.db import get_workout_sets, get_workouts_range
 
@@ -35,9 +36,10 @@ async def _load_workouts_with_sets(uid: str, from_date: date, to_date: date):
 async def cb_hist_today(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     uid = str(cb.from_user.id)
-    today = date.today()
+    today = await tz.today(uid)
+    zone = await tz.user_zone(uid)
     data = await _load_workouts_with_sets(uid, today, today)
-    text = format_history_list(data)
+    text = format_history_list(data, zone=zone)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=history_menu())
 
 
@@ -45,10 +47,11 @@ async def cb_hist_today(cb: CallbackQuery, state: FSMContext) -> None:
 async def cb_hist_week(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     uid = str(cb.from_user.id)
-    today = date.today()
+    today = await tz.today(uid)
+    zone = await tz.user_zone(uid)
     week_start = today - timedelta(days=today.weekday())
     data = await _load_workouts_with_sets(uid, week_start, today)
-    text = format_history_list(data)
+    text = format_history_list(data, zone=zone)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=history_menu())
 
 
@@ -56,10 +59,11 @@ async def cb_hist_week(cb: CallbackQuery, state: FSMContext) -> None:
 async def cb_hist_month(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     uid = str(cb.from_user.id)
-    today = date.today()
+    today = await tz.today(uid)
+    zone = await tz.user_zone(uid)
     month_start = today.replace(day=1)
     data = await _load_workouts_with_sets(uid, month_start, today)
-    text = format_history_list(data)
+    text = format_history_list(data, zone=zone)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=history_menu())
 
 
@@ -87,7 +91,8 @@ async def cb_export_period(cb: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     fmt = data.get("export_fmt", "text")
     uid = str(cb.from_user.id)
-    today = date.today()
+    today = await tz.today(uid)
+    zone = await tz.user_zone(uid)
 
     if period == "all":
         from_date = date(2020, 1, 1)
@@ -111,7 +116,7 @@ async def cb_export_period(cb: CallbackQuery, state: FSMContext) -> None:
             caption=f"📊 Экспорт тренировок за {period if period != 'all' else 'всё время'}",
         )
     else:
-        text = format_history_list(workouts_with_sets)
+        text = format_history_list(workouts_with_sets, zone=zone)
         # Telegram limit is 4096 chars; split if needed
         if len(text) <= 4000:
             await cb.message.answer(text, parse_mode="HTML")

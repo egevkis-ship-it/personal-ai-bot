@@ -68,7 +68,9 @@ async def get_planned_workouts_range(
 
 
 async def get_today_plan(user_id: str) -> dict | None:
-    rows = await get_planned_workouts_range(user_id, date.today(), date.today())
+    from app.bot.services.tz import today as _today
+    d = await _today(user_id)
+    rows = await get_planned_workouts_range(user_id, d, d)
     return rows[0] if rows else None
 
 

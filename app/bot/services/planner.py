@@ -29,7 +29,8 @@ _anthropic = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 async def _gather_recent_history(user_id: str, days_back: int = 14) -> list[dict]:
     """Returns compact dict per workout for AI consumption."""
-    today = date.today()
+    from app.bot.services.tz import today as _today
+    today = await _today(user_id)
     from_d = today - timedelta(days=days_back)
     async with get_session() as s:
         wr = await s.execute(
@@ -169,9 +170,11 @@ def _strip_fence(raw: str) -> str:
 
 
 async def generate_day_plan(user_id: str, target_date: date) -> PlannedDay | None:
+    from app.bot.services.tz import today as _today
+    _t = await _today(user_id)
     history = await _gather_recent_history(user_id)
     upcoming = await _gather_upcoming_plans(
-        user_id, date.today(), date.today() + timedelta(days=14)
+        user_id, _t, _t + timedelta(days=14)
     )
     payload = {
         "target_date": target_date.isoformat(),

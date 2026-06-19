@@ -79,10 +79,12 @@ _DATE_PATTERNS = [
 ]
 
 
-def _parse_date(text: str) -> tuple[date | None, tuple[int, int] | None]:
-    """Returns (date, (start,end) of date token in original text)."""
+def _parse_date(text: str, today: date | None = None) -> tuple[date | None, tuple[int, int] | None]:
+    """Returns (date, (start,end) of date token in original text).
+    `today` should be the user-local date (caller threads it through)."""
     s = text.lower()
-    today = date.today()
+    if today is None:
+        today = date.today()
     if m := re.search(r"\bсегодня\b", s):
         return today, m.span()
     if m := re.search(r"\bвчера\b", s):
@@ -106,7 +108,7 @@ def _normalize_text(s: str) -> str:
     return s.lower().replace("ё", "е")
 
 
-def parse_measurement_text(raw: str) -> dict:
+def parse_measurement_text(raw: str, today: date | None = None) -> dict:
     """Pure-text first pass.
 
     Returns:
@@ -121,7 +123,7 @@ def parse_measurement_text(raw: str) -> dict:
 
     # Date extraction first — only blank out the EXACT date token so we don't
     # eat measurement numbers like "102.7" / "44.5".
-    d, date_span = _parse_date(text)
+    d, date_span = _parse_date(text, today)
     if date_span:
         text_for_metrics = (
             text[: date_span[0]] + " " * (date_span[1] - date_span[0]) + text[date_span[1]:]
@@ -271,12 +273,12 @@ async def ai_parse_measurement(raw: str) -> dict | None:
         return None
 
 
-async def parse_measurement(raw: str) -> dict:
+async def parse_measurement(raw: str, today: date | None = None) -> dict:
     """AI-first hybrid. AI handles typos ("Талмя"→талия), same-word ambiguity
     (бедро vs бёдра), and partial input. Regex is the safety net if AI fails.
     """
     ai = await ai_parse_measurement(raw)
-    pure = parse_measurement_text(raw)
+    pure = parse_measurement_text(raw, today)
 
     if not ai:
         # AI unavailable — fall back to regex.
@@ -381,12 +383,13 @@ async def ai_parse_measurement_batch(raw: str) -> list[dict] | None:
         return None
 
 
-async def parse_measurement_batch(raw: str) -> list[dict]:
+async def parse_measurement_batch(raw: str, today: date | None = None) -> list[dict]:
     """Returns one or more parsed measurement entries.
 
     Always returns a list. Length 1 == single-entry mode (caller can ask
     user to fill missing fields). Length > 1 == batch mode (caller should
     save all without asking for missing data).
+    `today` should be the user-local date.
     """
     if not raw or not raw.strip():
         return []
@@ -402,10 +405,10 @@ async def parse_measurement_batch(raw: str) -> list[dict]:
         if ai_batch:
             return ai_batch
         # Fallback: split by lines and parse each
-        return _regex_split_batch(raw)
+        return _regex_split_batch(raw, today)
 
     # Single-entry — use existing hybrid pipeline
-    single = await parse_measurement(raw)
+    single = await parse_measurement(raw, today)
     if single and (single.get("values") or single.get("date")):
         return [single]
     return []
@@ -422,7 +425,7 @@ def _is_multiline_with_metrics(raw: str) -> bool:
     return hits >= 2
 
 
-def _regex_split_batch(raw: str) -> list[dict]:
+def _regex_split_batch(raw: str, today: date | None = None) -> list[dict]:
     """Fallback: split text into per-line blocks and run the synchronous pure
     parser on each. Each line with both a date and at least one metric becomes
     its own entry.
@@ -433,7 +436,7 @@ def _regex_split_batch(raw: str) -> list[dict]:
         if not line:
             continue
         # Skip header-only lines / pure comments
-        parsed = parse_measurement_text(line)
+        parsed = parse_measurement_text(line, today)
         if parsed.get("values"):
             out.append(parsed)
     return out

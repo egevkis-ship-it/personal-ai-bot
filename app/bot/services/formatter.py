@@ -138,19 +138,27 @@ def format_set_line(s: dict[str, Any], idx: int) -> str:
     return result
 
 
-def format_active_session(sets: list[dict[str, Any]], workout: dict[str, Any]) -> str:
+def _fmt_time(dt_val, zone=None) -> str:
+    """Format a stored UTC timestamp as HH:MM in the user's zone."""
+    if dt_val is None:
+        return "?"
+    if isinstance(dt_val, str):
+        try:
+            dt_val = datetime.fromisoformat(dt_val)
+        except Exception:
+            return dt_val
+    if not isinstance(dt_val, datetime):
+        return "?"
+    if zone is not None:
+        from app.bot.services.tz import to_local
+        dt_val = to_local(dt_val, zone)
+    return dt_val.strftime("%H:%M")
+
+
+def format_active_session(sets: list[dict[str, Any]], workout: dict[str, Any], zone=None) -> str:
     """Full active workout display."""
     focus = workout.get("focus_label") or "тренировка"
-    started = workout.get("started_at")
-    if isinstance(started, datetime):
-        time_str = started.strftime("%H:%M")
-    elif isinstance(started, str):
-        try:
-            time_str = datetime.fromisoformat(started).strftime("%H:%M")
-        except Exception:
-            time_str = started
-    else:
-        time_str = "?"
+    time_str = _fmt_time(workout.get("started_at"), zone)
 
     lines = [f"💪 <b>{_esc(focus)}</b> (с {time_str})\n"]
 
@@ -231,7 +239,7 @@ def format_set_confirmation(sets: list[dict]) -> str:
 
 # ──────────────────────────── history formatters ─────────────────────────────
 
-def format_workout_summary(workout: dict, sets: list[dict]) -> str:
+def format_workout_summary(workout: dict, sets: list[dict], zone=None) -> str:
     """One completed workout — compact summary."""
     d = workout.get("workout_date")
     focus = workout.get("focus_label") or "тренировка"
@@ -240,12 +248,10 @@ def format_workout_summary(workout: dict, sets: list[dict]) -> str:
 
     time_range = ""
     if started and finished:
-        try:
-            s = datetime.fromisoformat(str(started)).strftime("%H:%M")
-            f = datetime.fromisoformat(str(finished)).strftime("%H:%M")
+        s = _fmt_time(started, zone)
+        f = _fmt_time(finished, zone)
+        if s != "?" and f != "?":
             time_range = f" ({s}–{f})"
-        except Exception:
-            pass
 
     lines = [f"🏋️ <b>{fmt_date(d)} — {_esc(focus)}</b>{time_range}"]
     w_notes = workout.get("notes")
@@ -290,11 +296,11 @@ def format_workout_summary(workout: dict, sets: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def format_history_list(workouts_with_sets: list[tuple[dict, list[dict]]]) -> str:
+def format_history_list(workouts_with_sets: list[tuple[dict, list[dict]]], zone=None) -> str:
     """Multiple workouts for history view."""
     if not workouts_with_sets:
         return "📭 Нет записанных тренировок."
-    parts = [format_workout_summary(w, s) for w, s in workouts_with_sets]
+    parts = [format_workout_summary(w, s, zone=zone) for w, s in workouts_with_sets]
     return "\n\n".join(parts)
 
 

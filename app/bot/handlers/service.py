@@ -17,7 +17,9 @@ from app.bot.keyboards import (
     confirm_destructive,
     main_menu,
     service_menu,
+    tz_menu,
 )
+from app.bot.services import tz as tzsvc
 from app.db import (
     db_stats,
     wipe_all_user_data,
@@ -97,6 +99,61 @@ async def cb_svc_back(cb: CallbackQuery, state: FSMContext) -> None:
         _format_intro(stats),
         parse_mode="HTML",
         reply_markup=service_menu(),
+    )
+
+
+# ─────────────────────────── timezone ───────────────────────────────────────
+
+def _tz_intro(tz_name: str) -> str:
+    return (
+        "🌍 <b>Часовой пояс</b>\n\n"
+        f"Текущий: <b>{tz_name}</b>\n\n"
+        "📍 Отправь свою геолокацию (скрепка → Геопозиция) — определю пояс "
+        "автоматически. Удобно в поездках: прислал точку в новой стране — "
+        "время подстроилось.\n\n"
+        "Либо выбери из списка:"
+    )
+
+
+@router.callback_query(F.data == "svc:tz")
+async def cb_svc_tz(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    name = await tzsvc.user_tz_name(str(cb.from_user.id))
+    await cb.message.edit_text(_tz_intro(name), parse_mode="HTML",
+                               reply_markup=tz_menu(name))
+
+
+@router.callback_query(F.data.startswith("svc:tz_set:"))
+async def cb_svc_tz_set(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    name = cb.data.split(":", 2)[2]
+    await tzsvc.set_user_tz(str(cb.from_user.id), name)
+    from datetime import datetime
+    local = datetime.now(await tzsvc.user_zone(str(cb.from_user.id)))
+    await cb.message.edit_text(
+        f"✅ Часовой пояс: <b>{name}</b>\nСейчас у тебя: <b>{local.strftime('%H:%M, %d.%m.%Y')}</b>",
+        parse_mode="HTML",
+        reply_markup=tz_menu(name),
+    )
+
+
+@router.message(F.location)
+async def handle_location_tz(message: Message, state: FSMContext) -> None:
+    """Any shared location sets the user's timezone via coordinates."""
+    loc = message.location
+    name = tzsvc.tz_from_coords(loc.latitude, loc.longitude)
+    if not name:
+        await message.answer("❌ Не смог определить часовой пояс по точке. "
+                             "Выбери вручную в ⚙️ Сервис → Часовой пояс.")
+        return
+    await tzsvc.set_user_tz(str(message.from_user.id), name)
+    from datetime import datetime
+    local = datetime.now(await tzsvc.user_zone(str(message.from_user.id)))
+    await message.answer(
+        f"✅ Часовой пояс определён: <b>{name}</b>\n"
+        f"Сейчас у тебя: <b>{local.strftime('%H:%M, %d.%m.%Y')}</b>",
+        parse_mode="HTML",
+        reply_markup=main_menu(),
     )
 
 
