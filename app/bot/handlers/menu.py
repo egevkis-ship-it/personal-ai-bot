@@ -9,8 +9,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards import back_button, history_menu, main_menu, plan_menu, workout_start
+from app.bot.states import WorkoutStates
 from app.config import settings
-from app.db import get_active_workout, get_today_plan
+from app.db import get_active_workout, get_last_set, get_today_plan
 
 router = Router(name="menu")
 
@@ -48,7 +49,17 @@ async def menu_workout(message: Message, state: FSMContext) -> None:
     uid = str(message.from_user.id)
     active = await get_active_workout(uid)
     if active:
+        # Resume: restore FSM state so the active-workout buttons (finish,
+        # delete, note, show) work again. Without this the state is empty
+        # (e.g. after a bot restart / Redis flush) and every workout:* button
+        # is "not handled".
         from app.bot.handlers.workout import show_active_session
+        last = await get_last_set(active["id"])
+        await state.set_state(WorkoutStates.active)
+        await state.update_data(
+            workout_id=active["id"],
+            last_exercise=last["exercise_name"] if last else None,
+        )
         await show_active_session(message, active, uid)
         return
     today_plan = await get_today_plan(uid)
