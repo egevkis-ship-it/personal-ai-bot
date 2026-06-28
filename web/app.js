@@ -184,7 +184,7 @@ function setLabel(s) {
 function openExercise(wid, idx) {
   const ex = window._WO.exercises[idx];
   const sets = ex.sets.map(s => `<div class="row sp" style="padding:8px 0;border-bottom:1px solid var(--line)">
-    <span>${s.is_warmup ? 'Р · ' : ''}${setLabel(s)}</span>
+    <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
     <span><span class="muted" onclick="editSet(${s.id},${wid})" style="cursor:pointer">✏️</span> &nbsp; <span style="color:var(--danger);cursor:pointer" onclick="rmSet(${s.id},${wid})">🗑</span></span></div>`).join('');
   const last = ex.last ? `Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}` : '';
   sheet(`<div class="muted small">Из текущей тренировки</div><h2>${esc(ex.name)}</h2>
@@ -382,7 +382,7 @@ async function History() {
 async function WorkoutDetail(id) {
   const w = await api('/workouts/' + id);
   const ex = w.exercises.filter(e => e.sets.length).map(e => `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-    <b>${esc(e.name)}</b><div class="small muted">${e.sets.map(setLabel).join(' · ')}</div></div>`).join('');
+    <b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>`).join('');
   view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span>
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${w.workout_date}</div>
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
