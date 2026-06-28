@@ -223,7 +223,7 @@ function openAddSet(wid, idx, exObj) {
     <span class="pill" data-tag="failure" onclick="tag(this)">До отказа</span></div>
     <button class="btn" onclick="confirmSet(${wid},'${type}')">✓ Подтвердить</button>
     <div class="muted small" style="text-align:center;margin:12px 0 4px">или ввести другое</div>
-    <div class="field"><input id="freetext" placeholder="80x10, до отказа…"><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`;
+    <div class="field"><input id="freetext" placeholder="80x10, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`;
   sheet(html); window._addCtx = { wid, ex };
 }
 function stepRow(fields) {
@@ -249,6 +249,40 @@ async function confirmText(wid) {
   const t = document.getElementById('freetext').value.trim(); if (!t) return;
   try { await api('/workouts/' + wid + '/sets', 'POST', { text: t }); closeSheet(); go('active', wid); }
   catch (e) { toast(e.message); }
+}
+
+// voice → text: record with MediaRecorder, transcribe via Whisper, fill a field
+let _voiceRec = null, _voiceChunks = [];
+async function recToField(targetId, btn) {
+  if (_voiceRec && _voiceRec.state === 'recording') { _voiceRec.stop(); return; }
+  if (!navigator.mediaDevices || !window.MediaRecorder) return toast('Запись не поддерживается');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { return toast('Микрофон недоступен'); }
+  const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+  _voiceChunks = [];
+  _voiceRec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+  _voiceRec.ondataavailable = e => { if (e.data && e.data.size) _voiceChunks.push(e.data); };
+  _voiceRec.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    if (btn) btn.textContent = '🎤';
+    const el = document.getElementById(targetId);
+    const blob = new Blob(_voiceChunks, { type: (_voiceChunks[0] && _voiceChunks[0].type) || 'audio/webm' });
+    if (!blob.size) return;
+    const ext = blob.type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+    const fd = new FormData(); fd.append('file', blob, 'voice.' + ext);
+    const ph = el ? el.placeholder : ''; if (el) el.placeholder = 'распознаю…';
+    try {
+      const r = await fetch('/api/voice/transcribe', { method: 'POST', body: fd, credentials: 'include' });
+      if (!r.ok) { let d = ''; try { d = (await r.json()).detail; } catch {} throw new Error(d || r.status); }
+      const j = await r.json();
+      if (el) el.value = (el.value ? el.value + ' ' : '') + (j.text || '');
+    } catch (e) { toast(e.message || 'не удалось распознать'); }
+    finally { if (el) el.placeholder = ph; }
+  };
+  _voiceRec.start();
+  if (btn) btn.textContent = '⏹';
+  toast('Запись… нажми ещё раз для остановки');
 }
 
 // in-set timer
@@ -428,7 +462,7 @@ async function Measure() {
   const last = await api('/measurements/last');
   view.innerHTML = `<div class="row sp"><h1>Замеры</h1><span class="back" onclick="go('measureHistory')">История ›</span></div>
     <div class="grid2" style="margin-top:8px">${MFIELDS.map(([k, l]) => `<div class="mfield"><label>${l}</label><input id="m_${k}" inputmode="decimal" value="${last && last[k] != null ? fmt(last[k]) : ''}" placeholder="—"></div>`).join('')}</div>
-    <div class="field" style="margin-top:12px"><input id="mtext" placeholder="или: вес 82 талия 84"><span onclick="saveMeasureText()" style="color:var(--info);cursor:pointer">↑</span></div>
+    <div class="field" style="margin-top:12px"><input id="mtext" placeholder="или: вес 82 талия 84"><span onclick="recToField('mtext',this)" style="cursor:pointer">🎤</span><span onclick="saveMeasureText()" style="color:var(--info);cursor:pointer">↑</span></div>
     <button class="btn" style="margin-top:12px" onclick="saveMeasure()">Сохранить замер</button>`;
 }
 async function saveMeasure() {

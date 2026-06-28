@@ -20,7 +20,7 @@ from datetime import date, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1294,6 +1294,29 @@ async def period_report(
     return StreamingResponse(
         io.BytesIO(pdf), media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+# ──────────────────────────────── voice ─────────────────────────────────────
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(file: UploadFile = File(...), uid: str = Depends(current_uid)):
+    """Transcribe an uploaded audio clip (Whisper) → {text}. The caller then feeds
+    the text into the existing set/measurement parsers."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(422, "пустой файл")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "файл слишком большой")
+    await check_and_bump_ai(uid)
+    try:
+        from app.bot.services.ai_parser import transcribe_voice
+    except Exception:
+        raise HTTPException(503, "транскрипция недоступна")
+    try:
+        text_out = await transcribe_voice(data, filename=file.filename or "voice.webm")
+    except Exception as e:
+        raise HTTPException(502, f"ошибка распознавания: {str(e)[:200]}")
+    return {"text": text_out or ""}
 
 
 # ──────────────────────────────── seed (dev) ────────────────────────────────
