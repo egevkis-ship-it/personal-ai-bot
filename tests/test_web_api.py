@@ -159,3 +159,66 @@ def test_admin_flow_owner_and_last_admin_guards(client):
     # alias-cache wipe is admin-only; generic service wipe doesn't expose it
     assert client.post("/api/service/wipe/aliases").status_code == 404
     assert client.post("/api/admin/wipe-aliases").status_code == 200
+
+
+# ── new feature endpoints (phases B / D / F / G) ─────────────────────────────
+
+def test_exercise_stats_pr(client):
+    from urllib.parse import quote
+    name = "Тест-жим-уникальный"   # not in the dev seed → isolated stats
+    wid = client.post("/api/workouts", json={}).json()["id"]
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": name, "weight_kg": 80, "reps": 10})
+    client.post(f"/api/workouts/{wid}/finish")
+    st = client.get("/api/exercises/" + quote(name) + "/stats").json()
+    assert st["pr"]["weight"]["weight"] == 80
+    assert abs(st["pr"]["one_rm"]["value"] - 106.7) < 0.2   # Epley 80*(1+10/30)
+    assert len(st["series"]) == 1 and st["series"][0]["top_weight"] == 80
+
+
+def test_routines_crud_and_apply(client):
+    body = {"name": "Сплит", "days": [
+        {"weekday": 0, "focus_label": "Грудь", "exercises": [{"name": "Жим штанги лёжа", "target_sets": 4, "target_reps_min": 8, "target_weight": 80}]},
+        {"weekday": 2, "focus_label": "Спина", "exercises": [{"name": "Тяга штанги в наклоне", "target_sets": 4}]},
+    ]}
+    rid = client.post("/api/routines", json=body).json()["id"]
+    lst = client.get("/api/routines").json()
+    assert len(lst) == 1 and lst[0]["name"] == "Сплит" and len(lst[0]["days"]) == 2
+    # apply 2 weeks from a Monday (2026-07-06) → Mon+Wed × 2 = 4 plans
+    ap = client.post(f"/api/routines/{rid}/apply", json={"from_date": "2026-07-06", "weeks": 2})
+    assert ap.status_code == 200 and ap.json()["created"] == 4
+    plans = client.get("/api/plans?from=2026-07-06&to=2026-07-20").json()
+    dates = sorted(p["planned_date"] for p in plans)
+    assert dates == ["2026-07-06", "2026-07-08", "2026-07-13", "2026-07-15"]
+    assert client.delete(f"/api/routines/{rid}").status_code == 200
+    assert client.get("/api/routines").json() == []
+
+
+def test_settings_goals_and_dashboard(client):
+    assert client.patch("/api/settings", json={"target_weight": 78, "weekly_goal": 3}).status_code == 200
+    s = client.get("/api/settings").json()
+    assert s["target_weight"] == 78 and s["weekly_goal"] == 3
+    d = client.get("/api/dashboard").json()
+    assert d["weekly_goal"] == 3 and d["target_weight"] == 78
+    # clearing the target weight
+    client.patch("/api/settings", json={"clear_target": True})
+    assert client.get("/api/settings").json()["target_weight"] is None
+
+
+def test_export_json_and_csv(client):
+    wid = client.post("/api/workouts", json={}).json()["id"]
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Присед", "weight_kg": 100, "reps": 5})
+    j = client.get("/api/export?format=json")
+    assert j.status_code == 200
+    data = j.json()
+    assert "workouts" in data and "sets" in data and "routines" in data
+    c = client.get("/api/export?format=csv")
+    assert c.status_code == 200 and "exercise" in c.text and "Присед" in c.text
+
+
+def test_history_search_filter(client):
+    name = "Уникальная-тяга-теста"   # not in the dev seed → isolated search
+    wid = client.post("/api/workouts", json={"focus_label": "Грудь"}).json()["id"]
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": name, "weight_kg": 60, "reps": 8})
+    client.post(f"/api/workouts/{wid}/finish")
+    assert len(client.get("/api/workouts?days=365&q=уникальная-тяга").json()) == 1
+    assert len(client.get("/api/workouts?days=365&q=несуществующее-zzz").json()) == 0
