@@ -221,5 +221,5 @@ AI-кэш упражнений» из общих Настроек в админ-
 
 ### Фаза 5 — тесты, CI, заголовки
 - [x] **5.1 Тесты API** — `tests/test_web_api.py` (TestClient/ASGI, маркер `db`, фикстура сбрасывает схему): гейт pending/approved/blocked, **изоляция двух пользователей (404 на чужие объекты)**, CRUD+валидация планов, лог подходов + идемпотентность, owner-immutable/last-admin/admin-flow. 7/7 зелёных против тест-Postgres. Добавлен `@app.on_event("shutdown")` → `engine.dispose()` (чисто и в проде, и для тестов).
-- [ ] 5.2 CI-гейт (GitHub Actions: py_compile, node --check, pytest, линт)
+- [x] **5.2 CI-гейт** — `.github/workflows/web-ci.yml` на push/PR: Postgres-сервис, `py_compile api/*.py`, `node --check web/app.js+sw.js`, `pytest -q tests/test_web_api.py`. Отдельно от бот-CI (`tests.yml`), не ломает его. _Примечание:_ «деплой только по зелёному» требует настройки webhook в Coolify (сейчас Coolify деплоит по push независимо) — это твоя сторона.
 - [ ] 5.3 Security-заголовки (CSP, X-Content-Type-Options, Referrer-Policy)

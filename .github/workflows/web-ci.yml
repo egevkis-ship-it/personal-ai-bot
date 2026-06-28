@@ -1,0 +1,64 @@
+name: Web CI
+
+# Gate for the FastAPI/PWA web app: byte-compile, JS syntax, and the DB-backed
+# web API tests. Keep this green before relying on a deploy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      APP_ENV: development
+      OWNER_TELEGRAM_USER_ID: "local"
+      TELEGRAM_BOT_TOKEN: "x"
+      ANTHROPIC_API_KEY: "x"
+      OPENAI_API_KEY: "x"
+      REDIS_URL: "redis://localhost:6379/0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt "fastapi>=0.110" "uvicorn[standard]>=0.29"
+
+      - name: Lint / byte-compile API
+        run: python -m py_compile api/main.py api/auth.py api/schema.py
+
+      - name: JS syntax check
+        run: |
+          node --check web/app.js
+          node --check web/sw.js
+
+      - name: Web API tests
+        run: pytest -q tests/test_web_api.py
