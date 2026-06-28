@@ -287,6 +287,42 @@ async def get_last_set(workout_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+# ─────────────────────────── ownership lookups ─────────────────────────────
+# Return the owning user_id for a resource (or None if it does not exist), so the
+# web layer can scope every {id} access by owner and 404 on someone else's data.
+
+async def workout_owner(workout_id: int) -> str | None:
+    async with get_session() as s:
+        r = await s.execute(text("SELECT user_id FROM workouts WHERE id = :id"), {"id": workout_id})
+        return r.scalar_one_or_none()
+
+
+async def planned_workout_owner(plan_id: int) -> str | None:
+    async with get_session() as s:
+        r = await s.execute(text("SELECT user_id FROM planned_workouts WHERE id = :id"), {"id": plan_id})
+        return r.scalar_one_or_none()
+
+
+async def set_owner(set_id: int) -> str | None:
+    """A set's owner is the user_id of the workout it belongs to."""
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                SELECT w.user_id FROM exercise_sets es
+                JOIN workouts w ON w.id = es.workout_id
+                WHERE es.id = :id
+            """),
+            {"id": set_id},
+        )
+        return r.scalar_one_or_none()
+
+
+async def measurement_owner(measurement_id: int) -> str | None:
+    async with get_session() as s:
+        r = await s.execute(text("SELECT user_id FROM body_measurements WHERE id = :id"), {"id": measurement_id})
+        return r.scalar_one_or_none()
+
+
 # ─────────────────────────── service ops ───────────────────────────────────
 
 async def db_stats(user_id: str) -> dict:

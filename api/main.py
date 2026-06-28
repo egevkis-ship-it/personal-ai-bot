@@ -112,6 +112,30 @@ def current_uid(request: Request) -> str:
     return uid
 
 
+# ─────────────────────── ownership guards (IDOR) ────────────────────────────
+# Every {id} access is scoped to its owner; a mismatch (or missing) returns 404
+# so we never leak the existence of another user's objects.
+
+async def _own_workout(uid: str, wid: int) -> None:
+    if await db.workout_owner(wid) != uid:
+        raise HTTPException(404, "not found")
+
+
+async def _own_plan(uid: str, pid: int) -> None:
+    if await db.planned_workout_owner(pid) != uid:
+        raise HTTPException(404, "not found")
+
+
+async def _own_set(uid: str, sid: int) -> None:
+    if await db.set_owner(sid) != uid:
+        raise HTTPException(404, "not found")
+
+
+async def _own_measurement(uid: str, mid: int) -> None:
+    if await db.measurement_owner(mid) != uid:
+        raise HTTPException(404, "not found")
+
+
 # ───────────────────────────── access control ───────────────────────────────
 # Gate: every login is checked against app_access. Owner (OWNER_TELEGRAM_USER_ID)
 # and ALLOWED_TELEGRAM_USER_IDS are auto-approved; everyone else starts 'pending'
@@ -574,6 +598,7 @@ async def workouts_history(days: int = 30, uid: str = Depends(current_uid)):
 
 @app.get("/api/workouts/{wid}")
 async def workout_detail(wid: int, uid: str = Depends(current_uid)):
+    await _own_workout(uid, wid)
     return await assemble_workout(uid, wid)
 
 
@@ -631,12 +656,14 @@ class NotesBody(BaseModel):
 
 @app.patch("/api/workouts/{wid}/notes")
 async def set_workout_notes(wid: int, body: NotesBody, uid: str = Depends(current_uid)):
+    await _own_workout(uid, wid)
     await db.update_workout_notes(wid, body.notes)
     return {"ok": True}
 
 
 @app.delete("/api/workouts/{wid}")
 async def delete_workout(wid: int, uid: str = Depends(current_uid)):
+    await _own_workout(uid, wid)
     async with get_session() as s:
         await s.execute(text("DELETE FROM workouts WHERE id=:id AND user_id=:u"), {"id": wid, "u": uid})
     return {"ok": True}
@@ -644,6 +671,7 @@ async def delete_workout(wid: int, uid: str = Depends(current_uid)):
 
 @app.post("/api/workouts/{wid}/finish")
 async def finish_workout(wid: int, uid: str = Depends(current_uid)):
+    await _own_workout(uid, wid)
     w = await db.get_workout(wid)
     if not w:
         raise HTTPException(404, "workout not found")
@@ -679,8 +707,7 @@ async def workout_coach(wid: int, uid: str = Depends(current_uid)):
     """Post-workout AI coach: numeric facts (local DB) phrased by Opus.
     Degrades to a deterministic summary if Opus is unreachable; only hard
     failures (import/DB) surface as 503."""
-    if not await db.get_workout(wid):
-        raise HTTPException(404, "workout not found")
+    await _own_workout(uid, wid)
     try:
         from app.bot.services.coach import build_coach_facts, opus_coach_summary
     except Exception:
@@ -710,8 +737,7 @@ class AddSet(BaseModel):
 
 @app.post("/api/workouts/{wid}/sets")
 async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
-    if not await db.get_workout(wid):
-        raise HTTPException(404, "workout not found")
+    await _own_workout(uid, wid)
     if body.text:
         last = await db.get_last_set(wid)
         parsed = parse_exercise_input(body.text, last["exercise_name"] if last else None)
@@ -750,12 +776,14 @@ class PatchSet(BaseModel):
 
 @app.patch("/api/sets/{sid}")
 async def patch_set(sid: int, body: PatchSet, uid: str = Depends(current_uid)):
+    await _own_set(uid, sid)
     await db.update_set(sid, **{k: v for k, v in body.dict().items() if v is not None})
     return {"ok": True}
 
 
 @app.delete("/api/sets/{sid}")
 async def del_set(sid: int, uid: str = Depends(current_uid)):
+    await _own_set(uid, sid)
     await db.delete_set(sid)
     return {"ok": True}
 
@@ -956,6 +984,7 @@ async def plan_today(uid: str = Depends(current_uid)):
 
 @app.get("/api/plans/{pid}")
 async def plan_detail(pid: int, uid: str = Depends(current_uid)):
+    await _own_plan(uid, pid)
     p = await db.get_planned_workout(pid)
     if not p:
         raise HTTPException(404, "plan not found")
@@ -978,6 +1007,7 @@ async def create_plan(body: CreatePlan, uid: str = Depends(current_uid)):
 
 @app.patch("/api/plans/{pid}")
 async def update_plan(pid: int, body: UpdatePlan, uid: str = Depends(current_uid)):
+    await _own_plan(uid, pid)
     existing = await db.get_planned_workout(pid)
     if not existing:
         raise HTTPException(404, "plan not found")
@@ -1003,6 +1033,7 @@ async def update_plan(pid: int, body: UpdatePlan, uid: str = Depends(current_uid
 
 @app.delete("/api/plans/{pid}")
 async def delete_plan(pid: int, uid: str = Depends(current_uid)):
+    await _own_plan(uid, pid)
     await db.delete_planned_workout(pid)   # soft-delete: status='skipped' (mirrors bot)
     return {"ok": True}
 
@@ -1103,6 +1134,7 @@ async def last_measurement(uid: str = Depends(current_uid)):
 
 @app.delete("/api/measurements/{mid}")
 async def del_measurement(mid: int, uid: str = Depends(current_uid)):
+    await _own_measurement(uid, mid)
     await db.delete_measurement(mid)
     return {"ok": True}
 
