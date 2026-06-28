@@ -789,11 +789,21 @@ class AddSet(BaseModel):
     is_warmup: bool = False
     is_failure: bool = False
     superset_group: Optional[str] = None
+    client_op_id: Optional[str] = None   # idempotency key for offline replay
 
 
 @app.post("/api/workouts/{wid}/sets")
 async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
     await _own_workout(uid, wid)
+    if body.client_op_id:
+        # Idempotent replay: if this op was already applied, do nothing.
+        async with get_session() as s:
+            r = await s.execute(
+                text("INSERT INTO processed_ops (uid, op_id) VALUES (:u, :op) "
+                     "ON CONFLICT DO NOTHING RETURNING 1"),
+                {"u": uid, "op": body.client_op_id})
+            if r.scalar() is None:
+                return {"ids": [], "duplicate": True}
     if body.text:
         last = await db.get_last_set(wid)
         parsed = parse_exercise_input(body.text, last["exercise_name"] if last else None)

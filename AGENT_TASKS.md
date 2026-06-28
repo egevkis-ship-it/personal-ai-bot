@@ -217,7 +217,7 @@ AI-кэш упражнений» из общих Настроек в админ-
 - [x] **3.6 Прогресс-фото (диск)** — `progress_photos`: `telegram_file_id` nullable + `storage_key`/`ai_description_short` (идемпотентные ALTER, миграция NOT NULL-таблицы проверена). `db.create_web_photo`. Эндпоинты за `current_uid`+owner: `POST /api/photos` (multipart 1..N, resize `_resize_photo` → диск `PHOTO_DIR` → один `series_id` → `describe_photo_series` под AI-лимитом, graceful), `GET /api/photos` (серии), `GET /api/photos/{id}/image` (стрим с диска, owner→404), `DELETE /api/photos/series/{sid}` (БД+файлы). Экран «Фото» вместо заглушки на Главной. Проверено: загрузка/диск/список/стрим/IDOR-404/удаление-с-файлами. ⚠️ **нужен том на `PHOTO_DIR` в Coolify**, иначе фото теряются при редеплое.
 
 ### Фаза 4 — офлайн-основа
-- [ ] 4 Service worker + IndexedDB-очередь подходов активной тренировки (идемпотентность по `client_op_id`)
+- [x] **4 Офлайн-основа** — сервер: `client_op_id` в `add_set` + таблица `processed_ops` (атомарный `INSERT ON CONFLICT DO NOTHING RETURNING`), повтор того же op → `{duplicate:true}` без дубля (проверено: dup→1, diff-op→2, no-op→3). Клиент (`web/app.js`): IndexedDB-очередь подходов; при офлайне/сетевой ошибке POST — в очередь + оптимистичная вставка в `window._WO` + локальный рендер; флаш по событию `online` и на старте, идемпотентно по `client_op_id`. Активная тренировка кэшируется в `localStorage` (список/таймеры живут офлайн), очистка при finish/delete. SW: чистка старых кэшей на activate + bump версии. Только для flow активной тренировки. `node --check` ок; браузерный офлайн — проверяется на устройстве.
 
 ### Фаза 5 — тесты, CI, заголовки
 - [ ] 5.1 Тесты API (httpx+ASGI): гейт, изоляция пользователей, CRUD планов, лог подходов, регистрация/админка

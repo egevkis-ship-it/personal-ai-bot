@@ -155,9 +155,18 @@ async function ChooseDay() {
 
 // ── Active workout ────────────────────────────────────────────────────────
 async function Active(id) {
-  const w = id ? await api('/workouts/' + id) : await api('/workouts/active');
+  let w;
+  try { w = id ? await api('/workouts/' + id) : await api('/workouts/active'); }
+  catch (e) {
+    if (isNetworkErr(e)) { w = loadActiveCache(id); if (w) { await overlayQueue(w); return renderActive(w); } }
+    throw e;  // 401 / real errors handled by go()
+  }
   if (!w) return go('train');
-  STATE.activeId = w.id;
+  await overlayQueue(w);     // show any not-yet-synced offline sets
+  renderActive(w);
+}
+function renderActive(w) {
+  STATE.activeId = w.id; window._WO = w; saveActiveCache(w);
   const items = w.exercises.map((ex, i) => {
     const working = ex.sets.filter(s => !s.is_warmup);
     const done = ex.done;
@@ -168,14 +177,57 @@ async function Active(id) {
       <div class="ic">${done ? '✅' : next ? '▶️' : '⚪️'}</div>
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div><span class="muted">›</span></div>`;
   }).join('');
-  window._WO = w;
   view.innerHTML = `<div class="row sp"><span class="back" onclick="go('home')">‹ Главная</span><span class="muted small" onclick="workoutMenu(${w.id})" style="cursor:pointer">···</span></div>
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2>
-    <div class="muted small" style="margin-bottom:12px">идёт</div>
+    <div class="muted small" style="margin-bottom:12px">${navigator.onLine ? 'идёт' : '⚠️ оффлайн — подходы сохранятся при сети'}</div>
     ${items || '<div class="card muted">Пусто</div>'}
     <button class="btn ghost" style="margin-top:6px" onclick="openPicker(${w.id})">➕ Добавить упражнение</button>
     <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>`;
 }
+
+// ── offline support: IndexedDB queue + optimistic set logging ───────────────
+function isNetworkErr(e) { return !navigator.onLine || !e || e.status === undefined || e.status === 0; }
+function _opId() { return 'op-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+function saveActiveCache(w) { try { localStorage.setItem('active_wo', JSON.stringify(w)); } catch {} }
+function loadActiveCache(id) { try { const w = JSON.parse(localStorage.getItem('active_wo') || 'null'); if (w && (!id || w.id === id)) return w; } catch {} return null; }
+function clearActiveCache() { try { localStorage.removeItem('active_wo'); } catch {} }
+function _idb() {
+  return new Promise((res, rej) => {
+    let r; try { r = indexedDB.open('fitq', 1); } catch (e) { return rej(e); }
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('ops')) r.result.createObjectStore('ops', { keyPath: 'op_id' }); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function _qPut(op) { try { const db = await _idb(); await new Promise(r => { const t = db.transaction('ops', 'readwrite'); t.objectStore('ops').put(op); t.oncomplete = r; t.onerror = r; }); } catch {} }
+async function _qAll() { try { const db = await _idb(); return await new Promise(r => { const rq = db.transaction('ops').objectStore('ops').getAll(); rq.onsuccess = () => r(rq.result || []); rq.onerror = () => r([]); }); } catch { return []; } }
+async function _qDel(op_id) { try { const db = await _idb(); await new Promise(r => { const t = db.transaction('ops', 'readwrite'); t.objectStore('ops').delete(op_id); t.oncomplete = r; t.onerror = r; }); } catch {} }
+function _insertSet(W, body) {
+  const name = (body.exercise_name || '').trim();
+  let ex = W.exercises.find(e => (e.name || '').trim().toLowerCase() === name.toLowerCase());
+  if (!ex) { ex = { name, key: null, type: 'strength', sets: [], target: null, target_sets: null, last: null, in_plan: false, done: false }; W.exercises.push(ex); }
+  ex.sets.push({ id: 'tmp-' + body.client_op_id, set_number: ex.sets.length + 1, weight_kg: body.weight_kg ?? null, reps: body.reps ?? null, reps_text: body.reps_text ?? null, duration_seconds: body.duration_seconds ?? null, is_warmup: !!body.is_warmup, is_failure: !!body.is_failure, superset_group: body.superset_group ?? null, notes: null, _pending: true });
+}
+async function overlayQueue(w) { const ops = (await _qAll()).filter(o => o.wid === w.id).sort((a, b) => a.ts - b.ts); for (const o of ops) _insertSet(w, o.body); }
+async function submitSet(wid, body) {
+  body.client_op_id = _opId();
+  try { await api('/workouts/' + wid + '/sets', 'POST', body); go('active', wid); }
+  catch (e) {
+    if (isNetworkErr(e)) {
+      await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
+      const W = window._WO; if (W && W.id === wid) { _insertSet(W, body); renderActive(W); }
+      toast('Оффлайн — сохранится при сети');
+    } else { toast(e.message || 'не удалось'); }
+  }
+}
+async function flushQueue() {
+  if (!navigator.onLine) return;
+  const ops = (await _qAll()).sort((a, b) => a.ts - b.ts);
+  for (const o of ops) {
+    try { await api('/workouts/' + o.wid + '/sets', 'POST', o.body); await _qDel(o.op_id); }
+    catch (e) { if (isNetworkErr(e)) break; await _qDel(o.op_id); }  // drop permanently-failed ops
+  }
+}
+window.addEventListener('online', () => { flushQueue().then(() => { if (STATE.tab === 'active' && STATE.activeId) go('active', STATE.activeId); }); });
 function setLabel(s) {
   if (s.duration_seconds) return mmss(s.duration_seconds);
   let v = (s.weight_kg != null ? fmt(s.weight_kg) + '×' : '') + (s.reps != null ? s.reps : (s.reps_text || ''));
@@ -243,8 +295,9 @@ async function confirmSet(wid, type) {
   if (type === 'time') body.duration_seconds = (g('min') || 0) * 60 + (g('sec') || 0);
   else if (type === 'bodyweight') { body.reps = g('reps'); if (document.getElementById('usew')?.checked) body.weight_kg = g('weight'); }
   else { body.weight_kg = g('weight'); body.reps = g('reps'); }
-  await api('/workouts/' + wid + '/sets', 'POST', body);
-  closeSheet(); stopTimer(); restTimer(); go('active', wid);
+  closeSheet(); stopTimer();
+  await submitSet(wid, body);
+  restTimer();
 }
 async function confirmText(wid) {
   const t = document.getElementById('freetext').value.trim(); if (!t) return;
@@ -383,9 +436,10 @@ function noteSheet(wid) {
     <button class="btn" style="margin-top:10px" onclick="saveNote(${wid})">Сохранить</button>`);
 }
 async function saveNote(wid) { await api('/workouts/' + wid + '/notes', 'PATCH', { notes: document.getElementById('note').value }); closeSheet(); toast('Заметка сохранена'); }
-async function delWorkout(wid) { await api('/workouts/' + wid, 'DELETE'); closeSheet(); go('home'); }
+async function delWorkout(wid) { await api('/workouts/' + wid, 'DELETE'); clearActiveCache(); closeSheet(); go('home'); }
 async function finishWorkout(wid) {
   const r = await api('/workouts/' + wid + '/finish', 'POST');
+  clearActiveCache();
   sheet(`<div style="text-align:center"><div style="font-size:34px">✅</div><h2>Тренировка завершена</h2>
     <div class="muted small">${r.set_count} рабочих подходов</div></div>
     <div class="card" style="margin-top:10px"><div class="muted small">✨ Резюме</div><div style="margin-top:6px">${esc(r.summary)}</div></div>
@@ -954,6 +1008,6 @@ function closeSheet() { const b = document.getElementById('sheetbg'); if (b) b.r
 
 // boot — check session first
 (async function boot() {
-  try { await api('/auth/me'); renderTabs(); go('home'); }
+  try { await api('/auth/me'); renderTabs(); go('home'); flushQueue(); }
   catch { Login(); }
 })();

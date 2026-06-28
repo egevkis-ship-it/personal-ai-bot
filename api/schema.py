@@ -103,6 +103,15 @@ ALTER TABLE progress_photos ALTER COLUMN telegram_file_id DROP NOT NULL;
 ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS storage_key TEXT;
 ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS ai_description_short TEXT;
 
+-- Idempotency ledger for offline-queued client operations (e.g. set logging
+-- replayed after reconnect). Owned by the web API only.
+CREATE TABLE IF NOT EXISTS processed_ops (
+    uid        TEXT        NOT NULL,
+    op_id      TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (uid, op_id)
+);
+
 -- Per-user daily AI call counter (rate limit). Owned by the web API only.
 CREATE TABLE IF NOT EXISTS ai_usage (
     uid    TEXT    NOT NULL,
