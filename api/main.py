@@ -120,9 +120,16 @@ async def session_mw(request: Request, call_next):
 # iframe from oauth.telegram.org); it still locks down object/base/frame-ancestors
 # and restricts external script/connect origins. esc() (phase 1.2) is the primary
 # XSS defense; this is defence-in-depth.
+#
+# 'unsafe-eval' is required by telegram-widget.js: it parses the data-onauth
+# attribute via __parseFunction(), which calls eval() during widget init. Without
+# it the browser blocks that eval, the init aborts, and the OAuth iframe is never
+# created (the "login button doesn't render" bug from phase 5.3). The iframe src is
+# a plain https://oauth.telegram.org URL, so frame-src alone covers it — no blob:
+# or worker-src needed.
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' https://telegram.org; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; "
     "connect-src 'self'; "

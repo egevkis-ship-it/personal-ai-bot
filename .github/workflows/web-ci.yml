@@ -61,4 +61,4 @@ jobs:
           node --check web/sw.js
 
       - name: Web API tests
-        run: pytest -q tests/test_web_api.py
+        run: pytest -q tests/test_web_api.py tests/test_web_csp.py
