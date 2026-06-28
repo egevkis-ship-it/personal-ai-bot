@@ -38,6 +38,8 @@ async function go(tab, param) {
     if (tab === 'history') return History();
     if (tab === 'workout') return WorkoutDetail(param);
     if (tab === 'chooseDay') return ChooseDay();
+    if (tab === 'plans') return Plans();
+    if (tab === 'planEdit') return PlanEdit(param);
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -110,7 +112,9 @@ async function Train() {
     ${plan ? `<div class="banner info" onclick="startFromPlan(${plan.id})"><div class="small" style="color:var(--info)">📅 План на сегодня</div>
       <div class="b-title" style="color:var(--info)">${esc(plan.focus_label || '')} →</div></div>` : ''}
     <div class="card list-item" onclick="go('chooseDay')"><div class="ic">🗓</div><div style="flex:1"><b>Другой день недели</b><div class="small muted">взять пропущенную</div></div><span class="muted">›</span></div>
-    <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>`;
+    <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>
+    <div class="muted small" style="margin:18px 0 8px">Планирование</div>
+    <div class="card list-item" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Запланировать тренировки</b><div class="small muted">расписание на дни и неделю</div></div><span class="muted">›</span></div>`;
 }
 async function freeWorkout() { const r = await api('/workouts', 'POST', {}); go('active', r.id); }
 async function ChooseDay() {
@@ -378,6 +382,219 @@ async function MeasureHistory() {
     ${rows.filter(r => r[metric] != null).map(r => `<div class="row sp" style="padding:9px 0;border-bottom:1px solid var(--line)"><span class="muted small">${r.taken_on}</span><span>${fmt(r[metric])}</span></div>`).join('')}`;
 }
 function setMetric(m) { STATE._metric = m; MeasureHistory(); }
+
+// ── Planning ────────────────────────────────────────────────────────────────
+const WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];        // Monday = 0
+const WD_FULL = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+function todayISO() { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+function isoWeekday(iso) { const d = new Date(iso + 'T00:00:00'); return (d.getDay() + 6) % 7; } // 0=Mon
+function nextOccurrenceISO(wd) { // wd: 0=Mon..6=Sun → next date (today counts)
+  const t = new Date(todayISO() + 'T00:00:00'); const cur = (t.getDay() + 6) % 7;
+  const ahead = (wd - cur + 7) % 7; t.setDate(t.getDate() + ahead);
+  return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+function fmtPlanDate(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function repsLabel(ex) {
+  if (ex.reps_text) return ex.reps_text;
+  const a = ex.target_reps_min, b = ex.target_reps_max;
+  if (a && b && a !== b) return a + '–' + b;
+  if (a) return String(a);
+  return '?';
+}
+function exLine(ex) {
+  const sets = ex.target_sets || '?';
+  const w = ex.target_weight ? ' · ' + fmt(ex.target_weight) + ' кг' : '';
+  return `${sets}×${repsLabel(ex)}${w}`;
+}
+
+// list of upcoming plans
+async function Plans() {
+  const list = await api('/plans?days=30');
+  const rows = list.length ? list.map(p => `<div class="card list-item" onclick="go('planEdit',${p.id})">
+      <div class="ic">${p.is_today ? '📍' : '📅'}</div>
+      <div style="flex:1"><b>${esc(p.focus_label || 'Тренировка')}</b>
+        <div class="small muted">${fmtPlanDate(p.planned_date)}${p.is_today ? ' · сегодня' : ''} · ${(p.exercises || []).length} упр.</div></div>
+      <span class="muted">›</span></div>`).join('')
+    : '<div class="card muted">Пока ничего не запланировано на 30 дней вперёд.</div>';
+  view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span>
+    <h1>Планы</h1><div class="muted small" style="margin-bottom:14px">Расписание на ближайшие дни</div>
+    <button class="btn" onclick="newPlan()">➕ Запланировать день</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">📝 Вставить планом (ИИ)</button>
+    <div style="margin-top:16px">${rows}</div>`;
+}
+
+function newPlan(dateISO) {
+  window._PLAN = { id: null, date: dateISO || todayISO(), focus: '', notes: '', exercises: [] };
+  go('planEdit', 'new');
+}
+
+async function PlanEdit(param) {
+  if (param && param !== 'new') {
+    const p = await api('/plans/' + param);
+    window._PLAN = {
+      id: p.id, date: p.planned_date, focus: p.focus_label || '',
+      notes: p.notes || '', exercises: (p.exercises || []).map(e => ({ ...e })),
+    };
+  } else if (!window._PLAN) {
+    window._PLAN = { id: null, date: todayISO(), focus: '', notes: '', exercises: [] };
+  }
+  const P = window._PLAN;
+  const curWd = isoWeekday(P.date);
+  const chips = WD_SHORT.map((w, i) =>
+    `<span class="pill ${i === curWd ? 'on' : ''}" onclick="planQuickDay(${i})">${w}</span>`).join('');
+  const exItems = P.exercises.length ? P.exercises.map((ex, i) => `<div class="card list-item">
+      <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div></div>
+      <span class="muted" onclick="planEditEx(${i})" style="cursor:pointer">✏️</span> &nbsp;
+      <span style="color:var(--danger);cursor:pointer" onclick="planRemoveEx(${i})">🗑</span></div>`).join('')
+    : '<div class="card muted small">Упражнения не добавлены</div>';
+  view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span>
+    <h2>${P.id ? 'Редактировать план' : 'Новый план'}</h2>
+    <div class="mfield" style="margin-top:8px"><label>Дата</label>
+      <input id="pl_date" type="date" value="${P.date}" onchange="planDateInput()"></div>
+    <div class="tag-row" style="justify-content:flex-start;margin:8px 0 4px">${chips}</div>
+    <div class="muted small" style="margin-top:4px">${fmtPlanDate(P.date)}</div>
+    <div class="mfield" style="margin-top:12px"><label>Фокус (что тренируем)</label>
+      <input id="pl_focus" value="${esc(P.focus)}" placeholder="напр. Грудь / Трицепс"></div>
+    <div class="muted small" style="margin:16px 0 6px">Упражнения</div>
+    ${exItems}
+    <button class="btn ghost" style="margin-top:8px" onclick="planAddExercise()">➕ Добавить упражнение</button>
+    <div class="mfield" style="margin-top:16px"><label>Заметка к дню (необязательно)</label>
+      <input id="pl_notes" value="${esc(P.notes)}" placeholder="напр. разминка 5 мин"></div>
+    <button class="btn success" style="margin-top:16px" onclick="savePlan()">${P.id ? 'Сохранить изменения' : 'Сохранить план'}</button>
+    ${P.id ? `<button class="btn danger" style="margin-top:8px" onclick="deletePlan(${P.id})">Удалить план</button>` : ''}`;
+}
+
+function planSync() {
+  const P = window._PLAN; if (!P) return;
+  const d = document.getElementById('pl_date'); if (d) P.date = d.value || P.date;
+  const f = document.getElementById('pl_focus'); if (f) P.focus = f.value;
+  const n = document.getElementById('pl_notes'); if (n) P.notes = n.value;
+}
+function planDateInput() { planSync(); PlanEdit('new'); }
+function planQuickDay(wd) { planSync(); window._PLAN.date = nextOccurrenceISO(wd); PlanEdit('new'); }
+function planRemoveEx(i) { planSync(); window._PLAN.exercises.splice(i, 1); PlanEdit('new'); }
+
+// exercise picker (plan context) — reuses /exercises/* endpoints
+function planAddExercise() {
+  planSync();
+  sheet(`<h2>Добавить упражнение</h2>
+    <div class="field" style="margin-bottom:10px"><input id="pexq" placeholder="поиск…" oninput="planPickSearch()"><span>🔎</span></div>
+    <div class="tag-row"><span class="pill on" id="ptabRec" onclick="planPickTab('rec')">Недавние</span>
+      <span class="pill" id="ptabGrp" onclick="planPickTab('grp')">По группам</span></div>
+    <div id="ppickbody"></div>`);
+  planPickTab('rec');
+}
+async function planPickTab(t) {
+  document.getElementById('ptabRec').classList.toggle('on', t === 'rec');
+  document.getElementById('ptabGrp').classList.toggle('on', t === 'grp');
+  const body = document.getElementById('ppickbody');
+  if (t === 'rec') {
+    const r = await api('/exercises/recent');
+    body.innerHTML = r.length ? r.map(x => planPickRow(x.name)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>';
+  } else {
+    const g = await api('/exercises/groups');
+    body.innerHTML = g.map(x => `<div class="list-item" onclick="planPickGroup('${x.group}','${esc(x.label)}')"><div style="flex:1">${esc(x.label)}</div><span class="muted small">${x.count} ›</span></div>`).join('');
+  }
+}
+async function planPickGroup(g, label) {
+  const list = await api('/exercises/catalog?group=' + g);
+  document.getElementById('ppickbody').innerHTML = `<div class="back" onclick="planPickTab('grp')">‹ ${label}</div>` + list.map(x => planPickRow(x.name)).join('');
+}
+async function planPickSearch() {
+  const q = document.getElementById('pexq').value.trim(); if (q.length < 2) return;
+  const r = await api('/exercises/search?q=' + encodeURIComponent(q));
+  document.getElementById('ppickbody').innerHTML = r.map(x => planPickRow(x.name)).join('') || '<div class="muted small">Ничего не найдено</div>';
+}
+function planPickRow(name) {
+  return `<div class="list-item" onclick='planChooseEx(${JSON.stringify(name)})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+}
+function planChooseEx(name) { openPlanTarget(name, -1); }
+
+// target sheet (sets / reps / weight) — for new (idx=-1) or existing exercise
+function openPlanTarget(name, idx) {
+  const ex = idx >= 0 ? window._PLAN.exercises[idx] : { name, target_sets: 3, target_reps_min: 10, target_reps_max: 10, target_weight: null, reps_text: null };
+  const wVal = ex.target_weight != null ? fmt(ex.target_weight) : '';
+  sheet(`<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>
+    ${stepRow([['psets', ex.target_sets || 3, 'подх.', 1], ['prmin', ex.target_reps_min || 10, 'повт. от', 1]])}
+    ${stepRow([['prmax', ex.target_reps_max || ex.target_reps_min || 10, 'повт. до', 1], ['pweight', wVal === '' ? 0 : wVal, 'кг', 2.5]])}
+    <div class="tag-row"><span class="pill ${ex.reps_text ? 'on' : ''}" id="pfail" onclick="tag(this)" data-tag="x">До отказа</span></div>
+    <div class="muted small" style="margin:2px 0 10px">Вес можно оставить 0, если без веса/по самочувствию</div>
+    <button class="btn" onclick='planSaveTarget(${idx},${JSON.stringify(name)})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+}
+function planEditEx(i) { planSync(); openPlanTarget(window._PLAN.exercises[i].name, i); }
+function planSaveTarget(idx, name) {
+  const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
+  const failure = document.getElementById('pfail').classList.contains('on');
+  const sets = g('psets') || null;
+  let rmin = g('prmin') || null, rmax = g('prmax') || null;
+  if (rmin && rmax && rmax < rmin) rmax = rmin;
+  const w = g('pweight'); const weight = (w && w > 0) ? w : null;
+  const ex = {
+    name, target_sets: sets,
+    target_reps_min: failure ? null : rmin,
+    target_reps_max: failure ? null : rmax,
+    target_weight: weight,
+    reps_text: failure ? 'до отказа' : null,
+  };
+  if (idx >= 0) window._PLAN.exercises[idx] = ex;
+  else window._PLAN.exercises.push(ex);
+  closeSheet(); PlanEdit('new');
+}
+
+async function savePlan() {
+  planSync();
+  const P = window._PLAN;
+  if (!P.date) return toast('Укажи дату');
+  if (!P.exercises.length && !P.focus) return toast('Добавь фокус или упражнения');
+  const payload = { date: P.date, focus_label: P.focus || null, notes: P.notes || null, exercises: P.exercises };
+  try {
+    if (P.id) await api('/plans/' + P.id, 'PATCH', payload);
+    else await api('/plans', 'POST', payload);
+    window._PLAN = null; toast('План сохранён'); go('plans');
+  } catch (e) { toast(e.message || 'не удалось сохранить'); }
+}
+async function deletePlan(id) {
+  try { await api('/plans/' + id, 'DELETE'); window._PLAN = null; toast('План удалён'); go('plans'); }
+  catch (e) { toast(e.message); }
+}
+
+// AI free-text → preview → bulk save
+function planPasteSheet() {
+  sheet(`<h2>План текстом</h2>
+    <div class="muted small" style="margin-bottom:8px">Вставь план в свободной форме — ИИ разберёт по дням.<br>
+      Напр.: «Пн — Грудь: жим 4×8-12 80кг, разводка 3×12. Ср — Спина: тяга 4×8 90кг»</div>
+    <textarea id="planText" style="width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--card);color:var(--txt);font-size:15px"></textarea>
+    <button class="btn" style="margin-top:10px" onclick="planParse()">⏳ Разобрать</button>`);
+}
+async function planParse() {
+  const t = document.getElementById('planText').value.trim();
+  if (!t) return toast('Пустой текст');
+  const btn = event.target; btn.textContent = '⏳ Разбираю…'; btn.disabled = true;
+  try {
+    const r = await api('/plans/parse', 'POST', { text: t });
+    window._PARSED = r.days;
+    const preview = r.days.map(d => `<div class="card" style="margin-bottom:8px">
+      <div class="row sp"><b>${esc(d.focus_label || 'Тренировка')}</b><span class="small muted">${fmtPlanDate(d.date)}</span></div>
+      ${(d.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">отдых / без упражнений</div>'}
+    </div>`).join('');
+    sheet(`<h2>Разобрано: ${r.days.length} дн.</h2>
+      <div style="max-height:50vh;overflow:auto">${preview}</div>
+      <button class="btn success" style="margin-top:12px" onclick="planConfirmBulk()">✓ Сохранить все</button>
+      <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">Назад к тексту</button>`);
+  } catch (e) {
+    toast(e.message || 'не удалось разобрать');
+    btn.textContent = '⏳ Разобрать'; btn.disabled = false;
+  }
+}
+async function planConfirmBulk() {
+  try {
+    const r = await api('/plans/bulk', 'POST', { days: window._PARSED });
+    window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans');
+  } catch (e) { toast(e.message); }
+}
 
 // ── sheet system ──────────────────────────────────────────────────────────
 function sheet(html) {

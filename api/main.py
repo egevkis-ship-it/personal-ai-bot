@@ -515,6 +515,112 @@ async def exercise_history(key: str, limit: int = 10, uid: str = Depends(current
 
 # ──────────────────────────────── plans ─────────────────────────────────────
 
+_WEEKDAY_ORDER = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+
+
+def _resolve_plan_date(date_str: Optional[str], weekday: Optional[int], today: date) -> date:
+    """Mirror the bot's date logic: explicit ISO date wins; else next occurrence
+    of the given weekday (0=Mon..6=Sun), today counting as valid; else today."""
+    if date_str:
+        try:
+            return date.fromisoformat(date_str.strip())
+        except ValueError:
+            raise HTTPException(422, "bad date format, expected YYYY-MM-DD")
+    if weekday is not None:
+        if not 0 <= weekday <= 6:
+            raise HTTPException(422, "weekday must be 0..6 (Mon..Sun)")
+        days_ahead = (weekday - today.weekday()) % 7
+        return today + timedelta(days=days_ahead)
+    return today
+
+
+def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
+    """Normalize incoming exercise dicts to the bot's planned-exercise shape."""
+    out: list[dict] = []
+    for e in exercises or []:
+        name = (e.get("name") or "").strip()
+        if not name:
+            continue
+        d = {
+            "name": name,
+            "target_sets": e.get("target_sets"),
+            "target_reps_min": e.get("target_reps_min"),
+            "target_reps_max": e.get("target_reps_max"),
+            "target_weight": _to_f(e.get("target_weight")),
+            "reps_text": (e.get("reps_text") or None),
+            "notes": (e.get("notes") or None),
+            "superset_group": (e.get("superset_group") or None),
+        }
+        # if only one reps value provided, mirror it into min==max (bot convention)
+        if d["target_reps_min"] is not None and d["target_reps_max"] is None:
+            d["target_reps_max"] = d["target_reps_min"]
+        out.append(d)
+    return out
+
+
+class PlanExercise(BaseModel):
+    name: str
+    target_sets: Optional[int] = None
+    target_reps_min: Optional[int] = None
+    target_reps_max: Optional[int] = None
+    target_weight: Optional[float] = None
+    reps_text: Optional[str] = None
+    notes: Optional[str] = None
+    superset_group: Optional[str] = None
+
+
+class CreatePlan(BaseModel):
+    date: Optional[str] = None          # YYYY-MM-DD
+    weekday: Optional[int] = None       # 0=Mon .. 6=Sun
+    focus_label: Optional[str] = None
+    notes: Optional[str] = None
+    exercises: list[PlanExercise] = []
+
+
+class UpdatePlan(BaseModel):
+    date: Optional[str] = None
+    weekday: Optional[int] = None
+    focus_label: Optional[str] = None
+    notes: Optional[str] = None
+    exercises: Optional[list[PlanExercise]] = None
+
+
+class ParsePlan(BaseModel):
+    text: str
+
+
+class BulkDay(BaseModel):
+    date: Optional[str] = None
+    weekday: Optional[int] = None
+    focus_label: Optional[str] = None
+    notes: Optional[str] = None
+    exercises: list[PlanExercise] = []
+
+
+class BulkPlans(BaseModel):
+    days: list[BulkDay] = []
+
+
+@app.get("/api/plans")
+async def plans_list(days: int = 30, uid: str = Depends(current_uid)):
+    """Upcoming planned workouts within the next `days` days (status='planned')."""
+    today = date.today()
+    rows = await db.get_planned_workouts_range(uid, today, today + timedelta(days=days))
+    out = []
+    for p in rows:
+        d = p.get("planned_date")
+        out.append({
+            "id": p["id"],
+            "planned_date": d.isoformat() if isinstance(d, date) else d,
+            "weekday": d.weekday() if isinstance(d, date) else None,
+            "focus_label": p.get("focus_label"),
+            "notes": p.get("notes"),
+            "exercises": p.get("exercises") or [],
+            "is_today": (isinstance(d, date) and d == today),
+        })
+    return out
+
+
 @app.get("/api/plans/today")
 async def plan_today(uid: str = Depends(current_uid)):
     rows = await db.get_planned_workouts_range(uid, date.today(), date.today())
@@ -526,7 +632,113 @@ async def plan_detail(pid: int, uid: str = Depends(current_uid)):
     p = await db.get_planned_workout(pid)
     if not p:
         raise HTTPException(404, "plan not found")
+    d = p.get("planned_date")
+    if isinstance(d, date):
+        p["planned_date"] = d.isoformat()
+        p["weekday"] = d.weekday()
     return p
+
+
+@app.post("/api/plans")
+async def create_plan(body: CreatePlan, uid: str = Depends(current_uid)):
+    d = _resolve_plan_date(body.date, body.weekday, date.today())
+    exs = _clean_plan_exercises([e.model_dump() for e in body.exercises])
+    pid = await db.create_planned_workout(uid, d, (body.focus_label or None), exs)
+    if body.notes:
+        await db.update_planned_workout_notes(pid, body.notes)
+    return {"id": pid, "planned_date": d.isoformat()}
+
+
+@app.patch("/api/plans/{pid}")
+async def update_plan(pid: int, body: UpdatePlan, uid: str = Depends(current_uid)):
+    existing = await db.get_planned_workout(pid)
+    if not existing:
+        raise HTTPException(404, "plan not found")
+    exs = None
+    if body.exercises is not None:
+        exs = _clean_plan_exercises([e.model_dump() for e in body.exercises])
+    await db.update_planned_workout(
+        pid,
+        focus_label=body.focus_label,
+        exercises=exs,
+    )
+    if body.notes is not None:
+        await db.update_planned_workout_notes(pid, body.notes)
+    if body.date is not None or body.weekday is not None:
+        new_date = _resolve_plan_date(body.date, body.weekday, date.today())
+        async with get_session() as s:
+            await s.execute(
+                text("UPDATE planned_workouts SET planned_date = :d, updated_at = now() WHERE id = :id"),
+                {"d": new_date, "id": pid},
+            )
+    return {"ok": True}
+
+
+@app.delete("/api/plans/{pid}")
+async def delete_plan(pid: int, uid: str = Depends(current_uid)):
+    await db.delete_planned_workout(pid)   # soft-delete: status='skipped' (mirrors bot)
+    return {"ok": True}
+
+
+@app.post("/api/plans/parse")
+async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
+    """Free-text → structured days preview (AI), with dates pre-assigned.
+    Does NOT save — the client confirms via POST /api/plans/bulk."""
+    if not (body.text or "").strip():
+        raise HTTPException(422, "пустой текст")
+    try:
+        from app.bot.services.ai_parser import parse_plan_text
+    except Exception:
+        raise HTTPException(503, "ИИ-парсер недоступен")
+    try:
+        days = await parse_plan_text(body.text)
+    except Exception as e:
+        raise HTTPException(502, f"ошибка разбора: {str(e)[:200]}")
+    if not days:
+        raise HTTPException(422, "не удалось разобрать план")
+    today = date.today()
+    out = []
+    for i, day in enumerate(days):
+        label = (day.day_label or "").lower().strip()
+        wd = next((idx for idx, nm in enumerate(_WEEKDAY_ORDER) if nm.lower() in label), None)
+        if wd is not None:
+            days_ahead = (wd - today.weekday()) % 7
+            if days_ahead == 0 and i > 0:
+                days_ahead = 7
+            assigned = today + timedelta(days=days_ahead)
+        else:
+            try:
+                assigned = date.fromisoformat((day.day_label or "").strip())
+            except ValueError:
+                assigned = today + timedelta(days=i)
+        out.append({
+            "date": assigned.isoformat(),
+            "weekday": assigned.weekday(),
+            "day_label": day.day_label,
+            "focus_label": day.focus_label,
+            "notes": day.notes,
+            "exercises": [{
+                "name": ex.name, "target_sets": ex.target_sets,
+                "target_reps_min": ex.target_reps_min, "target_reps_max": ex.target_reps_max,
+                "target_weight": ex.target_weight, "reps_text": ex.reps_text,
+                "notes": ex.notes, "superset_group": ex.superset_group,
+            } for ex in day.exercises],
+        })
+    return {"days": out}
+
+
+@app.post("/api/plans/bulk")
+async def create_plans_bulk(body: BulkPlans, uid: str = Depends(current_uid)):
+    """Save multiple planned days at once (confirmed preview)."""
+    saved = []
+    for day in body.days:
+        d = _resolve_plan_date(day.date, day.weekday, date.today())
+        exs = _clean_plan_exercises([e.model_dump() for e in day.exercises])
+        pid = await db.create_planned_workout(uid, d, (day.focus_label or None), exs)
+        if day.notes:
+            await db.update_planned_workout_notes(pid, day.notes)
+        saved.append({"id": pid, "planned_date": d.isoformat()})
+    return {"saved": len(saved), "plans": saved}
 
 
 # ───────────────────────────── measurements ─────────────────────────────────
