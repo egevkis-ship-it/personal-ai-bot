@@ -31,7 +31,6 @@ DROP TABLE IF EXISTS fitness_exercise_sets CASCADE;
 DROP TABLE IF EXISTS fitness_workouts CASCADE;
 DROP TABLE IF EXISTS planned_exercises CASCADE;
 DROP TABLE IF EXISTS training_plans CASCADE;
-DROP TABLE IF EXISTS body_measurements CASCADE;
 DROP TABLE IF EXISTS fitness_pending_decisions CASCADE;
 DROP TABLE IF EXISTS fitness_goals CASCADE;
 DROP TABLE IF EXISTS workout_templates CASCADE;
