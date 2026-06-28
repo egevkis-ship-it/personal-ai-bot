@@ -510,12 +510,18 @@ async function coachReview(wid) {
 
 // ── History ───────────────────────────────────────────────────────────────
 async function History() {
-  const list = await api('/workouts?days=60');
+  const q = STATE.histQ || '';
+  const list = await api('/workouts?days=365' + (q ? '&q=' + encodeURIComponent(q) : ''));
   view.innerHTML = `<h1>История</h1>
+    <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
     ${list.length ? list.map(w => `<div class="card list-item" onclick="go('workout',${w.id})">
       <div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${w.workout_date} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`).join('')
-      : '<div class="card muted">Пока нет завершённых тренировок.</div>'}`;
+      : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}`;
+  const inp = document.getElementById('histQ');
+  if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
 }
+let _histT = null;
+function histSearch(v) { STATE.histQ = v; clearTimeout(_histT); _histT = setTimeout(() => { if (STATE.tab === 'history') History(); }, 350); }
 async function WorkoutDetail(id) {
   const w = await api('/workouts/' + id);
   window._WDid = id; window._WDex = w.exercises.filter(e => e.sets.length);
@@ -1260,6 +1266,12 @@ async function Settings() {
       ${statRow('Фото', s.photos_total || 0)}
       ${statRow('AI-алиасов', s.aliases_total || 0)}
     </div>
+    <div class="muted small" style="margin:14px 0 6px">📦 Экспорт данных</div>
+    <div class="card">
+      <button class="btn ghost sm" onclick="window.open('/api/export?format=json','_blank')">Скачать всё (JSON)</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="window.open('/api/export?format=csv','_blank')">Скачать подходы (CSV)</button>
+    </div>
+    <div id="installCard"></div>
     <div class="muted small" style="margin:14px 0 6px">🧹 Очистка данных</div>
     <div class="card">
       <button class="btn ghost sm" onclick="wipeAsk('plans')">Очистить запланированные</button>
@@ -1270,6 +1282,24 @@ async function Settings() {
     </div>
     ${admin ? adminSection(admin) : ''}
     <button class="btn ghost" style="margin-top:20px" onclick="logout()">Выйти</button>`;
+  renderInstallButton();
+}
+// ── PWA install (Add to Home Screen) ────────────────────────────────────────
+let _installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _installEvt = e; renderInstallButton(); });
+window.addEventListener('appinstalled', () => { _installEvt = null; renderInstallButton(); toast('Добавлено на экран'); });
+function renderInstallButton() {
+  const box = document.getElementById('installCard');
+  if (!box) return;
+  box.innerHTML = _installEvt
+    ? `<div class="muted small" style="margin:14px 0 6px">📲 Приложение</div>
+       <div class="card"><button class="btn ghost sm" onclick="installApp()">Добавить на экран</button></div>` : '';
+}
+async function installApp() {
+  if (!_installEvt) return;
+  _installEvt.prompt();
+  try { await _installEvt.userChoice; } catch {}
+  _installEvt = null; renderInstallButton();
 }
 
 // timezone

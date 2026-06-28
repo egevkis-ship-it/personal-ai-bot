@@ -759,13 +759,20 @@ async def workouts_week(uid: str = Depends(current_uid)):
 
 
 @app.get("/api/workouts")
-async def workouts_history(days: int = 30, uid: str = Depends(current_uid)):
+async def workouts_history(days: int = 30, q: Optional[str] = None, uid: str = Depends(current_uid)):
+    """Finished workouts in the last `days`. Optional `q` filters by a substring of
+    the focus label or any exercise name (case-insensitive)."""
     today = await today_for(uid)
     rows = [r for r in await db.get_workouts_range(uid, today - timedelta(days=days), today) if r.get("finished_at")]
+    ql = (q or "").strip().lower()
     out = []
     for w in rows:
         sets = await db.get_workout_sets(w["id"])
         working = [s for s in sets if not s["is_warmup"]]
+        if ql:
+            hay = (w.get("focus_label") or "").lower() + " " + " ".join((s.get("exercise_name") or "").lower() for s in sets)
+            if ql not in hay:
+                continue
         out.append({**w, "set_count": len(working),
                     "tonnage": round(sum((_to_f(s["weight_kg"]) or 0) * (s["reps"] or 0) for s in working))})
     out.reverse()
@@ -1556,6 +1563,43 @@ async def del_measurement(mid: int, uid: str = Depends(current_uid)):
 
 
 # ──────────────────────────────── reports ───────────────────────────────────
+
+@app.get("/api/export")
+async def export_data(format: str = "json", uid: str = Depends(current_uid)):
+    """Owner-scoped export of all the user's data. format=json → one JSON file;
+    format=csv → a flat CSV of every logged set with its workout date/focus."""
+    from fastapi.encoders import jsonable_encoder
+    workouts = await _rows(
+        "SELECT id, workout_date, focus_label, notes, finished_at FROM workouts WHERE user_id=:u ORDER BY workout_date", u=uid)
+    sets = await _rows(
+        """SELECT es.workout_id, es.exercise_name, es.set_number, es.weight_kg, es.reps,
+                  es.duration_seconds, es.is_warmup
+           FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
+           WHERE w.user_id=:u ORDER BY es.workout_id, es.set_number""", u=uid)
+    plans = await _rows(
+        "SELECT planned_date, focus_label, exercises, notes, status FROM planned_workouts WHERE user_id=:u ORDER BY planned_date", u=uid)
+    meas = await _rows("SELECT * FROM body_measurements WHERE user_id=:u ORDER BY taken_on", u=uid)
+    routines = await _rows("SELECT name, days, created_at FROM routines WHERE user_id=:u ORDER BY id", u=uid)
+    if format == "csv":
+        import csv as _csv
+        wo = {w["id"]: w for w in workouts}
+        buf = io.StringIO()
+        wr = _csv.writer(buf)
+        wr.writerow(["date", "focus", "exercise", "set", "weight_kg", "reps", "duration_s", "warmup"])
+        for s in sets:
+            w = wo.get(s["workout_id"], {})
+            wr.writerow([w.get("workout_date"), w.get("focus_label"), s["exercise_name"], s["set_number"],
+                         _to_f(s["weight_kg"]), s["reps"], s["duration_seconds"], s["is_warmup"]])
+        data = buf.getvalue().encode("utf-8-sig")
+        return StreamingResponse(io.BytesIO(data), media_type="text/csv",
+                                 headers={"Content-Disposition": 'attachment; filename="workouts.csv"'})
+    payload = jsonable_encoder({
+        "exported_at": (await today_for(uid)).isoformat(),
+        "user_id": uid, "workouts": workouts, "sets": sets,
+        "plans": plans, "measurements": meas, "routines": routines,
+    })
+    return JSONResponse(payload, headers={"Content-Disposition": 'attachment; filename="fitness-export.json"'})
+
 
 @app.get("/api/reports")
 async def period_report(
