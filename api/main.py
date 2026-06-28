@@ -317,6 +317,11 @@ async def _startup() -> None:
             await _seed(dev)
 
 
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await engine.dispose()
+
+
 # ──────────────────────────── helpers (custom SQL) ──────────────────────────
 
 async def _scalar(sql: str, **p):

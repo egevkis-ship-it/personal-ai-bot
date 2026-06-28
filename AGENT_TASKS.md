@@ -220,6 +220,6 @@ AI-кэш упражнений» из общих Настроек в админ-
 - [x] **4 Офлайн-основа** — сервер: `client_op_id` в `add_set` + таблица `processed_ops` (атомарный `INSERT ON CONFLICT DO NOTHING RETURNING`), повтор того же op → `{duplicate:true}` без дубля (проверено: dup→1, diff-op→2, no-op→3). Клиент (`web/app.js`): IndexedDB-очередь подходов; при офлайне/сетевой ошибке POST — в очередь + оптимистичная вставка в `window._WO` + локальный рендер; флаш по событию `online` и на старте, идемпотентно по `client_op_id`. Активная тренировка кэшируется в `localStorage` (список/таймеры живут офлайн), очистка при finish/delete. SW: чистка старых кэшей на activate + bump версии. Только для flow активной тренировки. `node --check` ок; браузерный офлайн — проверяется на устройстве.
 
 ### Фаза 5 — тесты, CI, заголовки
-- [ ] 5.1 Тесты API (httpx+ASGI): гейт, изоляция пользователей, CRUD планов, лог подходов, регистрация/админка
+- [x] **5.1 Тесты API** — `tests/test_web_api.py` (TestClient/ASGI, маркер `db`, фикстура сбрасывает схему): гейт pending/approved/blocked, **изоляция двух пользователей (404 на чужие объекты)**, CRUD+валидация планов, лог подходов + идемпотентность, owner-immutable/last-admin/admin-flow. 7/7 зелёных против тест-Postgres. Добавлен `@app.on_event("shutdown")` → `engine.dispose()` (чисто и в проде, и для тестов).
 - [ ] 5.2 CI-гейт (GitHub Actions: py_compile, node --check, pytest, линт)
 - [ ] 5.3 Security-заголовки (CSP, X-Content-Type-Options, Referrer-Policy)
