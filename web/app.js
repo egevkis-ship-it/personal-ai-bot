@@ -4,8 +4,11 @@ async function api(path, method = 'GET', body) {
   const opt = { method, headers: {}, credentials: 'include' };
   if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   const r = await fetch('/api' + path, opt);
-  if (r.status === 401) { const e = new Error('unauthorized'); e.code = 401; throw e; }
-  if (!r.ok) { let d = ''; try { d = (await r.json()).detail; } catch {} throw new Error(d || r.status); }
+  if (r.status === 401) { const e = new Error('unauthorized'); e.code = 401; e.status = 401; throw e; }
+  if (!r.ok) {
+    let j = null; try { j = await r.json(); } catch {}
+    const e = new Error((j && j.detail) || r.status); e.status = r.status; e.body = j; throw e;
+  }
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
 const fmt = n => (n == null ? '' : (Math.round(n * 100) / 100).toString());
@@ -40,6 +43,7 @@ async function go(tab, param) {
     if (tab === 'chooseDay') return ChooseDay();
     if (tab === 'plans') return Plans();
     if (tab === 'planEdit') return PlanEdit(param);
+    if (tab === 'settings') return Settings();
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -68,9 +72,28 @@ async function Login() {
   }
 }
 window.onTelegramAuth = async function (user) {
-  try { await api('/auth/telegram', 'POST', user); document.getElementById('tabbar').style.display = ''; go('home'); }
-  catch (e) { toast(e.message || 'вход не удался'); }
+  try {
+    await api('/auth/telegram', 'POST', user);
+    document.getElementById('tabbar').style.display = '';
+    go('home');
+  } catch (e) {
+    const st = e.body && e.body.status;
+    if (e.status === 403 && (st === 'pending' || st === 'blocked')) return AccessGate(st);
+    toast(e.message || 'вход не удался');
+  }
 };
+function AccessGate(kind) {
+  document.getElementById('tabbar').style.display = 'none';
+  const pending = kind === 'pending';
+  view.innerHTML = `<div style="text-align:center;padding:64px 20px">
+    <div style="font-size:46px">${pending ? '⏳' : '🚫'}</div>
+    <h1 style="margin-top:12px">${pending ? 'Заявка отправлена' : 'Доступ ограничен'}</h1>
+    <p class="muted" style="margin-top:8px">${pending
+      ? 'Запрос на доступ отправлен администратору. Как только его одобрят — войдите снова.'
+      : 'Доступ к приложению закрыт. Обратитесь к администратору.'}</p>
+    <button class="btn ghost" style="margin:24px auto 0;max-width:200px" onclick="location.reload()">Обновить</button>
+  </div>`;
+}
 async function logout() { try { await api('/auth/logout', 'POST'); } catch {} location.reload(); }
 
 // ── Home ────────────────────────────────────────────────────────────────
@@ -90,7 +113,7 @@ async function Home() {
     banner = `<div class="banner info"><div class="b-title" style="color:var(--info)">На сегодня плана нет</div>
       <button class="btn" style="margin-top:9px" onclick="go('train')">Начать тренировку</button></div>`;
   }
-  view.innerHTML = `<div class="row sp"><h1>Привет!</h1><span class="back" style="margin:0" onclick="logout()">Выйти</span></div><div class="muted small" style="margin-bottom:14px">${new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}</div>
+  view.innerHTML = `<div class="row sp"><h1>Привет!</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div><div class="muted small" style="margin-bottom:14px">${new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}</div>
     ${banner}
     <div class="muted small" style="margin:4px 0 8px">Быстрые действия</div>
     <div class="grid2">
@@ -594,6 +617,174 @@ async function planConfirmBulk() {
     const r = await api('/plans/bulk', 'POST', { days: window._PARSED });
     window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans');
   } catch (e) { toast(e.message); }
+}
+
+// ── Settings (service for all + access management for admins) ────────────────
+const TZ_PRESETS = [
+  ['Калининград (UTC+2)', 'Europe/Kaliningrad'], ['Москва (UTC+3)', 'Europe/Moscow'],
+  ['Самара (UTC+4)', 'Europe/Samara'], ['Екатеринбург (UTC+5)', 'Asia/Yekaterinburg'],
+  ['Новосибирск (UTC+7)', 'Asia/Novosibirsk'], ['Владивосток (UTC+10)', 'Asia/Vladivostok'],
+  ['Лиссабон (UTC+1)', 'Europe/Lisbon'], ['Лондон (UTC+0/1)', 'Europe/London'],
+  ['Дубай (UTC+4)', 'Asia/Dubai'], ['Бангкок (UTC+7)', 'Asia/Bangkok'],
+  ['Нью-Йорк (UTC-5/4)', 'America/New_York'], ['UTC', 'UTC'],
+];
+const WIPE_CONFIRM = {
+  plans: ['Удалить все запланированные тренировки?', 'Удалятся и активные, и пропущенные планы. Действие необратимо.'],
+  history: ['Удалить всю историю тренировок?', 'Все записанные подходы и сессии будут удалены. Действие необратимо.'],
+  measurements: ['Удалить все замеры тела?', 'Все сохранённые замеры (вес, обхваты) будут удалены. Действие необратимо.'],
+  photos: ['Удалить все прогресс-фото?', 'Записи в дневнике (file_id и AI-описания) будут удалены. Сами файлы остаются в Telegram. Действие необратимо.'],
+  aliases: ['Очистить кэш AI-нормализации?', 'Сохранённые AI-разрешения имён упражнений будут удалены. В следующий раз каждое неизвестное название снова спросит у ИИ.'],
+  all: ['ПОЛНЫЙ СБРОС', 'Удалит ВСЁ: планы, тренировки, замеры, фото. Действие необратимо. Точно?'],
+};
+const WIPE_DONE = {
+  plans: n => `Удалено запланированных: ${n}`, history: n => `Удалено тренировок: ${n}`,
+  measurements: n => `Удалено замеров: ${n}`, photos: n => `Удалено записей о фото: ${n}`,
+  aliases: n => `Очищено AI-алиасов: ${n}`,
+  all: r => `Сброшено: планов ${r.planned}, трен. ${r.workouts}, замеров ${r.measurements}, фото ${r.photos}`,
+};
+
+async function Settings() {
+  document.getElementById('tabbar').style.display = '';
+  view.innerHTML = `<span class="back" onclick="go('home')">‹ Главная</span><h1>Настройки</h1>
+    <div id="setBody"><div class="card muted small">Загрузка…</div></div>`;
+  let tzr, s, admin = null;
+  try {
+    tzr = await api('/service/tz');
+    s = await api('/service/stats');
+    try { admin = await api('/admin/users'); }            // 403 → not an admin (hide section)
+    catch (e) { if (e.status === 401) throw e; admin = null; }
+  } catch (e) {
+    if (e.status === 401 || e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
+    return toast(e.message || 'Не удалось загрузить настройки');
+  }
+  window._ADMIN = admin;
+  const statRow = (l, v) => `<div class="row sp" style="padding:6px 0"><span class="muted small">${l}</span><span>${v}</span></div>`;
+  document.getElementById('setBody').innerHTML = `
+    <div class="muted small" style="margin:8px 0 6px">🌍 Часовой пояс</div>
+    <div class="card">
+      <div class="row sp"><span>Текущий</span><b id="tzCur">${esc(tzr.tz || 'UTC')}</b></div>
+      <button class="btn ghost sm" style="margin-top:10px" onclick="tzAuto()">📍 Определить автоматически</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="tzPick()">Выбрать из списка</button>
+    </div>
+    <div class="muted small" style="margin:14px 0 6px">📊 Статистика</div>
+    <div class="card">
+      ${statRow('Планы (активные / всего)', `${s.planned_active || 0} / ${s.planned_total || 0}`)}
+      ${statRow('Тренировки (заверш. / всего)', `${s.workouts_finished || 0} / ${s.workouts_total || 0}`)}
+      ${statRow('Подходов', s.sets_total || 0)}
+      ${statRow('Замеров', s.measurements_total || 0)}
+      ${statRow('Фото', s.photos_total || 0)}
+      ${statRow('AI-алиасов', s.aliases_total || 0)}
+    </div>
+    <div class="muted small" style="margin:14px 0 6px">🧹 Очистка данных</div>
+    <div class="card">
+      <button class="btn ghost sm" onclick="wipeAsk('plans')">Очистить запланированные</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('history')">Очистить историю</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('measurements')">Очистить замеры</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('photos')">Очистить фото</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('aliases')">Очистить AI-кэш</button>
+      <button class="btn danger sm" style="margin-top:12px" onclick="wipeAsk('all')">⚠️ ПОЛНЫЙ СБРОС</button>
+    </div>
+    ${admin ? adminSection(admin) : ''}
+    <button class="btn ghost" style="margin-top:20px" onclick="logout()">Выйти</button>`;
+}
+
+// timezone
+async function tzAuto() {
+  let z = '';
+  try { z = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
+  if (!z) return toast('Не удалось определить пояс');
+  try { const r = await api('/service/tz', 'POST', { tz: z }); const el = document.getElementById('tzCur'); if (el) el.textContent = r.tz; toast('Часовой пояс: ' + r.tz); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+function tzPick() {
+  const cur = (document.getElementById('tzCur') || {}).textContent || '';
+  sheet(`<h2>Часовой пояс</h2>${TZ_PRESETS.map(([l, n]) =>
+    `<div class="list-item" onclick="tzSet('${n}')"><div style="flex:1">${esc(l)}</div>${n === cur.trim() ? '<span style="color:var(--success)">✓</span>' : '<span class="muted">›</span>'}</div>`).join('')}`);
+}
+async function tzSet(name) {
+  try { const r = await api('/service/tz', 'POST', { tz: name }); closeSheet(); const el = document.getElementById('tzCur'); if (el) el.textContent = r.tz; toast('Часовой пояс: ' + r.tz); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+
+// wipes (two-step confirm)
+function wipeAsk(what) {
+  const [title, msg] = WIPE_CONFIRM[what];
+  confirmSheet(title, msg, what === 'all' ? 'Да, сбросить всё' : 'Да, удалить', true, () => wipeDo(what));
+}
+async function wipeDo(what) {
+  try { const r = await api('/service/wipe/' + what, 'POST'); toast('✅ ' + WIPE_DONE[what](r.deleted)); Settings(); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+
+// generic two-step confirm sheet
+function confirmSheet(title, message, yesLabel, danger, onYes) {
+  window._confirmFn = onYes;
+  sheet(`<h2>${esc(title)}</h2>
+    <div class="muted small" style="margin:4px 0 16px;white-space:pre-line">${esc(message)}</div>
+    <button class="btn ${danger ? 'danger' : ''}" onclick="confirmRun()">${esc(yesLabel)}</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="closeSheet()">Отмена</button>`);
+}
+function confirmRun() { const f = window._confirmFn; window._confirmFn = null; closeSheet(); if (f) f(); }
+
+// access management (admin only)
+function accName(u) { return u.display_name || (u.username ? '@' + u.username : 'id ' + u.uid); }
+function adminSection(users) {
+  const pending = users.filter(u => u.status === 'pending');
+  const others = users.filter(u => u.status !== 'pending');
+  const badge = u => u.is_owner ? '<span class="pill ok">владелец</span>'
+    : u.status === 'blocked' ? '<span class="pill warn">заблокирован</span>'
+    : u.role === 'admin' ? '<span class="pill ok">админ</span>' : '';
+  const pendRows = pending.length ? pending.map(u => `<div class="list-item">
+      <div style="flex:1"><b>${esc(accName(u))}</b><div class="small muted">${u.username ? '@' + esc(u.username) + ' · ' : ''}id ${esc(u.uid)}</div></div>
+      <span class="pill ok" style="cursor:pointer" onclick="accSet('${u.uid}',{status:'approved'})">✓</span> &nbsp;
+      <span class="pill warn" style="cursor:pointer" onclick="accAskBlock('${u.uid}')">✕</span></div>`).join('')
+    : '<div class="muted small" style="padding:8px 0">Нет заявок</div>';
+  const userRows = others.length ? others.map(u => `<div class="list-item">
+      <div style="flex:1"><b>${esc(accName(u))}</b> ${badge(u)}<div class="small muted">id ${esc(u.uid)}</div></div>
+      ${u.is_owner ? '<span class="muted small">—</span>' : `<span class="muted" style="cursor:pointer;font-size:20px" onclick="accMenu('${u.uid}')">···</span>`}</div>`).join('')
+    : '<div class="muted small" style="padding:8px 0">Пусто</div>';
+  return `<div class="muted small" style="margin:18px 0 6px">🔑 Управление доступом</div>
+    <div class="card"><div class="small muted" style="margin-bottom:4px">Заявки${pending.length ? ' · ' + pending.length : ''}</div>${pendRows}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:4px">Пользователи</div>${userRows}</div>
+    <button class="btn ghost sm" onclick="accAddSheet()">➕ Добавить пользователя</button>`;
+}
+function _accFind(uid) { return (window._ADMIN || []).find(x => x.uid === uid); }
+function accMenu(uid) {
+  const u = _accFind(uid); if (!u) return;
+  const items = [];
+  if (u.status !== 'approved') items.push(`<div class="list-item" onclick="accSet('${uid}',{status:'approved'})"><div class="ic">✓</div>Одобрить доступ</div>`);
+  if (u.role === 'admin') items.push(`<div class="list-item" onclick="accAskDemote('${uid}')"><div class="ic">⬇️</div>Снять администратора</div>`);
+  else items.push(`<div class="list-item" onclick="accSet('${uid}',{role:'admin'})"><div class="ic">⭐</div>Сделать администратором</div>`);
+  if (u.status === 'blocked') items.push(`<div class="list-item" onclick="accSet('${uid}',{status:'approved'})"><div class="ic">↩️</div>Разблокировать</div>`);
+  else items.push(`<div class="list-item" style="color:var(--danger)" onclick="accAskBlock('${uid}')"><div class="ic">🚫</div>Заблокировать</div>`);
+  sheet(`<div class="muted small">id ${esc(uid)}</div><h2>${esc(accName(u))}</h2>${items.join('')}`);
+}
+function accAskBlock(uid) {
+  const u = _accFind(uid);
+  confirmSheet('Заблокировать доступ?', u ? accName(u) : ('id ' + uid), 'Заблокировать', true, () => accSet(uid, { status: 'blocked' }));
+}
+function accAskDemote(uid) {
+  const u = _accFind(uid);
+  confirmSheet('Снять администратора?', u ? accName(u) : ('id ' + uid), 'Снять', true, () => accSet(uid, { role: 'user' }));
+}
+async function accSet(uid, patch) {
+  closeSheet();
+  try { await api('/admin/users/' + uid, 'PATCH', patch); toast('Готово'); Settings(); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+function accAddSheet() {
+  sheet(`<h2>Добавить пользователя</h2>
+    <div class="muted small" style="margin-bottom:10px">Введите Telegram-ID пользователя — он сразу получит доступ. Узнать свой ID можно через @userinfobot.</div>
+    <div class="mfield" style="margin-bottom:10px"><label>Telegram-ID</label><input id="accUid" inputmode="numeric" placeholder="напр. 123456789"></div>
+    <div class="mfield" style="margin-bottom:12px"><label>Имя (необязательно)</label><input id="accName" placeholder="напр. Иван"></div>
+    <button class="btn" onclick="accAdd()">Добавить и одобрить</button>`);
+}
+async function accAdd() {
+  const uid = (document.getElementById('accUid').value || '').trim();
+  const name = (document.getElementById('accName').value || '').trim();
+  if (!uid) return toast('Введите Telegram-ID');
+  try { await api('/admin/users', 'POST', { uid, display_name: name || null }); closeSheet(); toast('Пользователь добавлен'); Settings(); }
+  catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── sheet system ──────────────────────────────────────────────────────────

@@ -63,6 +63,51 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Tables the bot also owns (created by app/main.py at bot startup). Declared here
+-- with IF NOT EXISTS so the web API also works standalone in local dev. In prod
+-- the bot already created them, so these statements are no-ops.
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id     TEXT        PRIMARY KEY,
+    tz_name     TEXT        NOT NULL DEFAULT 'UTC',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS exercise_aliases (
+    id              SERIAL PRIMARY KEY,
+    alias_text      TEXT        NOT NULL,
+    alias_clean     TEXT        NOT NULL UNIQUE,
+    canonical       TEXT        NOT NULL,
+    muscle_group    TEXT,
+    source          TEXT        NOT NULL DEFAULT 'ai',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS progress_photos (
+    id                       SERIAL PRIMARY KEY,
+    user_id                  TEXT        NOT NULL,
+    taken_on                 DATE        NOT NULL,
+    telegram_file_id         TEXT        NOT NULL,
+    telegram_file_unique_id  TEXT,
+    ai_description           TEXT,
+    notes                    TEXT,
+    series_id                TEXT,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Web-app access control (gate + roles). Owned by the web API only.
+CREATE TABLE IF NOT EXISTS app_access (
+    uid          TEXT        PRIMARY KEY,
+    status       TEXT        NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending','approved','blocked')),
+    role         TEXT        NOT NULL DEFAULT 'user'
+                             CHECK (role IN ('user','admin')),
+    display_name TEXT,
+    username     TEXT,
+    invited_by   TEXT,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at   TIMESTAMPTZ
+);
+
 CREATE INDEX IF NOT EXISTS idx_pw_user_date ON planned_workouts(user_id, planned_date);
 CREATE INDEX IF NOT EXISTS idx_w_user_date  ON workouts(user_id, workout_date);
 CREATE INDEX IF NOT EXISTS idx_es_workout   ON exercise_sets(workout_id);

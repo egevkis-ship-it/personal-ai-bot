@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from datetime import date, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,7 @@ from sqlalchemy import text
 
 import app.db as db
 from app.db.engine import engine, get_session
+from app.bot.services import tz
 from app.bot.services.set_parser import parse_exercise_input
 from app.modules.fitness.exercise_normalizer import EXERCISE_LIBRARY, possible_matches
 
@@ -37,10 +39,11 @@ IS_PROD = APP_ENV == "production"
 WEB_ORIGIN = os.getenv("WEB_ORIGIN", "http://localhost:8000")
 BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
 ALLOW_SEED = (not IS_PROD) or os.getenv("SEED") == "1"
+OWNER_UID = os.getenv("OWNER_TELEGRAM_USER_ID", "").strip()
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 COOKIE = "session"
 
-PUBLIC = ("/api/auth/telegram", "/api/config", "/healthz")
+PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz")
 
 GROUP_RU = {
     "chest": "Грудь", "back": "Спина", "legs": "Ноги", "shoulders": "Плечи",
@@ -88,10 +91,15 @@ async def session_mw(request: Request, call_next):
     request.state.uid = None
     if path.startswith("/api/") and path not in PUBLIC:
         uid = auth.parse_session(request.cookies.get(COOKIE))
+        from_cookie = uid is not None
         if not uid and not IS_PROD:
             uid = os.getenv("DEV_UID", "local")  # local dev: no Telegram needed
         if not uid:
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        # Live access re-check: an admin's block/revoke must end an active session,
+        # not merely block the next login. Dev-fallback uid skips this (no local gate).
+        if from_cookie and not await _is_active(uid):
+            return JSONResponse({"detail": "access revoked"}, status_code=401)
         request.state.uid = uid
     return await call_next(request)
 
@@ -103,11 +111,132 @@ def current_uid(request: Request) -> str:
     return uid
 
 
+# ───────────────────────────── access control ───────────────────────────────
+# Gate: every login is checked against app_access. Owner (OWNER_TELEGRAM_USER_ID)
+# and ALLOWED_TELEGRAM_USER_IDS are auto-approved; everyone else starts 'pending'
+# until an admin approves them.
+
+def is_owner(uid: Optional[str]) -> bool:
+    return bool(OWNER_UID) and str(uid) == OWNER_UID
+
+
+async def get_access(uid: str) -> Optional[dict]:
+    rows = await _rows("SELECT * FROM app_access WHERE uid = :u", u=uid)
+    return rows[0] if rows else None
+
+
+async def is_admin(uid: str) -> bool:
+    if is_owner(uid):
+        return True
+    role = await _scalar(
+        "SELECT role FROM app_access WHERE uid = :u AND status = 'approved'", u=uid)
+    return role == "admin"
+
+
+async def current_admin(uid: str = Depends(current_uid)) -> str:
+    if not await is_admin(uid):
+        raise HTTPException(403, "только для администраторов")
+    return uid
+
+
+async def _is_active(uid: str) -> bool:
+    """Whether uid may currently use the app — checked live on each request so a
+    block/revoke ends an active session, not just the next login."""
+    if is_owner(uid):
+        return True
+    st = await _scalar("SELECT status FROM app_access WHERE uid = :u", u=uid)
+    return st == "approved"
+
+
+# Transaction-level lock key serializing admin-set mutations (last-admin guard).
+_ADMIN_LOCK = 78146565
+
+
+def _display_from(data: Optional[dict]) -> Optional[str]:
+    if not data:
+        return None
+    name = ((data.get("first_name") or "").strip() + " "
+            + (data.get("last_name") or "").strip()).strip()
+    return name or None
+
+
+async def _upsert_access(uid: str, *, status: str, role: str,
+                         data: Optional[dict] = None, decided: bool = False,
+                         display_name: Optional[str] = None,
+                         invited_by: Optional[str] = None) -> None:
+    if display_name is None:
+        display_name = _display_from(data)
+    username = (data.get("username") if data else None) or None
+    async with get_session() as s:
+        await s.execute(
+            text("""
+                INSERT INTO app_access (uid, status, role, display_name, username,
+                                        invited_by, decided_at)
+                VALUES (:uid, :status, :role, :dn, :un, :inv,
+                        CASE WHEN :dec THEN now() ELSE NULL END)
+                ON CONFLICT (uid) DO UPDATE SET
+                  status      = EXCLUDED.status,
+                  role        = EXCLUDED.role,
+                  display_name = COALESCE(EXCLUDED.display_name, app_access.display_name),
+                  username    = COALESCE(EXCLUDED.username, app_access.username),
+                  invited_by  = COALESCE(app_access.invited_by, EXCLUDED.invited_by),
+                  decided_at  = CASE WHEN :dec THEN now() ELSE app_access.decided_at END
+            """),
+            {"uid": uid, "status": status, "role": role, "dn": display_name,
+             "un": username, "inv": invited_by, "dec": decided},
+        )
+
+
+async def gate_login(uid: str, data: dict) -> str:
+    """Decide a login: returns 'approved' | 'pending' | 'blocked'.
+    First-time users are recorded as 'pending'."""
+    if is_owner(uid):
+        return "approved"
+    row = await get_access(uid)
+    # An explicit admin block wins over everything (including the env allowlist),
+    # so a blocked user cannot re-enter by being on ALLOWED_TELEGRAM_USER_IDS.
+    if row and row["status"] == "blocked":
+        return "blocked"
+    if uid in auth.ALLOWED:  # explicit env allowlist → auto-approve + persist
+        if not row or row["status"] != "approved":
+            await _upsert_access(uid, status="approved",
+                                 role=(row or {}).get("role") or "user",
+                                 data=data, decided=True)
+        return "approved"
+    if row is None:
+        await _upsert_access(uid, status="pending", role="user", data=data, decided=False)
+        return "pending"
+    return row["status"] if row["status"] in ("approved", "blocked", "pending") else "pending"
+
+
+def _access_public(row: dict, viewer_uid: str) -> dict:
+    def _iso(v):
+        return v.isoformat() if hasattr(v, "isoformat") else v
+    return {
+        "uid": row["uid"], "status": row["status"], "role": row["role"],
+        "display_name": row.get("display_name"), "username": row.get("username"),
+        "invited_by": row.get("invited_by"),
+        "requested_at": _iso(row.get("requested_at")),
+        "decided_at": _iso(row.get("decided_at")),
+        "is_owner": is_owner(row["uid"]), "is_self": row["uid"] == viewer_uid,
+    }
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     async with engine.begin() as conn:
         for stmt in (s.strip() for s in CREATE_SQL.split(";") if s.strip()):
             await conn.execute(text(stmt))
+        if OWNER_UID:  # the owner is always an approved admin and cannot be locked out
+            await conn.execute(
+                text("""
+                    INSERT INTO app_access (uid, status, role, decided_at)
+                    VALUES (:u, 'approved', 'admin', now())
+                    ON CONFLICT (uid) DO UPDATE
+                      SET status = 'approved', role = 'admin'
+                """),
+                {"u": OWNER_UID},
+            )
     if not IS_PROD:  # local dev convenience: seed demo data for the dev user
         dev = os.getenv("DEV_UID", "local")
         have = await _scalar("SELECT COUNT(*) FROM workouts WHERE user_id=:u", u=dev) or 0
@@ -174,8 +303,10 @@ async def auth_telegram(request: Request):
     if not auth.verify_telegram_login(data):
         raise HTTPException(401, "подпись не прошла проверку")
     uid = str(data.get("id"))
-    if not auth.is_allowed(uid):
-        raise HTTPException(403, "доступ не разрешён")
+    decision = await gate_login(uid, data)
+    if decision != "approved":
+        # 403 with the gate status so the client can show the right screen.
+        return JSONResponse({"status": decision}, status_code=403)
     resp = JSONResponse({"ok": True, "user_id": uid})
     resp.set_cookie(COOKIE, auth.make_session(uid), max_age=auth.SESSION_TTL,
                     httponly=True, secure=IS_PROD, samesite="lax", path="/")
@@ -192,6 +323,139 @@ async def auth_logout():
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(COOKIE, path="/")
     return resp
+
+
+# ────────────────────────── service (all users) ─────────────────────────────
+# Thin wrappers over the bot's maintenance helpers (stats / timezone / wipes).
+
+@app.get("/api/service/stats")
+async def service_stats(uid: str = Depends(current_uid)):
+    return await db.db_stats(uid)
+
+
+@app.get("/api/service/tz")
+async def service_tz_get(uid: str = Depends(current_uid)):
+    return {"tz": await tz.user_tz_name(uid)}
+
+
+class TzBody(BaseModel):
+    tz: str
+
+
+@app.post("/api/service/tz")
+async def service_tz_set(body: TzBody, uid: str = Depends(current_uid)):
+    name = (body.tz or "").strip()
+    try:
+        ZoneInfo(name)
+    except Exception:
+        raise HTTPException(422, "неизвестный часовой пояс")
+    await tz.set_user_tz(uid, name)
+    return {"tz": await tz.user_tz_name(uid)}
+
+
+# what -> (callable, takes_uid). 'aliases' is a global cache (no uid).
+_WIPE = {
+    "plans": (db.wipe_planned_workouts, True),
+    "history": (db.wipe_workouts, True),
+    "measurements": (db.wipe_measurements, True),
+    "photos": (db.wipe_photos, True),
+    "aliases": (db.wipe_exercise_aliases, False),
+    "all": (db.wipe_all_user_data, True),
+}
+
+
+@app.post("/api/service/wipe/{what}")
+async def service_wipe(what: str, uid: str = Depends(current_uid)):
+    entry = _WIPE.get(what)
+    if entry is None:
+        raise HTTPException(404, "неизвестная цель очистки")
+    fn, takes_uid = entry
+    deleted = await (fn(uid) if takes_uid else fn())
+    return {"deleted": deleted}
+
+
+# ───────────────────────── access management (admin) ────────────────────────
+
+@app.get("/api/admin/users")
+async def admin_users(uid: str = Depends(current_admin)):
+    rows = await _rows("""
+        SELECT uid, status, role, display_name, username, invited_by,
+               requested_at, decided_at
+        FROM app_access
+        ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+                 requested_at ASC
+    """)
+    return [_access_public(r, uid) for r in rows]
+
+
+class AdminUserCreate(BaseModel):
+    uid: str
+    display_name: Optional[str] = None
+
+
+@app.post("/api/admin/users")
+async def admin_user_add(body: AdminUserCreate, admin_uid: str = Depends(current_admin)):
+    new_uid = (body.uid or "").strip()
+    if not new_uid:
+        raise HTTPException(422, "нужен Telegram-ID")
+    if not new_uid.isdigit():
+        raise HTTPException(422, "Telegram-ID должен быть числом")
+    if is_owner(new_uid):
+        raise HTTPException(409, "это владелец — уже администратор")
+    existing = await get_access(new_uid)
+    role = "admin" if (existing and existing["role"] == "admin") else "user"
+    await _upsert_access(
+        new_uid, status="approved", role=role, decided=True,
+        display_name=(body.display_name or "").strip() or None, invited_by=admin_uid)
+    return _access_public(await get_access(new_uid), admin_uid)
+
+
+class AdminUserPatch(BaseModel):
+    status: Optional[str] = None
+    role: Optional[str] = None
+
+
+@app.patch("/api/admin/users/{target}")
+async def admin_user_patch(target: str, body: AdminUserPatch,
+                           admin_uid: str = Depends(current_admin)):
+    target = (target or "").strip()
+    if is_owner(target):
+        raise HTTPException(409, "владельца нельзя изменить")
+    row = await get_access(target)
+    if not row:
+        raise HTTPException(404, "пользователь не найден")
+    if body.status is not None and body.status not in ("pending", "approved", "blocked"):
+        raise HTTPException(422, "недопустимый статус")
+    if body.role is not None and body.role not in ("user", "admin"):
+        raise HTTPException(422, "недопустимая роль")
+    if body.status is None and body.role is None:
+        raise HTTPException(422, "нечего менять")
+    eff_status = body.status if body.status is not None else row["status"]
+    eff_role = body.role if body.role is not None else row["role"]
+    # Promotion to admin implies approval; a non-approved user holds no role
+    # (so blocking an admin actually revokes admin, and states stay consistent).
+    if body.role == "admin" and eff_status != "approved":
+        eff_status = "approved"
+    if eff_status != "approved":
+        eff_role = "user"
+    # Never strand the system without an admin (covers self-demote / self-block).
+    was_admin = row["status"] == "approved" and row["role"] == "admin"
+    will_admin = eff_status == "approved" and eff_role == "admin"
+    async with get_session() as s:
+        # Serialize admin-set mutations: count + update in one locked transaction
+        # so two concurrent demotions can't both pass the guard and strand 0 admins.
+        await s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ADMIN_LOCK})
+        if was_admin and not will_admin:
+            n = (await s.execute(text(
+                "SELECT COUNT(*) FROM app_access WHERE status='approved' AND role='admin'"
+            ))).scalar() or 0
+            if n <= 1:
+                raise HTTPException(409, "нельзя снять последнего администратора")
+        await s.execute(
+            text("UPDATE app_access SET status = :st, role = :rl, decided_at = now() "
+                 "WHERE uid = :u"),
+            {"st": eff_status, "rl": eff_role, "u": target})
+    return _access_public(await get_access(target), admin_uid)
 
 
 # ────────────────────────────── dashboard ───────────────────────────────────
