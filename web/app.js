@@ -649,13 +649,11 @@ const WIPE_CONFIRM = {
   history: ['Удалить всю историю тренировок?', 'Все записанные подходы и сессии будут удалены. Действие необратимо.'],
   measurements: ['Удалить все замеры тела?', 'Все сохранённые замеры (вес, обхваты) будут удалены. Действие необратимо.'],
   photos: ['Удалить все прогресс-фото?', 'Записи в дневнике (file_id и AI-описания) будут удалены. Сами файлы остаются в Telegram. Действие необратимо.'],
-  aliases: ['Очистить кэш AI-нормализации?', 'Сохранённые AI-разрешения имён упражнений будут удалены. В следующий раз каждое неизвестное название снова спросит у ИИ.'],
   all: ['ПОЛНЫЙ СБРОС', 'Удалит ВСЁ: планы, тренировки, замеры, фото. Действие необратимо. Точно?'],
 };
 const WIPE_DONE = {
   plans: n => `Удалено запланированных: ${n}`, history: n => `Удалено тренировок: ${n}`,
   measurements: n => `Удалено замеров: ${n}`, photos: n => `Удалено записей о фото: ${n}`,
-  aliases: n => `Очищено AI-алиасов: ${n}`,
   all: r => `Сброшено: планов ${r.planned}, трен. ${r.workouts}, замеров ${r.measurements}, фото ${r.photos}`,
 };
 
@@ -698,7 +696,6 @@ async function Settings() {
       <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('history')">Очистить историю</button>
       <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('measurements')">Очистить замеры</button>
       <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('photos')">Очистить фото</button>
-      <button class="btn ghost sm" style="margin-top:8px" onclick="wipeAsk('aliases')">Очистить AI-кэш</button>
       <button class="btn danger sm" style="margin-top:12px" onclick="wipeAsk('all')">⚠️ ПОЛНЫЙ СБРОС</button>
     </div>
     ${admin ? adminSection(admin) : ''}
@@ -774,7 +771,18 @@ function adminSection(users) {
   return `<div class="muted small" style="margin:18px 0 6px">🔑 Управление доступом</div>
     <div class="card"><div class="small muted" style="margin-bottom:4px">Заявки${pending.length ? ' · ' + pending.length : ''}</div>${pendRows}</div>
     <div class="card"><div class="small muted" style="margin-bottom:4px">Пользователи</div>${userRows}</div>
-    <button class="btn ghost sm" onclick="accAddSheet()">➕ Добавить пользователя</button>`;
+    <button class="btn ghost sm" onclick="accAddSheet()">➕ Добавить пользователя</button>
+    <div class="muted small" style="margin:16px 0 6px">🧹 Обслуживание (админ)</div>
+    <div class="card"><button class="btn ghost sm" onclick="accWipeAliases()">Очистить AI-кэш упражнений</button>
+      <div class="small muted" style="margin-top:6px">Глобальный кэш имён — общий для всех пользователей.</div></div>`;
+}
+function accWipeAliases() {
+  confirmSheet('Очистить кэш AI-нормализации?',
+    'Сохранённые AI-разрешения имён упражнений будут удалены (глобально, для всех). В следующий раз каждое неизвестное название снова спросит у ИИ.',
+    'Да, очистить', true, async () => {
+      try { const r = await api('/admin/wipe-aliases', 'POST'); toast('✅ Очищено AI-алиасов: ' + r.deleted); }
+      catch (e) { toast(e.message || 'не удалось'); }
+    });
 }
 function _accFind(uid) { return (window._ADMIN || []).find(x => x.uid === uid); }
 function accMenu(uid) {

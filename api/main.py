@@ -402,13 +402,13 @@ async def service_tz_coords(body: TzCoords, uid: str = Depends(current_uid)):
     return {"tz": name}
 
 
-# what -> (callable, takes_uid). 'aliases' is a global cache (no uid).
+# what -> (callable, takes_uid). All per-user. The global alias cache is wiped
+# via the admin-only endpoint below (it affects every user, not just the caller).
 _WIPE = {
     "plans": (db.wipe_planned_workouts, True),
     "history": (db.wipe_workouts, True),
     "measurements": (db.wipe_measurements, True),
     "photos": (db.wipe_photos, True),
-    "aliases": (db.wipe_exercise_aliases, False),
     "all": (db.wipe_all_user_data, True),
 }
 
@@ -505,6 +505,14 @@ async def admin_user_patch(target: str, body: AdminUserPatch,
                  "WHERE uid = :u"),
             {"st": eff_status, "rl": eff_role, "u": target})
     return _access_public(await get_access(target), admin_uid)
+
+
+@app.post("/api/admin/wipe-aliases")
+async def admin_wipe_aliases(admin_uid: str = Depends(current_admin)):
+    """The AI exercise-alias cache is global (shared by all users), so only an
+    admin may clear it."""
+    n = await db.wipe_exercise_aliases()
+    return {"deleted": n}
 
 
 # ────────────────────────────── dashboard ───────────────────────────────────
