@@ -14,14 +14,15 @@ Reuses:
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 from datetime import date, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -1239,6 +1240,60 @@ async def del_measurement(mid: int, uid: str = Depends(current_uid)):
     await _own_measurement(uid, mid)
     await db.delete_measurement(mid)
     return {"ok": True}
+
+
+# ──────────────────────────────── reports ───────────────────────────────────
+
+@app.get("/api/reports")
+async def period_report(
+    days: Optional[int] = None,
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    uid: str = Depends(current_uid),
+):
+    """Streams a PDF report for a period: presets (?days=7|14|30|60) or an
+    explicit range (?from=YYYY-MM-DD&to=YYYY-MM-DD)."""
+    today = await today_for(uid)
+    if from_ or to:
+        try:
+            fd = date.fromisoformat((from_ or "").strip())
+            td = date.fromisoformat((to or "").strip())
+        except ValueError:
+            raise HTTPException(422, "bad date, expected YYYY-MM-DD")
+    else:
+        n = days if (days and 1 <= days <= 366) else 30
+        td, fd = today, today - timedelta(days=n)
+    if fd > td:
+        raise HTTPException(422, "from must be <= to")
+    try:
+        from app.bot.services.report_builder import build_period_report
+    except Exception:
+        raise HTTPException(503, "отчёты недоступны")
+    # A bot lets the report pull the user's Telegram-stored photos; without a
+    # valid token the report still builds (photos are skipped). Local web photos
+    # (phase 3.6) are read from disk by the builder when telegram_file_id is null.
+    bot = None
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    try:
+        if token:
+            from aiogram import Bot
+            bot = Bot(token=token)
+    except Exception:
+        bot = None
+    try:
+        pdf = await build_period_report(bot, uid, fd, td)
+    except Exception as e:
+        raise HTTPException(500, f"ошибка построения отчёта: {str(e)[:200]}")
+    finally:
+        if bot is not None:
+            try:
+                await bot.session.close()
+            except Exception:
+                pass
+    fn = f"report_{fd.isoformat()}_{td.isoformat()}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 # ──────────────────────────────── seed (dev) ────────────────────────────────

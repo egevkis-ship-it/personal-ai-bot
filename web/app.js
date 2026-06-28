@@ -44,6 +44,7 @@ async function go(tab, param) {
     if (tab === 'plans') return Plans();
     if (tab === 'planEdit') return PlanEdit(param);
     if (tab === 'settings') return Settings();
+    if (tab === 'reports') return Reports();
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -122,6 +123,7 @@ async function Home() {
       <div class="tile" onclick="repeatLast(${d.last_workout?d.last_workout.id:0})">🔁<div class="small" style="margin-top:6px">Повторить прошлую</div></div>
       <div class="tile" onclick="go('train')">📅<div class="small" style="margin-top:6px">Тренировки</div></div>
     </div>
+    <button class="btn ghost" style="margin-top:12px" onclick="go('reports')">📄 Отчёты (PDF)</button>
     ${lm ? `<div class="card" style="margin-top:12px"><div class="row sp"><span class="muted small">Последний замер</span><span class="small muted">${lm.taken_on}</span></div>
       <div style="font-size:22px;font-weight:700;margin-top:4px">${fmt(lm.weight_kg)} <span class="small muted">кг</span></div></div>` : ''}`;
 }
@@ -388,6 +390,36 @@ async function WorkoutDetail(id) {
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
     <button class="btn ghost" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>`;
+}
+
+// ── Reports (PDF) ──────────────────────────────────────────────────────────
+function Reports() {
+  document.getElementById('tabbar').style.display = '';
+  const t = todayISO();
+  const from30 = new Date(new Date(t + 'T00:00:00').getTime() - 30 * 864e5);
+  const fromDefault = new Date(from30.getTime() - from30.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  view.innerHTML = `<span class="back" onclick="go('home')">‹ Главная</span><h1>Отчёты</h1>
+    <div class="muted small" style="margin-bottom:12px">PDF за период: тренировки, тоннаж, замеры и фото.</div>
+    <div class="card">
+      <button class="btn ghost sm" onclick="openReport('days=7')">За неделю</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="openReport('days=14')">За 2 недели</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="openReport('days=30')">За месяц</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="openReport('days=60')">За 2 месяца</button>
+    </div>
+    <div class="muted small" style="margin:14px 0 6px">Произвольный период</div>
+    <div class="card">
+      <div class="mfield" style="margin-bottom:8px"><label>С</label><input id="rFrom" type="date" value="${fromDefault}"></div>
+      <div class="mfield" style="margin-bottom:10px"><label>По</label><input id="rTo" type="date" value="${t}"></div>
+      <button class="btn sm" onclick="openReportCustom()">📄 Сформировать PDF</button>
+    </div>
+    <div class="muted small" style="margin-top:10px">PDF откроется в новой вкладке/скачается.</div>`;
+}
+function openReport(q) { toast('Готовлю PDF…'); window.open('/api/reports?' + q, '_blank'); }
+function openReportCustom() {
+  const f = document.getElementById('rFrom').value, t = document.getElementById('rTo').value;
+  if (!f || !t) return toast('Укажите период');
+  if (f > t) return toast('«С» должно быть раньше «По»');
+  openReport(`from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`);
 }
 
 // ── Measurements ──────────────────────────────────────────────────────────
