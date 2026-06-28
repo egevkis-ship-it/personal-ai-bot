@@ -128,13 +128,16 @@ async function Home() {
         <div style="font-size:20px;font-weight:700;margin-top:2px">${d.week_workouts} ${plural(d.week_workouts, 'тренировка', 'тренировки', 'тренировок')}</div></div>
       <div style="text-align:right"><div class="muted small">тоннаж</div>
         <div style="font-size:18px;font-weight:700">${(d.week_tonnage || 0).toLocaleString('ru-RU')} <span class="small muted">кг</span></div></div></div>
-    ${streak > 0 ? `<div class="pill ok" style="margin-top:8px">🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')}</div>` : ''}</div>`;
+    ${streak > 0 ? `<div class="pill ok" style="margin-top:8px">🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')}</div>` : ''}
+    ${d.weekly_goal ? `<div class="small muted" style="margin-top:6px">Цель недели: ${Math.min(d.week_workouts, d.weekly_goal)}/${d.weekly_goal}${d.week_workouts >= d.weekly_goal ? ' ✅' : ''}</div>` : ''}</div>`;
   const trend = d.weight_trend || [];
   const last_w = trend.length ? trend[trend.length - 1].weight_kg : (lm ? lm.weight_kg : null);
   const delta = trend.length >= 2 ? Math.round((trend[trend.length - 1].weight_kg - trend[0].weight_kg) * 10) / 10 : null;
+  const toGoal = (d.target_weight != null && last_w != null) ? Math.round((last_w - d.target_weight) * 10) / 10 : null;
   const weightCard = last_w != null ? `<div class="card" onclick="go('measure')" style="cursor:pointer">
-    <div class="row sp"><span class="muted small">Вес</span>
+    <div class="row sp"><span class="muted small">Вес${d.target_weight != null ? ` · цель ${fmt(d.target_weight)} кг` : ''}</span>
       <span class="small">${fmt(last_w)} кг${delta != null && delta !== 0 ? ` <span class="muted">(${delta > 0 ? '+' : ''}${fmt(delta)})</span>` : ''}</span></div>
+    ${toGoal != null && toGoal !== 0 ? `<div class="small muted" style="margin-top:2px">до цели ${fmt(Math.abs(toGoal))} кг ${toGoal > 0 ? '↓' : '↑'}</div>` : (toGoal === 0 ? '<div class="small" style="margin-top:2px;color:var(--success)">цель достигнута 🎯</div>' : '')}
     ${trend.length >= 2 ? spark(trend.map(p => p.weight_kg)) : ''}</div>` : '';
   const prs = d.recent_prs || [];
   const prCard = prs.length ? `<div class="card"><div class="muted small" style="margin-bottom:4px">🏆 Свежие рекорды</div>
@@ -1237,10 +1240,11 @@ async function Settings() {
   document.getElementById('tabbar').style.display = '';
   view.innerHTML = `<span class="back" onclick="go('home')">‹ Главная</span><h1>Настройки</h1>
     <div id="setBody"><div class="card muted small">Загрузка…</div></div>`;
-  let tzr, s, admin = null;
+  let tzr, s, cfg = {}, admin = null;
   try {
     tzr = await api('/service/tz');
     s = await api('/service/stats');
+    try { cfg = await api('/settings'); } catch { cfg = {}; }
     try { admin = await api('/admin/users'); }            // 403 → not an admin (hide section)
     catch (e) { if (e.status === 401) throw e; admin = null; }
   } catch (e) {
@@ -1266,6 +1270,12 @@ async function Settings() {
       ${statRow('Фото', s.photos_total || 0)}
       ${statRow('AI-алиасов', s.aliases_total || 0)}
     </div>
+    <div class="muted small" style="margin:14px 0 6px">🎯 Цели</div>
+    <div class="card">
+      <div class="mfield" style="margin-bottom:8px"><label>Целевой вес, кг</label><input id="goalWeight" type="number" step="0.1" value="${cfg.target_weight != null ? cfg.target_weight : ''}" placeholder="напр. 78"></div>
+      <div class="mfield" style="margin-bottom:10px"><label>Тренировок в неделю</label><input id="goalWeekly" type="number" min="0" max="14" value="${cfg.weekly_goal != null ? cfg.weekly_goal : ''}" placeholder="напр. 3"></div>
+      <button class="btn sm" onclick="saveGoals()">Сохранить цели</button>
+    </div>
     <div class="muted small" style="margin:14px 0 6px">📦 Экспорт данных</div>
     <div class="card">
       <button class="btn ghost sm" onclick="window.open('/api/export?format=json','_blank')">Скачать всё (JSON)</button>
@@ -1284,6 +1294,15 @@ async function Settings() {
     <button class="btn ghost" style="margin-top:20px" onclick="logout()">Выйти</button>`;
   renderInstallButton();
 }
+async function saveGoals() {
+  const tw = document.getElementById('goalWeight').value.trim();
+  const wg = document.getElementById('goalWeekly').value.trim();
+  const body = wg === '' ? { weekly_goal: 0 } : { weekly_goal: parseInt(wg, 10) };
+  if (tw === '') body.clear_target = true; else body.target_weight = parseFloat(tw);
+  try { await api('/settings', 'PATCH', body); toast('Цели сохранены'); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+
 // ── PWA install (Add to Home Screen) ────────────────────────────────────────
 let _installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _installEvt = e; renderInstallButton(); });

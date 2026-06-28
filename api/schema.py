@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
     tz_name     TEXT        NOT NULL DEFAULT 'UTC',
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Goals + unit preference (phase G). Idempotent — no-ops if already present.
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS target_weight NUMERIC;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS weekly_goal   INTEGER;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS unit          TEXT NOT NULL DEFAULT 'kg';
 
 CREATE TABLE IF NOT EXISTS exercise_aliases (
     id              SERIAL PRIMARY KEY,

@@ -684,11 +684,50 @@ async def dashboard(uid: str = Depends(current_uid)):
                   for r in pr_rows]
     upcoming = await db.get_planned_workouts_range(uid, today + timedelta(days=1), today + timedelta(days=21))
     next_plan = upcoming[0] if upcoming else None
+    srow = await _rows("SELECT target_weight, weekly_goal, unit FROM user_settings WHERE user_id=:u", u=uid)
+    sg = srow[0] if srow else {}
     return {"today_plan": plans[0] if plans else None, "active_workout": active,
             "last_measurement": last_m, "week_workouts": week_count or 0,
             "last_workout": last_workout, "week_tonnage": round(_to_f(week_tonnage) or 0, 1),
             "streak": await _week_streak(uid, today), "weight_trend": weight_trend,
-            "recent_prs": recent_prs, "next_plan": next_plan}
+            "recent_prs": recent_prs, "next_plan": next_plan,
+            "weekly_goal": sg.get("weekly_goal"), "target_weight": _to_f(sg.get("target_weight")),
+            "unit": sg.get("unit") or "kg"}
+
+
+class SettingsPatch(BaseModel):
+    target_weight: Optional[float] = None
+    weekly_goal: Optional[int] = None
+    unit: Optional[str] = None
+    clear_target: bool = False
+
+
+@app.get("/api/settings")
+async def get_settings(uid: str = Depends(current_uid)):
+    rows = await _rows("SELECT tz_name, target_weight, weekly_goal, unit FROM user_settings WHERE user_id=:u", u=uid)
+    r = rows[0] if rows else {}
+    return {"tz_name": r.get("tz_name") or "UTC", "target_weight": _to_f(r.get("target_weight")),
+            "weekly_goal": r.get("weekly_goal"), "unit": r.get("unit") or "kg"}
+
+
+@app.patch("/api/settings")
+async def patch_settings(body: SettingsPatch, uid: str = Depends(current_uid)):
+    sets: list[str] = []
+    params: dict = {"u": uid}
+    if body.clear_target:
+        sets.append("target_weight = NULL")
+    elif body.target_weight is not None:
+        sets.append("target_weight = :tw"); params["tw"] = _opt_float(body.target_weight, "target_weight", 0, 1000)
+    if body.weekly_goal is not None:
+        sets.append("weekly_goal = :wg"); params["wg"] = _opt_int(body.weekly_goal, "weekly_goal", 0, 14)
+    if body.unit is not None:
+        sets.append("unit = :un"); params["un"] = body.unit if body.unit in ("kg", "lb") else "kg"
+    if not sets:
+        return {"ok": True}
+    async with get_session() as s:
+        await s.execute(text("INSERT INTO user_settings (user_id) VALUES (:u) ON CONFLICT (user_id) DO NOTHING"), {"u": uid})
+        await s.execute(text(f"UPDATE user_settings SET {', '.join(sets)}, updated_at = now() WHERE user_id = :u"), params)
+    return {"ok": True}
 
 
 # ────────────────────────────── workouts ────────────────────────────────────
