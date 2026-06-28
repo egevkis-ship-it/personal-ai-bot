@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS progress_photos (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Per-user daily AI call counter (rate limit). Owned by the web API only.
+CREATE TABLE IF NOT EXISTS ai_usage (
+    uid    TEXT    NOT NULL,
+    day    DATE    NOT NULL,
+    count  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (uid, day)
+);
+
 -- Web-app access control (gate + roles). Owned by the web API only.
 CREATE TABLE IF NOT EXISTS app_access (
     uid          TEXT        PRIMARY KEY,

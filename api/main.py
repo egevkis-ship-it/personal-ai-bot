@@ -41,6 +41,10 @@ WEB_ORIGIN = os.getenv("WEB_ORIGIN", "http://localhost:8000")
 BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
 ALLOW_SEED = (not IS_PROD) or os.getenv("SEED") == "1"
 OWNER_UID = os.getenv("OWNER_TELEGRAM_USER_ID", "").strip()
+try:
+    AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "100"))
+except ValueError:
+    AI_DAILY_LIMIT = 100
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 COOKIE = "session"
 
@@ -143,6 +147,37 @@ async def today_for(uid: str) -> date:
     """User-local 'today' (mirrors the bot's tz.today), not the container's UTC
     date — so 'today'/'today's plan' are correct for users outside UTC."""
     return await tz.today(uid)
+
+
+# ───────────────────────────── AI rate limit ────────────────────────────────
+
+async def check_and_bump_ai(uid: str, limit: int | None = None) -> int:
+    """Atomically count one AI call for the user's (local) day. Raises 429 once
+    the daily limit is exceeded. Use before any guaranteed AI call."""
+    limit = AI_DAILY_LIMIT if limit is None else limit
+    day = await today_for(uid)
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                INSERT INTO ai_usage (uid, day, count) VALUES (:u, :d, 1)
+                ON CONFLICT (uid, day) DO UPDATE SET count = ai_usage.count + 1
+                RETURNING count
+            """),
+            {"u": uid, "d": day},
+        )
+        n = r.scalar_one()
+    if n > limit:
+        raise HTTPException(429, "дневной лимит AI исчерпан")
+    return n
+
+
+async def _ai_over_limit(uid: str, limit: int | None = None) -> bool:
+    """Read-only check (no bump) — for soft-gating opportunistic AI work that
+    must not 429 a save (e.g. exercise-name normalization)."""
+    limit = AI_DAILY_LIMIT if limit is None else limit
+    day = await today_for(uid)
+    n = await _scalar("SELECT count FROM ai_usage WHERE uid = :u AND day = :d", u=uid, d=day)
+    return (n or 0) >= limit
 
 
 # ───────────────────────────── access control ───────────────────────────────
@@ -725,6 +760,7 @@ async def workout_coach(wid: int, uid: str = Depends(current_uid)):
     Degrades to a deterministic summary if Opus is unreachable; only hard
     failures (import/DB) surface as 503."""
     await _own_workout(uid, wid)
+    await check_and_bump_ai(uid)
     try:
         from app.bot.services.coach import build_coach_facts, opus_coach_summary
     except Exception:
@@ -769,7 +805,7 @@ async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
         return {"ids": ids}
     # Explicit free-text name → AI-normalize (catalog key is already canonical).
     if body.exercise_name:
-        name = await _canonical_name(body.exercise_name)
+        name = await _canonical_name(body.exercise_name, uid)
     else:
         name = key_to_name(body.exercise_key)
     if not name:
@@ -944,15 +980,23 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
     return out
 
 
-async def _canonical_name(raw: str) -> str:
+async def _canonical_name(raw: str, uid: str) -> str:
     """AI-normalize a free-text exercise name to its canonical form (self-learning
-    alias cache). Any failure (no AI key, network, etc.) → keep the original name."""
+    alias cache), under the per-user AI cap. Over the cap we skip AI and keep the
+    original name; any failure also falls back — never blocks the save."""
     raw = (raw or "").strip()
     if not raw:
         return raw
     try:
+        if await _ai_over_limit(uid):  # don't start new AI work past the daily cap
+            return raw
         from app.bot.services.exercise_catalog import resolve_or_register
         res = await resolve_or_register(raw)
+        if (res or {}).get("source") == "ai":
+            try:
+                await check_and_bump_ai(uid)  # count the actual AI call
+            except HTTPException:
+                pass
         canon = ((res or {}).get("canonical") or "").strip()
         if canon and canon.lower() != raw.lower():
             return canon
@@ -961,10 +1005,10 @@ async def _canonical_name(raw: str) -> str:
     return raw
 
 
-async def _normalize_plan_exercises(exs: list[dict]) -> list[dict]:
+async def _normalize_plan_exercises(exs: list[dict], uid: str) -> list[dict]:
     for e in exs:
         if e.get("name"):
-            e["name"] = await _canonical_name(e["name"])
+            e["name"] = await _canonical_name(e["name"], uid)
     return exs
 
 
@@ -1054,7 +1098,7 @@ async def plan_detail(pid: int, uid: str = Depends(current_uid)):
 @app.post("/api/plans")
 async def create_plan(body: CreatePlan, uid: str = Depends(current_uid)):
     d = _resolve_plan_date(body.date, body.weekday, await today_for(uid))
-    exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]))
+    exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]), uid)
     pid = await db.create_planned_workout(uid, d, (body.focus_label or None), exs)
     if body.notes:
         await db.update_planned_workout_notes(pid, body.notes)
@@ -1069,7 +1113,7 @@ async def update_plan(pid: int, body: UpdatePlan, uid: str = Depends(current_uid
         raise HTTPException(404, "plan not found")
     exs = None
     if body.exercises is not None:
-        exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]))
+        exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]), uid)
     await db.update_planned_workout(
         pid,
         focus_label=body.focus_label,
@@ -1100,6 +1144,7 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
     Does NOT save — the client confirms via POST /api/plans/bulk."""
     if not (body.text or "").strip():
         raise HTTPException(422, "пустой текст")
+    await check_and_bump_ai(uid)
     try:
         from app.bot.services.ai_parser import parse_plan_text
     except Exception:
@@ -1148,7 +1193,7 @@ async def create_plans_bulk(body: BulkPlans, uid: str = Depends(current_uid)):
     today = await today_for(uid)
     for day in body.days:
         d = _resolve_plan_date(day.date, day.weekday, today)
-        exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in day.exercises]))
+        exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in day.exercises]), uid)
         pid = await db.create_planned_workout(uid, d, (day.focus_label or None), exs)
         if day.notes:
             await db.update_planned_workout_notes(pid, day.notes)
