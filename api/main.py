@@ -982,6 +982,54 @@ async def exercise_history(key: str, limit: int = 10, uid: str = Depends(current
     return {"name": name, "history": rows, "recommendation": rec}
 
 
+@app.get("/api/exercises/{key}/stats")
+async def exercise_stats(key: str, uid: str = Depends(current_uid)):
+    """Personal records + per-session progression for one exercise (owner-scoped).
+
+    PRs over all working sets: heaviest weight, best single-set volume (weight×reps),
+    and estimated 1RM (Epley: weight·(1+reps/30)). `series` is one point per session
+    date (top working weight + total volume) for a progression chart. Accepts either
+    an exercise key or a raw name as `{key}` (matched case-insensitively by name)."""
+    name = key_to_name(key) or key
+    rows = await _rows(
+        """
+        SELECT w.workout_date AS date, es.weight_kg AS weight, es.reps AS reps
+        FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
+        WHERE w.user_id = :u AND lower(es.exercise_name) = lower(:n)
+          AND es.is_warmup = false
+          AND es.weight_kg IS NOT NULL AND es.reps IS NOT NULL AND es.reps > 0
+        ORDER BY w.workout_date ASC, es.set_number ASC
+        """, u=uid, n=name)
+    pr_weight = pr_vol = pr_1rm = None
+    by_date: dict[str, dict] = {}
+    for r in rows:
+        wt = _to_f(r["weight"]) or 0.0
+        reps = int(r["reps"])
+        d_iso = r["date"].isoformat()
+        vol = wt * reps
+        epley = wt * (1 + reps / 30.0)
+        if pr_weight is None or wt > pr_weight["weight"]:
+            pr_weight = {"weight": wt, "reps": reps, "date": d_iso}
+        if pr_vol is None or vol > pr_vol["value"]:
+            pr_vol = {"value": round(vol, 1), "weight": wt, "reps": reps, "date": d_iso}
+        if pr_1rm is None or epley > pr_1rm["value"]:
+            pr_1rm = {"value": round(epley, 1), "weight": wt, "reps": reps, "date": d_iso}
+        slot = by_date.setdefault(d_iso, {"date": d_iso, "top_weight": 0.0, "volume": 0.0})
+        slot["top_weight"] = max(slot["top_weight"], wt)
+        slot["volume"] += vol
+    series = [
+        {"date": s["date"], "top_weight": round(s["top_weight"], 1), "volume": round(s["volume"], 1)}
+        for s in by_date.values()
+    ]
+    return {
+        "name": name,
+        "key": name_to_key(name),
+        "sessions": len(series),
+        "pr": {"weight": pr_weight, "volume": pr_vol, "one_rm": pr_1rm},
+        "series": series,
+    }
+
+
 # ──────────────────────────────── plans ─────────────────────────────────────
 
 _WEEKDAY_ORDER = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]

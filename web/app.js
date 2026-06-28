@@ -47,6 +47,7 @@ async function go(tab, param) {
     if (tab === 'settings') return Settings();
     if (tab === 'reports') return Reports();
     if (tab === 'photos') return Photos();
+    if (tab === 'exercise') return ExerciseDetail(param);
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -177,7 +178,8 @@ function renderActive(w) {
       : (ex.target ? `цель ${ex.target_sets || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) : ''}` : 'нет подходов');
     return `<div class="card list-item" style="${next ? 'border:2px solid var(--info)' : ''}" onclick="openExercise(${w.id},${i})">
       <div class="ic">${done ? '✅' : next ? '▶️' : '⚪️'}</div>
-      <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div><span class="muted">›</span></div>`;
+      <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div>
+      <span class="muted" style="padding:4px 8px;cursor:pointer" title="Прогресс упражнения" onclick="event.stopPropagation();exDetailIdx(${i})">📈</span></div>`;
   }).join('');
   view.innerHTML = `<div class="row sp"><span class="back" onclick="go('home')">‹ Главная</span><span class="muted small" onclick="workoutMenu(${w.id})" style="cursor:pointer">···</span></div>
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2>
@@ -474,13 +476,73 @@ async function History() {
 }
 async function WorkoutDetail(id) {
   const w = await api('/workouts/' + id);
-  const ex = w.exercises.filter(e => e.sets.length).map(e => `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-    <b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>`).join('');
+  window._WDid = id; window._WDex = w.exercises.filter(e => e.sets.length);
+  const ex = window._WDex.map((e, idx) => `<div class="row sp" style="padding:8px 0;border-bottom:1px solid var(--line)">
+    <div style="flex:1"><b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>
+    <span class="muted" style="cursor:pointer;padding:4px 6px" title="Прогресс упражнения" onclick="exDetailWD(${idx})">📈</span></div>`).join('');
   view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span>
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${w.workout_date}</div>
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
     <button class="btn ghost" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>`;
+}
+
+// ── Exercise progress (charts + PR) ─────────────────────────────────────────
+function shortDate(iso) { return iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) : ''; }
+// Simple line chart with axes (extends spark for a labelled progression view).
+function lineChart(pts, color = 'var(--info)') {
+  if (!pts.length) return '<div class="muted small">нет данных</div>';
+  const W = 300, H = 130, padL = 34, padR = 10, padT = 10, padB = 20;
+  const vals = pts.map(p => p.value);
+  let mn = Math.min(...vals), mx = Math.max(...vals);
+  if (mn === mx) { mn -= 1; mx += 1; }
+  const rng = mx - mn;
+  const x = i => padL + (pts.length <= 1 ? (W - padL - padR) / 2 : (i / (pts.length - 1)) * (W - padL - padR));
+  const y = v => padT + (1 - (v - mn) / rng) * (H - padT - padB);
+  const poly = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+  const dots = pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3" fill="${color}"/>`).join('');
+  const ax = 'font-size:9px;fill:var(--muted)';
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:340px">
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="var(--line)"/>
+    <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" stroke="var(--line)"/>
+    ${pts.length > 1 ? `<polyline points="${poly}" fill="none" stroke="${color}" stroke-width="2"/>` : ''}${dots}
+    <text x="2" y="${padT + 7}" style="${ax}">${fmt(mx)}</text>
+    <text x="2" y="${H - padB + 2}" style="${ax}">${fmt(mn)}</text>
+    <text x="${padL}" y="${H - 5}" style="${ax}">${esc(pts[0].label)}</text>
+    ${pts.length > 1 ? `<text x="${W - padR}" y="${H - 5}" text-anchor="end" style="${ax}">${esc(pts[pts.length - 1].label)}</text>` : ''}
+  </svg>`;
+}
+// Entry points stash the source screen so "back" returns there.
+function exDetailIdx(i) { const ex = window._WO && window._WO.exercises[i]; if (ex) { STATE.exFrom = ['active', window._WO.id]; go('exercise', ex.key || ex.name); } }
+function exDetailWD(i) { const ex = window._WDex && window._WDex[i]; if (ex) { STATE.exFrom = ['workout', window._WDid]; go('exercise', ex.key || ex.name); } }
+function exBack() { const f = STATE.exFrom; if (f) go(f[0], f[1]); else go('home'); }
+async function ExerciseDetail(keyOrName) {
+  document.getElementById('tabbar').style.display = '';
+  let d;
+  try { d = await api('/exercises/' + encodeURIComponent(keyOrName) + '/stats'); }
+  catch (e) { if (e.code === 401) throw e; view.innerHTML = `<span class="back" onclick="exBack()">‹ Назад</span><div class="card">Ошибка: ${esc(e.message)}</div>`; return; }
+  const pr = d.pr || {};
+  const prCard = (label, p, val) => p ? `<div class="card" style="flex:1;min-width:0;text-align:center;padding:12px 4px;margin:0">
+    <div style="font-size:17px;font-weight:700;white-space:nowrap">${val(p)}</div>
+    <div class="small muted">${label}</div><div class="small muted" style="margin-top:2px">${shortDate(p.date)}</div></div>` : '';
+  const series = d.series || [];
+  const weightPts = series.map(s => ({ label: shortDate(s.date), value: s.top_weight }));
+  const volPts = series.map(s => ({ label: shortDate(s.date), value: s.volume }));
+  view.innerHTML = `<span class="back" onclick="exBack()">‹ Назад</span>
+    <h2 style="margin-bottom:12px">${esc(d.name)}</h2>
+    ${series.length ? `
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        ${prCard('рекорд веса', pr.weight, p => fmt(p.weight) + ' кг')}
+        ${prCard('1ПМ (оценка)', pr.one_rm, p => fmt(p.value) + ' кг')}
+        ${prCard('вес×повт', pr.volume, p => fmt(p.value))}
+      </div>
+      <div class="muted small" style="margin:4px 0 2px">Рабочий вес по сессиям</div>
+      <div class="card" style="text-align:center">${lineChart(weightPts, 'var(--info)')}</div>
+      <div class="muted small" style="margin:12px 0 2px">Объём (тоннаж) по сессиям</div>
+      <div class="card" style="text-align:center">${lineChart(volPts, '#3fb950')}</div>
+      <div class="muted small" style="margin:12px 0 2px">История · ${d.sessions} ${d.sessions === 1 ? 'сессия' : 'сессий'}</div>
+      <div class="card">${series.slice().reverse().map(s => `<div class="row sp" style="padding:5px 0;border-bottom:1px solid var(--line)"><span>${shortDate(s.date)}</span><span class="muted small">топ ${fmt(s.top_weight)} кг · объём ${fmt(s.volume)}</span></div>`).join('')}</div>
+    ` : `<div class="card muted">Пока нет рабочих подходов с весом. Запиши пару подходов — здесь появятся графики прогресса и личные рекорды.</div>`}`;
 }
 
 // ── Reports (PDF) ──────────────────────────────────────────────────────────
