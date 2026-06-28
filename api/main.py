@@ -13,6 +13,7 @@ Reuses:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date, timedelta
 from typing import Optional
@@ -353,6 +354,21 @@ async def service_tz_set(body: TzBody, uid: str = Depends(current_uid)):
     return {"tz": await tz.user_tz_name(uid)}
 
 
+class TzCoords(BaseModel):
+    lat: float
+    lon: float
+
+
+@app.post("/api/service/tz/coords")
+async def service_tz_coords(body: TzCoords, uid: str = Depends(current_uid)):
+    # timezonefinder is sync + CPU-heavy → keep it off the event loop.
+    name = await asyncio.to_thread(tz.tz_from_coords, body.lat, body.lon)
+    if not name:
+        raise HTTPException(422, "не удалось определить пояс по координатам")
+    await tz.set_user_tz(uid, name)
+    return {"tz": name}
+
+
 # what -> (callable, takes_uid). 'aliases' is a global cache (no uid).
 _WIPE = {
     "plans": (db.wipe_planned_workouts, True),
@@ -658,6 +674,25 @@ async def workout_summary(uid: str, wid: int, w: dict) -> dict:
     return {"tonnage": tonnage, "set_count": len(working), "summary": txt}
 
 
+@app.get("/api/workouts/{wid}/coach")
+async def workout_coach(wid: int, uid: str = Depends(current_uid)):
+    """Post-workout AI coach: numeric facts (local DB) phrased by Opus.
+    Degrades to a deterministic summary if Opus is unreachable; only hard
+    failures (import/DB) surface as 503."""
+    if not await db.get_workout(wid):
+        raise HTTPException(404, "workout not found")
+    try:
+        from app.bot.services.coach import build_coach_facts, opus_coach_summary
+    except Exception:
+        raise HTTPException(503, "AI-коуч недоступен")
+    try:
+        facts = await build_coach_facts(uid, wid)
+        summary = await opus_coach_summary(facts)
+    except Exception as e:
+        raise HTTPException(503, f"AI-разбор недоступен: {str(e)[:200]}")
+    return {"summary": summary, "facts": facts}
+
+
 # ──────────────────────────────── sets ──────────────────────────────────────
 
 class AddSet(BaseModel):
@@ -689,7 +724,11 @@ async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
                        superset_group=r.superset_group, is_warmup=r.is_warmup,
                        is_failure=r.is_failure, notes=r.notes))
         return {"ids": ids}
-    name = body.exercise_name or key_to_name(body.exercise_key)
+    # Explicit free-text name → AI-normalize (catalog key is already canonical).
+    if body.exercise_name:
+        name = await _canonical_name(body.exercise_name)
+    else:
+        name = key_to_name(body.exercise_key)
     if not name:
         raise HTTPException(422, "нужно упражнение")
     sid = await db.add_set(wid, name, weight_kg=body.weight_kg, reps=body.reps,
@@ -822,6 +861,30 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
     return out
 
 
+async def _canonical_name(raw: str) -> str:
+    """AI-normalize a free-text exercise name to its canonical form (self-learning
+    alias cache). Any failure (no AI key, network, etc.) → keep the original name."""
+    raw = (raw or "").strip()
+    if not raw:
+        return raw
+    try:
+        from app.bot.services.exercise_catalog import resolve_or_register
+        res = await resolve_or_register(raw)
+        canon = ((res or {}).get("canonical") or "").strip()
+        if canon and canon.lower() != raw.lower():
+            return canon
+    except Exception:
+        pass
+    return raw
+
+
+async def _normalize_plan_exercises(exs: list[dict]) -> list[dict]:
+    for e in exs:
+        if e.get("name"):
+            e["name"] = await _canonical_name(e["name"])
+    return exs
+
+
 class PlanExercise(BaseModel):
     name: str
     target_sets: Optional[int] = None
@@ -906,7 +969,7 @@ async def plan_detail(pid: int, uid: str = Depends(current_uid)):
 @app.post("/api/plans")
 async def create_plan(body: CreatePlan, uid: str = Depends(current_uid)):
     d = _resolve_plan_date(body.date, body.weekday, date.today())
-    exs = _clean_plan_exercises([e.model_dump() for e in body.exercises])
+    exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]))
     pid = await db.create_planned_workout(uid, d, (body.focus_label or None), exs)
     if body.notes:
         await db.update_planned_workout_notes(pid, body.notes)
@@ -920,7 +983,7 @@ async def update_plan(pid: int, body: UpdatePlan, uid: str = Depends(current_uid
         raise HTTPException(404, "plan not found")
     exs = None
     if body.exercises is not None:
-        exs = _clean_plan_exercises([e.model_dump() for e in body.exercises])
+        exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]))
     await db.update_planned_workout(
         pid,
         focus_label=body.focus_label,
@@ -997,7 +1060,7 @@ async def create_plans_bulk(body: BulkPlans, uid: str = Depends(current_uid)):
     saved = []
     for day in body.days:
         d = _resolve_plan_date(day.date, day.weekday, date.today())
-        exs = _clean_plan_exercises([e.model_dump() for e in day.exercises])
+        exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in day.exercises]))
         pid = await db.create_planned_workout(uid, d, (day.focus_label or None), exs)
         if day.notes:
             await db.update_planned_workout_notes(pid, day.notes)

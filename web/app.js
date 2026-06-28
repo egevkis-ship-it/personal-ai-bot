@@ -352,7 +352,23 @@ async function finishWorkout(wid) {
   sheet(`<div style="text-align:center"><div style="font-size:34px">✅</div><h2>Тренировка завершена</h2>
     <div class="muted small">${r.set_count} рабочих подходов</div></div>
     <div class="card" style="margin-top:10px"><div class="muted small">✨ Резюме</div><div style="margin-top:6px">${esc(r.summary)}</div></div>
+    <button class="btn ghost" style="margin-top:10px" id="coachBtn" onclick="coachReview(${wid})">🤖 AI-разбор</button>
+    <div id="coachBox"></div>
     <button class="btn" style="margin-top:12px" onclick="closeSheet();go('home')">Готово</button>`);
+}
+async function coachReview(wid) {
+  const btn = document.getElementById('coachBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Думаю…'; }
+  const box = document.getElementById('coachBox');
+  if (box) box.innerHTML = `<div class="card muted small" style="margin-top:10px">⏳ AI разбирает тренировку… (Opus небыстрый)</div>`;
+  try {
+    const r = await api('/workouts/' + wid + '/coach');
+    if (box) box.innerHTML = `<div class="card" style="margin-top:10px"><div class="muted small">🤖 AI-разбор</div><div style="margin-top:6px;white-space:pre-line">${esc(r.summary)}</div></div>`;
+    if (btn) btn.style.display = 'none';
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="card small" style="margin-top:10px;color:var(--danger)">${esc(e.message || 'AI-разбор недоступен')}</div>`;
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 Повторить'; }
+  }
 }
 
 // ── History ───────────────────────────────────────────────────────────────
@@ -663,7 +679,8 @@ async function Settings() {
     <div class="muted small" style="margin:8px 0 6px">🌍 Часовой пояс</div>
     <div class="card">
       <div class="row sp"><span>Текущий</span><b id="tzCur">${esc(tzr.tz || 'UTC')}</b></div>
-      <button class="btn ghost sm" style="margin-top:10px" onclick="tzAuto()">📍 Определить автоматически</button>
+      <button class="btn ghost sm" style="margin-top:10px" onclick="tzGeo()">📍 Поделиться геолокацией</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="tzAuto()">🕒 Определить автоматически</button>
       <button class="btn ghost sm" style="margin-top:8px" onclick="tzPick()">Выбрать из списка</button>
     </div>
     <div class="muted small" style="margin:14px 0 6px">📊 Статистика</div>
@@ -695,6 +712,17 @@ async function tzAuto() {
   if (!z) return toast('Не удалось определить пояс');
   try { const r = await api('/service/tz', 'POST', { tz: z }); const el = document.getElementById('tzCur'); if (el) el.textContent = r.tz; toast('Часовой пояс: ' + r.tz); }
   catch (e) { toast(e.message || 'не удалось'); }
+}
+function tzGeo() {
+  if (!navigator.geolocation) return toast('Геолокация недоступна');
+  toast('Запрашиваю геопозицию…');
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try {
+      const r = await api('/service/tz/coords', 'POST', { lat: pos.coords.latitude, lon: pos.coords.longitude });
+      const el = document.getElementById('tzCur'); if (el) el.textContent = r.tz;
+      toast('Часовой пояс: ' + r.tz);
+    } catch (e) { toast(e.message || 'не удалось определить пояс'); }
+  }, () => toast('Геолокация отклонена'), { timeout: 10000, enableHighAccuracy: false });
 }
 function tzPick() {
   const cur = (document.getElementById('tzCur') || {}).textContent || '';
