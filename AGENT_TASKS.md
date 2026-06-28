@@ -203,7 +203,7 @@ AI-кэш упражнений» из общих Настроек в админ-
 - [x] **1.1 Часовой пояс** — `today_for(uid)` (обёртка над `tz.today`) заменил все 12 `date.today()` в пользовательских эндпоинтах (dashboard, workouts, plans, measurements, parse, seed).
 - [x] **1.2 XSS** — аудит всех innerHTML-шаблонов: `focus_label`/`notes`/имена/`display_name`/`username`/`summary` уже под `esc()`; закрыта дыра `setLabel(reps_text)` (raw в 2 местах) → теперь `esc(setLabel(...))`. `esc()` экранирует `& < > "`.
 - [x] **1.3 Очистка AI-кэша — только админ** — убран `aliases` из общего `/service/wipe`; новый `POST /api/admin/wipe-aliases` за `current_admin`; кнопка перенесена в админ-секцию Настроек. Проверено: service-путь → 404, admin → 200/403.
-- [ ] 1.4 Валидация формы плановых упражнений (422 на кривой вход)
+- [x] **1.4 Валидация плановых упражнений** — `_clean_plan_exercises` теперь валидирует типы и диапазоны (`_opt_int`/`_opt_float`/`_opt_str`): sets 0..100, reps 0..1000, weight 0..10000, длины строк; мусорные поля отбрасываются; min>max переставляются; грубый вход → 422. JSONB-хранение без изменений.
 
 ### Фаза 2 — лимиты на AI
 - [ ] 2 Таблица `ai_usage` + `check_and_bump_ai(uid)` во всех AI-эндпоинтах (429 при превышении)

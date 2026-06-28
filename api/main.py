@@ -882,26 +882,64 @@ def _resolve_plan_date(date_str: Optional[str], weekday: Optional[int], today: d
     return today
 
 
+def _opt_int(v, field: str, lo: int = 0, hi: int = 1000):
+    if v is None or v == "":
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise HTTPException(422, f"{field}: ожидалось целое число")
+    if not (lo <= n <= hi):
+        raise HTTPException(422, f"{field}: вне диапазона {lo}..{hi}")
+    return n
+
+
+def _opt_float(v, field: str, lo: float = 0.0, hi: float = 10000.0):
+    if v is None or v == "":
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(422, f"{field}: ожидалось число")
+    if not (lo <= x <= hi):
+        raise HTTPException(422, f"{field}: вне диапазона {lo}..{hi}")
+    return x
+
+
+def _opt_str(v, maxlen: int = 500):
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s[:maxlen] or None
+
+
 def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
-    """Normalize incoming exercise dicts to the bot's planned-exercise shape."""
+    """Validate + normalize incoming exercise dicts to the bot's planned-exercise
+    shape. Unknown fields are dropped; bad types/ranges -> 422. JSONB storage."""
     out: list[dict] = []
     for e in exercises or []:
-        name = (e.get("name") or "").strip()
+        if not isinstance(e, dict):
+            raise HTTPException(422, "упражнение должно быть объектом")
+        name = str(e.get("name") or "").strip()
         if not name:
             continue
         d = {
-            "name": name,
-            "target_sets": e.get("target_sets"),
-            "target_reps_min": e.get("target_reps_min"),
-            "target_reps_max": e.get("target_reps_max"),
-            "target_weight": _to_f(e.get("target_weight")),
-            "reps_text": (e.get("reps_text") or None),
-            "notes": (e.get("notes") or None),
-            "superset_group": (e.get("superset_group") or None),
+            "name": name[:200],
+            "target_sets": _opt_int(e.get("target_sets"), "target_sets", 0, 100),
+            "target_reps_min": _opt_int(e.get("target_reps_min"), "target_reps_min", 0, 1000),
+            "target_reps_max": _opt_int(e.get("target_reps_max"), "target_reps_max", 0, 1000),
+            "target_weight": _opt_float(e.get("target_weight"), "target_weight", 0, 10000),
+            "reps_text": _opt_str(e.get("reps_text")),
+            "notes": _opt_str(e.get("notes")),
+            "superset_group": _opt_str(e.get("superset_group"), 50),
         }
         # if only one reps value provided, mirror it into min==max (bot convention)
         if d["target_reps_min"] is not None and d["target_reps_max"] is None:
             d["target_reps_max"] = d["target_reps_min"]
+        # keep min <= max
+        if (d["target_reps_min"] is not None and d["target_reps_max"] is not None
+                and d["target_reps_min"] > d["target_reps_max"]):
+            d["target_reps_min"], d["target_reps_max"] = d["target_reps_max"], d["target_reps_min"]
         out.append(d)
     return out
 
