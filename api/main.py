@@ -139,6 +139,12 @@ async def _own_measurement(uid: str, mid: int) -> None:
         raise HTTPException(404, "not found")
 
 
+async def today_for(uid: str) -> date:
+    """User-local 'today' (mirrors the bot's tz.today), not the container's UTC
+    date — so 'today'/'today's plan' are correct for users outside UTC."""
+    return await tz.today(uid)
+
+
 # ───────────────────────────── access control ───────────────────────────────
 # Gate: every login is checked against app_access. Owner (OWNER_TELEGRAM_USER_ID)
 # and ALLOWED_TELEGRAM_USER_IDS are auto-approved; everyone else starts 'pending'
@@ -505,7 +511,7 @@ async def admin_user_patch(target: str, body: AdminUserPatch,
 
 @app.get("/api/dashboard")
 async def dashboard(uid: str = Depends(current_uid)):
-    today = date.today()
+    today = await today_for(uid)
     plans = await db.get_planned_workouts_range(uid, today, today)
     active = await db.get_active_workout(uid)
     last_m = await db.get_last_measurement(uid)
@@ -528,7 +534,7 @@ class StartWorkout(BaseModel):
 
 @app.post("/api/workouts")
 async def start_workout(body: StartWorkout, uid: str = Depends(current_uid)):
-    today = date.today()
+    today = await today_for(uid)
     if body.from_plan_id:
         plan = await db.get_planned_workout(body.from_plan_id)
         if not plan:
@@ -568,7 +574,7 @@ async def active_workout(uid: str = Depends(current_uid)):
 
 @app.get("/api/workouts/week")
 async def workouts_week(uid: str = Depends(current_uid)):
-    today = date.today()
+    today = await today_for(uid)
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     rows = await _rows(
@@ -587,7 +593,7 @@ async def workouts_week(uid: str = Depends(current_uid)):
 
 @app.get("/api/workouts")
 async def workouts_history(days: int = 30, uid: str = Depends(current_uid)):
-    today = date.today()
+    today = await today_for(uid)
     rows = [r for r in await db.get_workouts_range(uid, today - timedelta(days=days), today) if r.get("finished_at")]
     out = []
     for w in rows:
@@ -962,7 +968,7 @@ class BulkPlans(BaseModel):
 @app.get("/api/plans")
 async def plans_list(days: int = 30, uid: str = Depends(current_uid)):
     """Upcoming planned workouts within the next `days` days (status='planned')."""
-    today = date.today()
+    today = await today_for(uid)
     rows = await db.get_planned_workouts_range(uid, today, today + timedelta(days=days))
     out = []
     for p in rows:
@@ -981,7 +987,8 @@ async def plans_list(days: int = 30, uid: str = Depends(current_uid)):
 
 @app.get("/api/plans/today")
 async def plan_today(uid: str = Depends(current_uid)):
-    rows = await db.get_planned_workouts_range(uid, date.today(), date.today())
+    d = await today_for(uid)
+    rows = await db.get_planned_workouts_range(uid, d, d)
     return rows[0] if rows else None
 
 
@@ -1000,7 +1007,7 @@ async def plan_detail(pid: int, uid: str = Depends(current_uid)):
 
 @app.post("/api/plans")
 async def create_plan(body: CreatePlan, uid: str = Depends(current_uid)):
-    d = _resolve_plan_date(body.date, body.weekday, date.today())
+    d = _resolve_plan_date(body.date, body.weekday, await today_for(uid))
     exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in body.exercises]))
     pid = await db.create_planned_workout(uid, d, (body.focus_label or None), exs)
     if body.notes:
@@ -1025,7 +1032,7 @@ async def update_plan(pid: int, body: UpdatePlan, uid: str = Depends(current_uid
     if body.notes is not None:
         await db.update_planned_workout_notes(pid, body.notes)
     if body.date is not None or body.weekday is not None:
-        new_date = _resolve_plan_date(body.date, body.weekday, date.today())
+        new_date = _resolve_plan_date(body.date, body.weekday, await today_for(uid))
         async with get_session() as s:
             await s.execute(
                 text("UPDATE planned_workouts SET planned_date = :d, updated_at = now() WHERE id = :id"),
@@ -1057,7 +1064,7 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
         raise HTTPException(502, f"ошибка разбора: {str(e)[:200]}")
     if not days:
         raise HTTPException(422, "не удалось разобрать план")
-    today = date.today()
+    today = await today_for(uid)
     out = []
     for i, day in enumerate(days):
         label = (day.day_label or "").lower().strip()
@@ -1092,8 +1099,9 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
 async def create_plans_bulk(body: BulkPlans, uid: str = Depends(current_uid)):
     """Save multiple planned days at once (confirmed preview)."""
     saved = []
+    today = await today_for(uid)
     for day in body.days:
-        d = _resolve_plan_date(day.date, day.weekday, date.today())
+        d = _resolve_plan_date(day.date, day.weekday, today)
         exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in day.exercises]))
         pid = await db.create_planned_workout(uid, d, (day.focus_label or None), exs)
         if day.notes:
@@ -1121,7 +1129,7 @@ async def add_measurement(body: AddMeasurement, uid: str = Depends(current_uid))
             raise HTTPException(503, "разбор текста замеров недоступен")
     if not values:
         raise HTTPException(422, "нет значений")
-    mid = await db.create_measurement(uid, body.taken_on or date.today().isoformat(), values)
+    mid = await db.create_measurement(uid, body.taken_on or (await today_for(uid)).isoformat(), values)
     return {"id": mid}
 
 
@@ -1152,7 +1160,7 @@ async def seed(uid: str = Depends(current_uid)):
 
 
 async def _seed(uid: str):
-    today = date.today()
+    today = await today_for(uid)
     monday = today - timedelta(days=today.weekday())
 
     def ex(name, sets, reps, weight=None, dur=None):
