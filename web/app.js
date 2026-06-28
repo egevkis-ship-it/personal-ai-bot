@@ -144,8 +144,12 @@ async function Home() {
     ${prs.map(p => `<div class="row sp" style="padding:3px 0"><span>${esc(p.name)}</span><span class="small muted">${fmt(p.weight_kg)} кг · ${shortDate(p.date)}</span></div>`).join('')}</div>` : '';
   const np = d.next_plan;
   const nextCard = (np && !d.active_workout && !d.today_plan) ? `<div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Ближайший план</b><div class="small muted">${esc(np.planned_date)} · ${esc(np.focus_label || 'тренировка')}</div></div><span class="muted">›</span></div>` : '';
+  const isNew = !d.last_workout && (d.week_workouts || 0) === 0 && !d.active_workout;
+  const onboardCard = isNew ? `<div class="card" style="border:1px dashed var(--line)"><b>Добро пожаловать! 👋</b>
+    <div class="small muted" style="margin-top:4px">Начни первую тренировку или запланируй неделю в «Планы». Записывай подходы — здесь появятся графики, рекорды и прогресс.</div></div>` : '';
   view.innerHTML = `<div class="row sp"><h1>Привет!</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div><div class="muted small" style="margin-bottom:14px">${new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}</div>
     ${banner}
+    ${onboardCard}
     ${summaryCard}
     ${nextCard}
     ${weightCard}
@@ -535,7 +539,8 @@ async function WorkoutDetail(id) {
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${w.workout_date}</div>
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
-    <button class="btn ghost" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>`;
+    <button class="btn ghost" onclick="go('active',${w.id})">✏️ Редактировать подходы</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>`;
 }
 
 // ── Exercise progress (charts + PR) ─────────────────────────────────────────
