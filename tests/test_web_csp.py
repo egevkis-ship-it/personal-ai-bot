@@ -64,3 +64,30 @@ def test_frame_src_allows_oauth_iframe(csp: str):
     """The widget injects an <iframe src=https://oauth.telegram.org/embed/...>."""
     frame_src = _directive(csp, "frame-src")
     assert "https://oauth.telegram.org" in frame_src
+
+
+def test_service_worker_does_not_proxy_cross_origin(csp: str):
+    """SW must let cross-origin (telegram) requests load natively.
+
+    The service worker proxies requests via its own fetch(). Because `connect-src`
+    is locked to 'self', a worker fetch() to telegram.org is CSP-blocked and the
+    catch-fallback serves index.html in its place — silently breaking the Telegram
+    Login Widget for installed-PWA clients. The fetch handler must therefore skip
+    cross-origin requests. This test pins that guard so it can't regress while
+    connect-src stays 'self'.
+    """
+    import pathlib
+
+    # The guard only matters while connect-src can't reach telegram.
+    connect_src = _directive(csp, "connect-src")
+    if "https://telegram.org" in connect_src and "https://oauth.telegram.org" in connect_src:
+        return  # alternative fix: worker fetch() is allowed to reach telegram
+
+    sw = pathlib.Path(__file__).resolve().parent.parent / "web" / "sw.js"
+    src = sw.read_text(encoding="utf-8")
+    assert "self.location.origin" in src and "url.origin" in src, (
+        "web/sw.js must skip cross-origin requests (e.g. "
+        "`if (url.origin !== self.location.origin) return;`) so telegram.org / "
+        "oauth.telegram.org load natively instead of being proxied through a "
+        "worker fetch() that connect-src 'self' blocks."
+    )
