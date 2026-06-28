@@ -24,7 +24,7 @@ function spark(vals, color = 'var(--info)') {
 let STATE = { tab: 'home' };
 
 // ── navigation ───────────────────────────────────────────────────────────
-const TABS = [['home', '🏠', 'Главная'], ['train', '🏋️', 'Тренировка'], ['measure', '📏', 'Замеры'], ['history', '📖', 'История']];
+const TABS = [['home', '🏠', 'Главная'], ['train', '🏋️', 'Тренировка'], ['measure', '📏', 'Замеры'], ['history', '📖', 'История'], ['more', '☰', 'Ещё']];
 function renderTabs() {
   document.getElementById('tabbar').innerHTML = TABS.map(([k, i, l]) =>
     `<div class="tab ${STATE.tab === k ? 'active' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</div>`).join('');
@@ -48,6 +48,7 @@ async function go(tab, param) {
     if (tab === 'reports') return Reports();
     if (tab === 'photos') return Photos();
     if (tab === 'exercise') return ExerciseDetail(param);
+    if (tab === 'more') return More();
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -126,12 +127,27 @@ async function Home() {
       <div class="tile" onclick="repeatLast(${d.last_workout?d.last_workout.id:0})">🔁<div class="small" style="margin-top:6px">Повторить прошлую</div></div>
       <div class="tile" onclick="go('train')">📅<div class="small" style="margin-top:6px">Тренировки</div></div>
     </div>
-    <button class="btn ghost" style="margin-top:12px" onclick="go('reports')">📄 Отчёты (PDF)</button>
+    <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>
+    <div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Расписание</b><div class="small muted">что запланировано: день / неделя / месяц</div></div><span class="muted">›</span></div>
+    <button class="btn ghost" style="margin-top:6px" onclick="go('reports')">📄 Отчёты (PDF)</button>
     ${lm ? `<div class="card" style="margin-top:12px"><div class="row sp"><span class="muted small">Последний замер</span><span class="small muted">${lm.taken_on}</span></div>
       <div style="font-size:22px;font-weight:700;margin-top:4px">${fmt(lm.weight_kg)} <span class="small muted">кг</span></div></div>` : ''}`;
 }
 async function startFromPlan(pid) { const r = await api('/workouts', 'POST', { from_plan_id: pid }); go('active', r.id); }
 async function repeatLast(id) { if (!id) return toast('Нет прошлых тренировок'); const r = await api('/workouts', 'POST', { repeat_from: id }); go('active', r.id); }
+
+// ── More (secondary navigation hub) ─────────────────────────────────────────
+function More() {
+  document.getElementById('tabbar').style.display = '';
+  const item = (tab, icon, title, sub) => `<div class="card list-item" onclick="go('${tab}')">
+    <div class="ic">${icon}</div><div style="flex:1"><b>${title}</b><div class="small muted">${sub}</div></div><span class="muted">›</span></div>`;
+  view.innerHTML = `<h1>Ещё</h1>
+    ${item('plans', '📅', 'Планы', 'планирование тренировок')}
+    ${item('schedule', '📆', 'Расписание', 'день / неделя / месяц')}
+    ${item('reports', '📄', 'Отчёты', 'PDF за период')}
+    ${item('photos', '📷', 'Прогресс-фото', 'снимки и сравнение «было/стало»')}
+    ${item('settings', '⚙️', 'Настройки', 'часовой пояс, доступ, экспорт данных')}`;
+}
 
 // ── Train (start) ─────────────────────────────────────────────────────────
 async function Train() {
