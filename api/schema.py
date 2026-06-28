@@ -86,13 +86,22 @@ CREATE TABLE IF NOT EXISTS progress_photos (
     id                       SERIAL PRIMARY KEY,
     user_id                  TEXT        NOT NULL,
     taken_on                 DATE        NOT NULL,
-    telegram_file_id         TEXT        NOT NULL,
+    telegram_file_id         TEXT,
     telegram_file_unique_id  TEXT,
     ai_description           TEXT,
+    ai_description_short     TEXT,
     notes                    TEXT,
     series_id                TEXT,
+    storage_key              TEXT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- The prod table is created by the bot with telegram_file_id NOT NULL and no
+-- web-storage columns. Relax it and add storage columns so web-uploaded photos
+-- (stored on disk, no telegram_file_id) fit. All idempotent / no-ops in prod.
+ALTER TABLE progress_photos ALTER COLUMN telegram_file_id DROP NOT NULL;
+ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS storage_key TEXT;
+ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS ai_description_short TEXT;
 
 -- Per-user daily AI call counter (rate limit). Owned by the web API only.
 CREATE TABLE IF NOT EXISTS ai_usage (

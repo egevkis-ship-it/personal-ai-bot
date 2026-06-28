@@ -478,6 +478,34 @@ async def create_photo(
         return r.scalar_one()
 
 
+async def create_web_photo(
+    user_id: str,
+    taken_on: str | date,
+    storage_key: str,
+    *,
+    series_id: str | None = None,
+    ai_description: str | None = None,
+    ai_description_short: str | None = None,
+    notes: str | None = None,
+) -> int:
+    """Insert a web-uploaded photo (stored on disk via storage_key, no Telegram
+    file id). Mirrors create_photo but for the web storage path."""
+    d = _to_date(taken_on)
+    async with get_session() as s:
+        r = await s.execute(
+            text("""
+                INSERT INTO progress_photos
+                    (user_id, taken_on, telegram_file_id, storage_key, series_id,
+                     ai_description, ai_description_short, notes)
+                VALUES (:uid, :d, NULL, :sk, :sid, :desc, :short, :notes)
+                RETURNING id
+            """),
+            {"uid": user_id, "d": d, "sk": storage_key, "sid": series_id,
+             "desc": ai_description, "short": ai_description_short, "notes": notes},
+        )
+        return r.scalar_one()
+
+
 async def get_photos(user_id: str, limit: int = 30) -> list[dict]:
     async with get_session() as s:
         r = await s.execute(

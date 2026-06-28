@@ -45,6 +45,7 @@ async function go(tab, param) {
     if (tab === 'planEdit') return PlanEdit(param);
     if (tab === 'settings') return Settings();
     if (tab === 'reports') return Reports();
+    if (tab === 'photos') return Photos();
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -119,7 +120,7 @@ async function Home() {
     <div class="muted small" style="margin:4px 0 8px">Быстрые действия</div>
     <div class="grid2">
       <div class="tile" onclick="go('measure')">📏<div class="small" style="margin-top:6px">Записать замер</div></div>
-      <div class="tile" onclick="toast('Фото — в следующей версии')">📷<div class="small" style="margin-top:6px">Добавить фото</div></div>
+      <div class="tile" onclick="go('photos')">📷<div class="small" style="margin-top:6px">Прогресс-фото</div></div>
       <div class="tile" onclick="repeatLast(${d.last_workout?d.last_workout.id:0})">🔁<div class="small" style="margin-top:6px">Повторить прошлую</div></div>
       <div class="tile" onclick="go('train')">📅<div class="small" style="margin-top:6px">Тренировки</div></div>
     </div>
@@ -454,6 +455,58 @@ function openReportCustom() {
   if (!f || !t) return toast('Укажите период');
   if (f > t) return toast('«С» должно быть раньше «По»');
   openReport(`from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`);
+}
+
+// ── Progress photos ─────────────────────────────────────────────────────────
+function Photos() {
+  document.getElementById('tabbar').style.display = '';
+  view.innerHTML = `<span class="back" onclick="go('home')">‹ Главная</span><h1>Прогресс-фото</h1>
+    <div class="muted small" style="margin-bottom:10px">Загрузи фото — ИИ опишет серию. Хранится на сервере.</div>
+    <input id="photoFiles" type="file" accept="image/*" multiple style="display:none" onchange="uploadPhotos()">
+    <button class="btn" onclick="document.getElementById('photoFiles').click()">📷 Добавить фото</button>
+    <div id="photoList" style="margin-top:14px"><div class="card muted small">Загрузка…</div></div>`;
+  loadPhotos();
+}
+async function loadPhotos() {
+  const box = document.getElementById('photoList');
+  try {
+    const series = await api('/photos?limit=30');
+    if (!series.length) { box.innerHTML = '<div class="card muted">Пока нет фото.</div>'; return; }
+    box.innerHTML = series.map(s => `<div class="card">
+      <div class="row sp"><b>${fmtPlanDate(s.taken_on)}</b><span class="small muted">${s.photo_count} фото</span></div>
+      <div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">
+        ${(s.photo_ids || []).map(id => `<img src="/api/photos/${id}/image" style="height:120px;border-radius:8px;object-fit:cover" loading="lazy">`).join('')}
+      </div>
+      ${s.ai_short ? `<div class="small">🤖 ${esc(s.ai_short)}</div>` : ''}
+      ${s.notes ? `<div class="small muted" style="margin-top:4px">📝 ${esc(s.notes)}</div>` : ''}
+      <button class="btn danger sm" style="margin-top:8px" onclick="delPhotoSeries('${esc(s.series_id)}')">Удалить</button>
+    </div>`).join('');
+  } catch (e) {
+    if (e.status === 401 || e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
+    box.innerHTML = `<div class="card small" style="color:var(--danger)">${esc(e.message || 'ошибка')}</div>`;
+  }
+}
+async function uploadPhotos() {
+  const input = document.getElementById('photoFiles');
+  if (!input.files || !input.files.length) return;
+  const fd = new FormData();
+  for (const f of input.files) fd.append('files', f);
+  const box = document.getElementById('photoList');
+  box.innerHTML = '<div class="card muted small">⏳ Загружаю и распознаю…</div>';
+  try {
+    const r = await fetch('/api/photos', { method: 'POST', body: fd, credentials: 'include' });
+    if (!r.ok) { let d = ''; try { d = (await r.json()).detail; } catch {} throw new Error(d || r.status); }
+    const j = await r.json();
+    toast('Добавлено фото: ' + j.count);
+  } catch (e) { toast(e.message || 'не удалось загрузить'); }
+  input.value = '';
+  loadPhotos();
+}
+function delPhotoSeries(sid) {
+  confirmSheet('Удалить эти фото?', 'Серия и файлы будут удалены безвозвратно.', 'Удалить', true, async () => {
+    try { await api('/photos/series/' + encodeURIComponent(sid), 'DELETE'); toast('Удалено'); loadPhotos(); }
+    catch (e) { toast(e.message || 'не удалось'); }
+  });
 }
 
 // ── Measurements ──────────────────────────────────────────────────────────

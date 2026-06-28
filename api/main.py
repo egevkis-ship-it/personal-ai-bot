@@ -16,11 +16,12 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import uuid
 from datetime import date, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,6 +47,7 @@ try:
     AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "100"))
 except ValueError:
     AI_DAILY_LIMIT = 100
+PHOTO_DIR = os.getenv("PHOTO_DIR", "/data/photos")  # mount a persistent volume here
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 COOKIE = "session"
 
@@ -1317,6 +1319,132 @@ async def voice_transcribe(file: UploadFile = File(...), uid: str = Depends(curr
     except Exception as e:
         raise HTTPException(502, f"ошибка распознавания: {str(e)[:200]}")
     return {"text": text_out or ""}
+
+
+# ──────────────────────────────── photos ────────────────────────────────────
+
+def _photo_path(storage_key: str) -> str:
+    # storage_key is a generated uuid filename — guard against path traversal.
+    safe = os.path.basename(storage_key or "")
+    if not safe or safe != storage_key:
+        raise HTTPException(404, "not found")
+    return os.path.join(PHOTO_DIR, safe)
+
+
+@app.post("/api/photos")
+async def upload_photos(
+    files: list[UploadFile] = File(...),
+    notes: Optional[str] = Form(None),
+    uid: str = Depends(current_uid),
+):
+    """Upload 1..N progress photos: resize → store on disk (PHOTO_DIR) → one
+    series_id per upload → AI series description (under the daily limit)."""
+    files = [f for f in files if f is not None][:10]
+    if not files:
+        raise HTTPException(422, "нет файлов")
+    try:
+        os.makedirs(PHOTO_DIR, exist_ok=True)
+    except Exception:
+        raise HTTPException(503, "хранилище фото недоступно")
+    try:
+        from app.bot.services.report_builder import _resize_photo
+    except Exception:
+        _resize_photo = None
+    saved: list[tuple[str, bytes]] = []
+    for f in files:
+        raw = await f.read()
+        if not raw:
+            continue
+        if len(raw) > 25 * 1024 * 1024:
+            raise HTTPException(413, "файл слишком большой")
+        jpeg = (_resize_photo(raw) if _resize_photo else raw) or raw
+        key = uuid.uuid4().hex + ".jpg"
+        try:
+            with open(_photo_path(key), "wb") as fh:
+                fh.write(jpeg)
+        except Exception:
+            raise HTTPException(503, "не удалось сохранить фото")
+        saved.append((key, jpeg))
+    if not saved:
+        raise HTTPException(422, "пустые файлы")
+    # One AI description per upload, under the daily cap; graceful on failure.
+    short = detailed = None
+    try:
+        if not await _ai_over_limit(uid):
+            from app.bot.services.photo_vision import describe_photo_series
+            res = await describe_photo_series([(b, "image/jpeg") for _, b in saved])
+            try:
+                await check_and_bump_ai(uid)
+            except HTTPException:
+                pass
+            if res:
+                short, detailed = res.get("short"), res.get("detailed")
+    except Exception:
+        pass
+    series_id = uuid.uuid4().hex
+    today = await today_for(uid)
+    note_val = (notes or "").strip() or None
+    ids = []
+    for key, _ in saved:
+        ids.append(await db.create_web_photo(
+            uid, today, key, series_id=series_id,
+            ai_description=detailed, ai_description_short=short, notes=note_val))
+    return {"series_id": series_id, "photo_ids": ids, "count": len(ids),
+            "ai_short": short, "ai_detailed": detailed}
+
+
+@app.get("/api/photos")
+async def list_photos(limit: int = 30, uid: str = Depends(current_uid)):
+    series = await db.get_photo_series(uid, limit)
+    out = []
+    for s in series:
+        d = s.get("taken_on")
+        out.append({
+            "series_id": s["series_id"],
+            "taken_on": d.isoformat() if isinstance(d, date) else d,
+            "photo_ids": s.get("photo_ids") or [],
+            "photo_count": s.get("photo_count") or len(s.get("photo_ids") or []),
+            "ai_short": s.get("ai_description_short"),
+            "ai_detailed": s.get("ai_description"),
+            "notes": s.get("notes"),
+        })
+    return out
+
+
+@app.get("/api/photos/{pid}/image")
+async def photo_image(pid: int, uid: str = Depends(current_uid)):
+    p = await db.get_photo(pid)
+    if not p or p.get("user_id") != uid:
+        raise HTTPException(404, "not found")
+    key = p.get("storage_key")
+    if not key:
+        raise HTTPException(404, "нет файла")  # Telegram-only photo (no disk copy)
+    path = _photo_path(key)
+    if not os.path.isfile(path):
+        raise HTTPException(404, "файл не найден")
+    return StreamingResponse(open(path, "rb"), media_type="image/jpeg",
+                             headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.delete("/api/photos/series/{sid}")
+async def del_photo_series(sid: str, uid: str = Depends(current_uid)):
+    if sid.startswith("_solo_"):
+        try:
+            pid = int(sid.split("_", 2)[2])
+        except (ValueError, IndexError):
+            raise HTTPException(404, "not found")
+        rows = await _rows("SELECT storage_key FROM progress_photos WHERE id=:i AND user_id=:u", i=pid, u=uid)
+    else:
+        rows = await _rows("SELECT storage_key FROM progress_photos WHERE series_id=:s AND user_id=:u", s=sid, u=uid)
+    n = await db.delete_photo_series(uid, sid)   # scoped to uid inside
+    for r in rows:
+        k = r.get("storage_key")
+        if k:
+            try:
+                os.remove(_photo_path(k))
+            except Exception:
+                pass
+    return {"deleted": n}
 
 
 # ──────────────────────────────── seed (dev) ────────────────────────────────
