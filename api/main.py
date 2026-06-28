@@ -627,6 +627,24 @@ async def admin_wipe_aliases(admin_uid: str = Depends(current_admin)):
 
 # ────────────────────────────── dashboard ───────────────────────────────────
 
+async def _week_streak(uid: str, today: date) -> int:
+    """Consecutive ISO weeks (ending at the current or most-recent week) with at
+    least one finished workout. Forgiving: an empty current week doesn't break a
+    streak that's still alive from last week."""
+    rows = await _rows(
+        """SELECT DISTINCT date_trunc('week', workout_date)::date AS wk
+           FROM workouts WHERE user_id=:u AND finished_at IS NOT NULL
+           ORDER BY wk DESC LIMIT 104""", u=uid)
+    weeks = {r["wk"] for r in rows}
+    monday = today - timedelta(days=today.weekday())
+    cur = monday if monday in weeks else monday - timedelta(days=7)
+    streak = 0
+    while cur in weeks:
+        streak += 1
+        cur -= timedelta(days=7)
+    return streak
+
+
 @app.get("/api/dashboard")
 async def dashboard(uid: str = Depends(current_uid)):
     today = await today_for(uid)
@@ -637,9 +655,39 @@ async def dashboard(uid: str = Depends(current_uid)):
         "SELECT COUNT(*) FROM workouts WHERE user_id=:u AND finished_at IS NOT NULL AND workout_date >= :d",
         u=uid, d=today - timedelta(days=7))
     last_workout = await db.get_last_workout(uid)
+    week_tonnage = await _scalar(
+        """SELECT COALESCE(SUM(es.weight_kg * es.reps), 0)
+           FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
+           WHERE w.user_id=:u AND w.finished_at IS NOT NULL AND es.is_warmup=false
+             AND es.weight_kg IS NOT NULL AND es.reps IS NOT NULL AND w.workout_date >= :d""",
+        u=uid, d=today - timedelta(days=7))
+    wt_rows = await _rows(
+        """SELECT taken_on, weight_kg FROM body_measurements
+           WHERE user_id=:u AND weight_kg IS NOT NULL ORDER BY taken_on DESC LIMIT 8""", u=uid)
+    weight_trend = [{"date": r["taken_on"].isoformat(), "weight_kg": _to_f(r["weight_kg"])}
+                    for r in reversed(wt_rows)]
+    pr_rows = await _rows(
+        """WITH working AS (
+             SELECT es.exercise_name AS name, w.workout_date AS d, es.weight_kg AS weight,
+                    MAX(es.weight_kg) OVER (
+                      PARTITION BY lower(es.exercise_name) ORDER BY w.workout_date, es.set_number
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_max
+             FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
+             WHERE w.user_id=:u AND w.finished_at IS NOT NULL AND es.is_warmup=false
+               AND es.weight_kg IS NOT NULL AND es.reps IS NOT NULL)
+           SELECT name, d, weight FROM working
+           WHERE prev_max IS NOT NULL AND weight > prev_max AND d >= :since
+           ORDER BY d DESC, weight DESC LIMIT 3""",
+        u=uid, since=today - timedelta(days=30))
+    recent_prs = [{"name": r["name"], "date": r["d"].isoformat(), "weight_kg": _to_f(r["weight"])}
+                  for r in pr_rows]
+    upcoming = await db.get_planned_workouts_range(uid, today + timedelta(days=1), today + timedelta(days=21))
+    next_plan = upcoming[0] if upcoming else None
     return {"today_plan": plans[0] if plans else None, "active_workout": active,
             "last_measurement": last_m, "week_workouts": week_count or 0,
-            "last_workout": last_workout}
+            "last_workout": last_workout, "week_tonnage": round(_to_f(week_tonnage) or 0, 1),
+            "streak": await _week_streak(uid, today), "weight_trend": weight_trend,
+            "recent_prs": recent_prs, "next_plan": next_plan}
 
 
 # ────────────────────────────── workouts ────────────────────────────────────

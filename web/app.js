@@ -15,6 +15,7 @@ const fmt = n => (n == null ? '' : (Math.round(n * 100) / 100).toString());
 const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 1800); }
 function mmss(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
+function plural(n, one, few, many) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many; }
 function spark(vals, color = 'var(--info)') {
   if (!vals.length) return '';
   const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx - mn) || 1;
@@ -118,8 +119,31 @@ async function Home() {
     banner = `<div class="banner info"><div class="b-title" style="color:var(--info)">На сегодня плана нет</div>
       <button class="btn" style="margin-top:9px" onclick="go('train')">Начать тренировку</button></div>`;
   }
+  const streak = d.streak || 0;
+  const summaryCard = `<div class="card"><div class="row sp">
+      <div><div class="muted small">На этой неделе</div>
+        <div style="font-size:20px;font-weight:700;margin-top:2px">${d.week_workouts} ${plural(d.week_workouts, 'тренировка', 'тренировки', 'тренировок')}</div></div>
+      <div style="text-align:right"><div class="muted small">тоннаж</div>
+        <div style="font-size:18px;font-weight:700">${(d.week_tonnage || 0).toLocaleString('ru-RU')} <span class="small muted">кг</span></div></div></div>
+    ${streak > 0 ? `<div class="pill ok" style="margin-top:8px">🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')}</div>` : ''}</div>`;
+  const trend = d.weight_trend || [];
+  const last_w = trend.length ? trend[trend.length - 1].weight_kg : (lm ? lm.weight_kg : null);
+  const delta = trend.length >= 2 ? Math.round((trend[trend.length - 1].weight_kg - trend[0].weight_kg) * 10) / 10 : null;
+  const weightCard = last_w != null ? `<div class="card" onclick="go('measure')" style="cursor:pointer">
+    <div class="row sp"><span class="muted small">Вес</span>
+      <span class="small">${fmt(last_w)} кг${delta != null && delta !== 0 ? ` <span class="muted">(${delta > 0 ? '+' : ''}${fmt(delta)})</span>` : ''}</span></div>
+    ${trend.length >= 2 ? spark(trend.map(p => p.weight_kg)) : ''}</div>` : '';
+  const prs = d.recent_prs || [];
+  const prCard = prs.length ? `<div class="card"><div class="muted small" style="margin-bottom:4px">🏆 Свежие рекорды</div>
+    ${prs.map(p => `<div class="row sp" style="padding:3px 0"><span>${esc(p.name)}</span><span class="small muted">${fmt(p.weight_kg)} кг · ${shortDate(p.date)}</span></div>`).join('')}</div>` : '';
+  const np = d.next_plan;
+  const nextCard = (np && !d.active_workout && !d.today_plan) ? `<div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Ближайший план</b><div class="small muted">${esc(np.planned_date)} · ${esc(np.focus_label || 'тренировка')}</div></div><span class="muted">›</span></div>` : '';
   view.innerHTML = `<div class="row sp"><h1>Привет!</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div><div class="muted small" style="margin-bottom:14px">${new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}</div>
     ${banner}
+    ${summaryCard}
+    ${nextCard}
+    ${weightCard}
+    ${prCard}
     <div class="muted small" style="margin:4px 0 8px">Быстрые действия</div>
     <div class="grid2">
       <div class="tile" onclick="go('measure')">📏<div class="small" style="margin-top:6px">Записать замер</div></div>
@@ -129,9 +153,7 @@ async function Home() {
     </div>
     <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Расписание</b><div class="small muted">что запланировано: день / неделя / месяц</div></div><span class="muted">›</span></div>
-    <button class="btn ghost" style="margin-top:6px" onclick="go('reports')">📄 Отчёты (PDF)</button>
-    ${lm ? `<div class="card" style="margin-top:12px"><div class="row sp"><span class="muted small">Последний замер</span><span class="small muted">${lm.taken_on}</span></div>
-      <div style="font-size:22px;font-weight:700;margin-top:4px">${fmt(lm.weight_kg)} <span class="small muted">кг</span></div></div>` : ''}`;
+    <button class="btn ghost" style="margin-top:6px" onclick="go('reports')">📄 Отчёты (PDF)</button>`;
 }
 async function startFromPlan(pid) { const r = await api('/workouts', 'POST', { from_plan_id: pid }); go('active', r.id); }
 async function repeatLast(id) { if (!id) return toast('Нет прошлых тренировок'); const r = await api('/workouts', 'POST', { repeat_from: id }); go('active', r.id); }
