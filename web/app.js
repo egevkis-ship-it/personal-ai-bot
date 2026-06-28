@@ -50,6 +50,9 @@ async function go(tab, param) {
     if (tab === 'photos') return Photos();
     if (tab === 'exercise') return ExerciseDetail(param);
     if (tab === 'more') return More();
+    if (tab === 'routines') return Routines();
+    if (tab === 'routineEdit') return RoutineEdit(param);
+    if (tab === 'routineDay') return RoutineDay(param);
   } catch (e) {
     if (e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
     view.innerHTML = `<div class="card">Ошибка: ${esc(e.message)}<br><span class="small muted">Сервер запущен?</span></div>`;
@@ -165,6 +168,7 @@ function More() {
     <div class="ic">${icon}</div><div style="flex:1"><b>${title}</b><div class="small muted">${sub}</div></div><span class="muted">›</span></div>`;
   view.innerHTML = `<h1>Ещё</h1>
     ${item('plans', '📅', 'Планы', 'планирование тренировок')}
+    ${item('routines', '🗂', 'Шаблоны', 'недельный сплит → раскатать на недели')}
     ${item('schedule', '📆', 'Расписание', 'день / неделя / месяц')}
     ${item('reports', '📄', 'Отчёты', 'PDF за период')}
     ${item('photos', '📷', 'Прогресс-фото', 'снимки и сравнение «было/стало»')}
@@ -785,6 +789,7 @@ async function Plans() {
     <h1>Планы</h1><div class="muted small" style="margin-bottom:14px">Расписание на ближайшие дни</div>
     <button class="btn" onclick="newPlan()">➕ Запланировать день</button>
     <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">📝 Вставить планом (ИИ)</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="go('routines')">🗂 Шаблоны (недельный сплит)</button>
     <div style="margin-top:16px">${rows}</div>`;
 }
 
@@ -1066,6 +1071,138 @@ async function planConfirmBulk() {
     const r = await api('/plans/bulk', 'POST', { days: window._PARSED });
     window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans');
   } catch (e) { toast(e.message); }
+}
+
+// ── Routines (reusable weekly templates) ────────────────────────────────────
+async function Routines() {
+  document.getElementById('tabbar').style.display = '';
+  const list = await api('/routines');
+  view.innerHTML = `<span class="back" onclick="go('more')">‹ Ещё</span><h1>Шаблоны</h1>
+    <div class="muted small" style="margin-bottom:10px">Недельный сплит, который можно раскатать на несколько недель вперёд.</div>
+    <button class="btn" onclick="routineEditNew()">➕ Создать шаблон</button>
+    <div style="margin-top:14px">${list.length ? list.map(r => `<div class="card">
+      <div class="row sp"><b>${esc(r.name)}</b><span class="small muted">${(r.days || []).length} ${plural((r.days || []).length, 'день', 'дня', 'дней')}</span></div>
+      <div class="small muted" style="margin:4px 0 8px">${(r.days || []).map(d => WD_SHORT[d.weekday]).join(' · ') || 'нет дней'}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost sm" style="flex:1;margin:0" onclick="go('routineEdit',${r.id})">Изменить</button>
+        <button class="btn sm" style="flex:1;margin:0" onclick="routineApplySheet(${r.id})">Применить</button></div></div>`).join('') : '<div class="card muted">Пока нет шаблонов.</div>'}</div>`;
+}
+function routineEditNew() { window._ROUTINE = { id: null, name: '', days: [] }; go('routineEdit', 'new'); }
+async function RoutineEdit(param) {
+  document.getElementById('tabbar').style.display = '';
+  if (param && param !== 'new') {
+    const r = await api('/routines/' + param);
+    window._ROUTINE = { id: r.id, name: r.name, days: (r.days || []).map(d => ({ ...d, exercises: (d.exercises || []).map(e => ({ ...e })) })) };
+  } else if (!window._ROUTINE) { window._ROUTINE = { id: null, name: '', days: [] }; }
+  const R = window._ROUTINE;
+  const dayItems = R.days.length ? R.days.map((d, i) => `<div class="card list-item" onclick="go('routineDay',${i})">
+    <div class="ic">${WD_SHORT[d.weekday]}</div>
+    <div style="flex:1"><b>${WD_FULL[d.weekday]}</b><div class="small muted">${esc(d.focus_label || 'без фокуса')} · ${(d.exercises || []).length} упр.</div></div>
+    <span style="color:var(--danger);cursor:pointer" onclick="event.stopPropagation();routineRemoveDay(${i})">🗑</span></div>`).join('') : '<div class="card muted small">Дни не добавлены</div>';
+  view.innerHTML = `<span class="back" onclick="go('routines')">‹ Шаблоны</span>
+    <h2>${R.id ? 'Редактировать шаблон' : 'Новый шаблон'}</h2>
+    <div class="mfield" style="margin-top:8px"><label>Название</label><input id="r_name" value="${esc(R.name)}" placeholder="напр. Сплит 3 дня"></div>
+    <div class="muted small" style="margin:16px 0 6px">Дни недели</div>
+    ${dayItems}
+    <button class="btn ghost" style="margin-top:8px" onclick="routineAddDay()">➕ Добавить день</button>
+    <button class="btn success" style="margin-top:16px" onclick="saveRoutine()">${R.id ? 'Сохранить' : 'Создать шаблон'}</button>
+    ${R.id ? `<button class="btn danger" style="margin-top:8px" onclick="deleteRoutine(${R.id})">Удалить шаблон</button>` : ''}`;
+}
+function routineSyncName() { const e = document.getElementById('r_name'); if (e && window._ROUTINE) window._ROUTINE.name = e.value; }
+function routineAddDay() {
+  routineSyncName();
+  sheet(`<h2>День недели</h2><div class="tag-row" style="flex-wrap:wrap">${WD_FULL.map((w, i) => `<span class="pill" onclick="routinePickDay(${i})">${w}</span>`).join('')}</div>`);
+}
+function routinePickDay(wd) {
+  closeSheet(); routineSyncName();
+  const R = window._ROUTINE;
+  if (R.days.findIndex(d => d.weekday === wd) < 0) { R.days.push({ weekday: wd, focus_label: '', exercises: [] }); R.days.sort((a, b) => a.weekday - b.weekday); }
+  go('routineDay', R.days.findIndex(d => d.weekday === wd));
+}
+function routineRemoveDay(i) { routineSyncName(); window._ROUTINE.days.splice(i, 1); RoutineEdit('new'); }
+async function saveRoutine() {
+  routineSyncName();
+  const R = window._ROUTINE;
+  if (!R.name.trim()) return toast('Укажите название');
+  try {
+    if (R.id) await api('/routines/' + R.id, 'PATCH', { name: R.name, days: R.days });
+    else { const r = await api('/routines', 'POST', { name: R.name, days: R.days }); R.id = r.id; }
+    toast('Сохранено'); go('routines');
+  } catch (e) { toast(e.message || 'не удалось'); }
+}
+function deleteRoutine(id) { confirmSheet('Удалить шаблон?', 'Действие необратимо.', 'Удалить', true, async () => { try { await api('/routines/' + id, 'DELETE'); toast('Удалено'); go('routines'); } catch (e) { toast(e.message || 'не удалось'); } }); }
+// Routine day editor (self-contained exercise picker → writes to the routine day)
+function RoutineDay(i) {
+  document.getElementById('tabbar').style.display = '';
+  const R = window._ROUTINE, d = R && R.days[i];
+  if (!d) return go('routines');
+  window._RDi = i;
+  const exItems = d.exercises.length ? d.exercises.map((ex, j) => `<div class="card list-item">
+    <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div></div>
+    <span class="muted" style="cursor:pointer" onclick="rEditEx(${j})">✏️</span> &nbsp;
+    <span style="color:var(--danger);cursor:pointer" onclick="rRemoveEx(${j})">🗑</span></div>`).join('') : '<div class="card muted small">Упражнения не добавлены</div>';
+  view.innerHTML = `<span class="back" onclick="rDayBack()">‹ Шаблон</span><h2>${WD_FULL[d.weekday]}</h2>
+    <div class="mfield" style="margin-top:8px"><label>Фокус</label><input id="rd_focus" value="${esc(d.focus_label || '')}" placeholder="напр. Грудь / Трицепс"></div>
+    <div class="muted small" style="margin:16px 0 6px">Упражнения</div>
+    ${exItems}
+    <button class="btn ghost" style="margin-top:8px" onclick="rAddExercise()">➕ Добавить упражнение</button>
+    <button class="btn success" style="margin-top:16px" onclick="rDayBack()">Готово</button>`;
+}
+function rDaySync() { const e = document.getElementById('rd_focus'); if (e && window._ROUTINE) window._ROUTINE.days[window._RDi].focus_label = e.value; }
+function rDayBack() { rDaySync(); RoutineEdit('new'); }
+function rRemoveEx(j) { rDaySync(); window._ROUTINE.days[window._RDi].exercises.splice(j, 1); RoutineDay(window._RDi); }
+function rAddExercise() {
+  rDaySync();
+  sheet(`<h2>Добавить упражнение</h2>
+    <div class="field" style="margin-bottom:10px"><input id="rexq" placeholder="поиск…" oninput="rPickSearch()"><span>🔎</span></div>
+    <div class="tag-row"><span class="pill on" id="rtabRec" onclick="rPickTab('rec')">Недавние</span>
+      <span class="pill" id="rtabGrp" onclick="rPickTab('grp')">По группам</span></div>
+    <div id="rpickbody"></div>`);
+  rPickTab('rec');
+}
+async function rPickTab(t) {
+  document.getElementById('rtabRec').classList.toggle('on', t === 'rec');
+  document.getElementById('rtabGrp').classList.toggle('on', t === 'grp');
+  const body = document.getElementById('rpickbody');
+  if (t === 'rec') { const r = await api('/exercises/recent'); body.innerHTML = r.length ? r.map(x => rPickRow(x.name)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>'; }
+  else { const g = await api('/exercises/groups'); body.innerHTML = g.map(x => `<div class="list-item" onclick="rPickGroup('${x.group}','${esc(x.label)}')"><div style="flex:1">${esc(x.label)}</div><span class="muted small">${x.count} ›</span></div>`).join(''); }
+}
+async function rPickGroup(g, label) { const list = await api('/exercises/catalog?group=' + g); document.getElementById('rpickbody').innerHTML = `<div class="back" onclick="rPickTab('grp')">‹ ${label}</div>` + list.map(x => rPickRow(x.name)).join(''); }
+async function rPickSearch() { const q = document.getElementById('rexq').value.trim(); if (q.length < 2) return; const r = await api('/exercises/search?q=' + encodeURIComponent(q)); document.getElementById('rpickbody').innerHTML = r.map(x => rPickRow(x.name)).join('') || '<div class="muted small">Ничего не найдено</div>'; }
+function rPickRow(name) { return `<div class="list-item" onclick='rChooseEx(${JSON.stringify(name)})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
+function rChooseEx(name) { rOpenTarget(name, -1); }
+function rEditEx(j) { rOpenTarget(window._ROUTINE.days[window._RDi].exercises[j].name, j); }
+function rOpenTarget(name, idx) {
+  const arr = window._ROUTINE.days[window._RDi].exercises;
+  const ex = idx >= 0 ? arr[idx] : { name, target_sets: 3, target_reps_min: 10, target_reps_max: 10, target_weight: null, reps_text: null };
+  const wVal = ex.target_weight != null ? fmt(ex.target_weight) : '';
+  sheet(`<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>
+    ${stepRow([['rsets', ex.target_sets || 3, 'подх.', 1], ['rrmin', ex.target_reps_min || 10, 'повт. от', 1]])}
+    ${stepRow([['rrmax', ex.target_reps_max || ex.target_reps_min || 10, 'повт. до', 1], ['rweight', wVal === '' ? 0 : wVal, 'кг', 2.5]])}
+    <div class="tag-row"><span class="pill ${ex.reps_text ? 'on' : ''}" id="rfail" onclick="tag(this)" data-tag="x">До отказа</span></div>
+    <button class="btn" onclick='rSaveTarget(${idx},${JSON.stringify(name)})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+}
+function rSaveTarget(idx, name) {
+  const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
+  const failure = document.getElementById('rfail').classList.contains('on');
+  const sets = g('rsets') || null; let rmin = g('rrmin') || null, rmax = g('rrmax') || null;
+  if (rmin && rmax && rmax < rmin) rmax = rmin;
+  const w = g('rweight'); const weight = (w && w > 0) ? w : null;
+  const ex = { name, target_sets: sets, target_reps_min: failure ? null : rmin, target_reps_max: failure ? null : rmax, target_weight: weight, reps_text: failure ? 'до отказа' : null };
+  const arr = window._ROUTINE.days[window._RDi].exercises;
+  if (idx >= 0) arr[idx] = ex; else arr.push(ex);
+  closeSheet(); RoutineDay(window._RDi);
+}
+function routineApplySheet(id) {
+  sheet(`<h2>Применить шаблон</h2><div class="muted small" style="margin-bottom:10px">Создаст планы на выбранное число недель вперёд.</div>
+    <div class="mfield" style="margin-bottom:10px"><label>С даты</label><input id="ra_from" type="date" value="${todayISO()}"></div>
+    <div class="mfield" style="margin-bottom:12px"><label>Недель</label><input id="ra_weeks" type="number" min="1" max="12" value="4"></div>
+    <button class="btn" onclick="routineApplyDo(${id})">Применить</button>`);
+}
+async function routineApplyDo(id) {
+  const from = document.getElementById('ra_from').value, weeks = parseInt(document.getElementById('ra_weeks').value || '1', 10);
+  try { const r = await api('/routines/' + id + '/apply', 'POST', { from_date: from, weeks }); closeSheet(); toast(`Создано планов: ${r.created}`); go('schedule'); }
+  catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── Settings (service for all + access management for admins) ────────────────

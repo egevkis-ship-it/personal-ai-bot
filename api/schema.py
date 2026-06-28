@@ -134,6 +134,19 @@ CREATE TABLE IF NOT EXISTS app_access (
     decided_at   TIMESTAMPTZ
 );
 
+-- Reusable weekly templates ("routines"): days = [{weekday 0-6, focus_label,
+-- exercises:[...]}] in the same exercise shape as planned_workouts. Owned by the
+-- web API only (phase F).
+CREATE TABLE IF NOT EXISTS routines (
+    id         SERIAL      PRIMARY KEY,
+    user_id    TEXT        NOT NULL,
+    name       TEXT        NOT NULL,
+    days       JSONB       NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_routines_user ON routines(user_id);
+
 CREATE INDEX IF NOT EXISTS idx_pw_user_date ON planned_workouts(user_id, planned_date);
 CREATE INDEX IF NOT EXISTS idx_w_user_date  ON workouts(user_id, workout_date);
 CREATE INDEX IF NOT EXISTS idx_es_workout   ON exercise_sets(workout_id);

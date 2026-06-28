@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import uuid
@@ -1398,6 +1399,120 @@ async def create_plans_bulk(body: BulkPlans, uid: str = Depends(current_uid)):
             await db.update_planned_workout_notes(pid, day.notes)
         saved.append({"id": pid, "planned_date": d.isoformat()})
     return {"saved": len(saved), "plans": saved}
+
+
+# ─────────────────────────── routines (templates) ───────────────────────────
+
+class RoutineBody(BaseModel):
+    name: Optional[str] = None
+    days: Optional[list[dict]] = None
+
+
+class ApplyRoutine(BaseModel):
+    from_date: Optional[str] = None
+    weeks: int = 1
+
+
+def _clean_routine_days(days: list[dict]) -> list[dict]:
+    """Validate routine days: each {weekday 0-6, focus_label?, exercises[]} where
+    exercises use the same shape as planned_workouts (_clean_plan_exercises)."""
+    out: list[dict] = []
+    for d in days or []:
+        if not isinstance(d, dict):
+            raise HTTPException(422, "день должен быть объектом")
+        wd = _opt_int(d.get("weekday"), "weekday", 0, 6)
+        out.append({
+            "weekday": wd if wd is not None else 0,
+            "focus_label": _opt_str(d.get("focus_label"), 200),
+            "exercises": _clean_plan_exercises(d.get("exercises") or []),
+        })
+    out.sort(key=lambda x: x["weekday"])
+    return out
+
+
+async def _own_routine(uid: str, rid: int) -> dict:
+    rows = await _rows("SELECT id, user_id, name, days FROM routines WHERE id = :id", id=rid)
+    if not rows or rows[0]["user_id"] != uid:
+        raise HTTPException(404, "not found")
+    return rows[0]
+
+
+@app.get("/api/routines")
+async def list_routines(uid: str = Depends(current_uid)):
+    return await _rows(
+        "SELECT id, name, days, updated_at FROM routines WHERE user_id = :u ORDER BY updated_at DESC", u=uid)
+
+
+@app.post("/api/routines")
+async def create_routine(body: RoutineBody, uid: str = Depends(current_uid)):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(422, "укажите название шаблона")
+    days = _clean_routine_days(body.days or [])
+    rid = await _scalar(
+        "INSERT INTO routines (user_id, name, days) VALUES (:u, :n, CAST(:d AS jsonb)) RETURNING id",
+        u=uid, n=name[:200], d=json.dumps(days, ensure_ascii=False))
+    return {"id": rid}
+
+
+@app.get("/api/routines/{rid}")
+async def get_routine(rid: int, uid: str = Depends(current_uid)):
+    return await _own_routine(uid, rid)
+
+
+@app.patch("/api/routines/{rid}")
+async def update_routine(rid: int, body: RoutineBody, uid: str = Depends(current_uid)):
+    await _own_routine(uid, rid)
+    sets, params = [], {"id": rid}
+    if body.name is not None:
+        n = body.name.strip()
+        if not n:
+            raise HTTPException(422, "название не может быть пустым")
+        sets.append("name = :n"); params["n"] = n[:200]
+    if body.days is not None:
+        sets.append("days = CAST(:d AS jsonb)")
+        params["d"] = json.dumps(_clean_routine_days(body.days), ensure_ascii=False)
+    if sets:
+        sets.append("updated_at = now()")
+        async with get_session() as s:
+            await s.execute(text(f"UPDATE routines SET {', '.join(sets)} WHERE id = :id"), params)
+    return {"ok": True}
+
+
+@app.delete("/api/routines/{rid}")
+async def delete_routine(rid: int, uid: str = Depends(current_uid)):
+    await _own_routine(uid, rid)
+    async with get_session() as s:
+        await s.execute(text("DELETE FROM routines WHERE id = :id"), {"id": rid})
+    return {"ok": True}
+
+
+@app.post("/api/routines/{rid}/apply")
+async def apply_routine(rid: int, body: ApplyRoutine, uid: str = Depends(current_uid)):
+    """Roll the weekly template out to planned_workouts for `weeks` weeks from
+    `from_date` (default today). Each routine day lands on its weekday; days before
+    the start date are skipped so a mid-week start doesn't backfill the past."""
+    r = await _own_routine(uid, rid)
+    days = r["days"] or []
+    weeks = max(1, min(int(body.weeks or 1), 12))
+    if body.from_date:
+        try:
+            start = date.fromisoformat(body.from_date.strip())
+        except ValueError:
+            raise HTTPException(422, "bad from_date, expected YYYY-MM-DD")
+    else:
+        start = await today_for(uid)
+    created = 0
+    for wk in range(weeks):
+        monday = start - timedelta(days=start.weekday()) + timedelta(days=7 * wk)
+        for d in days:
+            target = monday + timedelta(days=int(d.get("weekday", 0)))
+            if target < start:
+                continue
+            exs = await _normalize_plan_exercises(_clean_plan_exercises(d.get("exercises") or []), uid)
+            await db.create_planned_workout(uid, target, d.get("focus_label") or None, exs)
+            created += 1
+    return {"created": created}
 
 
 # ───────────────────────────── measurements ─────────────────────────────────
