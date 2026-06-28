@@ -72,7 +72,11 @@ async def _start_workout(
         focus_label=focus,
         planned_workout_id=plan_id,
     )
-    await state.update_data(workout_id=workout_id, last_exercise=None)
+    # Plan exercises become the recognition dictionary for this session.
+    plan_ex_names = [e.get("name") for e in (plan.get("exercises") or [])] if plan else []
+    plan_ex_names = [n for n in plan_ex_names if n]
+    await state.update_data(workout_id=workout_id, last_exercise=None,
+                            plan_exercises=plan_ex_names)
     await state.set_state(WorkoutStates.active)
 
     focus_str = f" — {focus}" if focus else ""
@@ -333,13 +337,23 @@ async def _handle_set_input(message: Message, text: str, state: FSMContext, *, p
         )
         return
 
-    # Resolve names via static lib + DB cache ONLY (no AI auto-write).
-    # If something is unknown — we'll ask the user before showing set-confirm.
-    from app.bot.services.exercise_catalog import resolve_known, ai_suggest_canonical
+    # Resolve names: (1) today's plan exercises are the priority dictionary —
+    # if the entry matches a planned exercise, use the plan's exact name so the
+    # log stays in sync with the plan and no "new exercise" prompt appears.
+    # (2) static lib + DB cache. (3) otherwise ask the user (AI suggestion).
+    from app.bot.services.exercise_catalog import (
+        resolve_known, ai_suggest_canonical, match_plan_exercise,
+    )
+    plan_exercises: list[str] = data.get("plan_exercises") or []
     name_cache: dict[str, str] = {}      # raw → canonical (already known)
     new_unknown: list[str] = []          # raw names that need user confirmation
     unique_names = list({s.exercise_name for s in sets if s.exercise_name})
     for raw_name in unique_names:
+        # Plan dictionary first.
+        plan_hit = match_plan_exercise(raw_name, plan_exercises)
+        if plan_hit:
+            name_cache[raw_name] = plan_hit
+            continue
         try:
             r = await resolve_known(raw_name)
         except Exception as exc:

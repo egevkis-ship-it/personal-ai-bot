@@ -248,6 +248,57 @@ async def resolve_or_register(name: str) -> dict:
 
 # ─────────────────────────── confirmation-aware lookup ─────────────────────
 
+# ─────────────────────────── plan-as-dictionary match ─────────────────────
+
+_STOP_WORDS = {
+    "в", "на", "с", "со", "из", "и", "для", "к", "по", "от", "до", "у",
+    "под", "над", "за", "о", "об", "при", "или",
+}
+
+
+def _sig_words(s: str) -> list[str]:
+    cleaned = clean_text(s)
+    return [w for w in cleaned.split() if len(w) >= 3 and w not in _STOP_WORDS]
+
+
+def match_plan_exercise(raw_input: str, plan_names: list[str]) -> str | None:
+    """Match a free-text set entry against the day's planned exercises.
+
+    Narrow context (6-8 exercises of one day, usually distinct) makes fuzzy
+    matching safe here — unlike the global catalog. Returns the plan's exact
+    name when one clearly wins; None if no match or ambiguous (caller falls
+    back to the catalog / new-exercise confirmation).
+    """
+    if not raw_input or not plan_names:
+        return None
+    iset = set(_sig_words(raw_input))
+    if not iset:
+        return None
+    scored: list[tuple[float, str]] = []
+    for pn in plan_names:
+        pw = set(_sig_words(pn))
+        if not pw:
+            continue
+        inter = iset & pw
+        # require a real overlap: ≥2 shared significant words, or one is a
+        # subset of the other.
+        if len(inter) < 2 and not (iset <= pw or pw <= iset):
+            continue
+        score = len(inter) / max(1, min(len(iset), len(pw)))
+        scored.append((score, pn))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_score, top_name = scored[0]
+    if top_score < 0.6:
+        return None
+    # Ambiguity guard: if the runner-up is essentially as good and different,
+    # don't auto-pick — let the user confirm via the catalog path.
+    if len(scored) > 1 and scored[1][1] != top_name and scored[1][0] >= top_score - 0.01:
+        return None
+    return top_name
+
+
 async def resolve_known(name: str) -> dict | None:
     """Like resolve_or_register but ONLY checks static library and DB cache.
     Returns None if the name is unknown (caller should ask the user before

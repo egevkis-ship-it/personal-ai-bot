@@ -153,20 +153,64 @@ async def handle_plan_paste(message: Message, state: FSMContext) -> None:
     await state.update_data(parsed_days=days_data)
     await state.set_state(PlanStates.confirm_parsed)
 
-    # Build preview
-    preview_lines = []
-    for d in days[:7]:  # show max 7 days in preview
-        focus = d.focus_label or "тренировка"
-        n_ex = len(d.exercises)
-        preview_lines.append(f"  • {d.day_label} — {focus} ({n_ex} упр.)")
-    if len(days) > 7:
-        preview_lines.append(f"  ... ещё {len(days) - 7} дн.")
+    # Full preview: every day with every exercise, so the user can verify the
+    # bot parsed everything correctly BEFORE saving. Split across messages to
+    # stay under Telegram's 4096-char limit; the confirm buttons go on the last.
+    blocks = [f"✅ Разобрано <b>{len(days)}</b> дней. Проверь и сохрани:\n"]
+    for d in days:
+        blocks.append(_format_parsed_day_preview(d))
 
-    preview = "\n".join(preview_lines)
-    await message.answer(
-        f"✅ Разобрано {len(days)} дней:\n{preview}",
-        reply_markup=plan_confirm_parsed(len(days)),
-    )
+    chunks: list[str] = []
+    current = ""
+    for block in blocks:
+        if len(current) + len(block) + 2 > 3500:
+            if current:
+                chunks.append(current)
+            current = block
+        else:
+            current = f"{current}\n\n{block}" if current else block
+    if current:
+        chunks.append(current)
+
+    for i, chunk in enumerate(chunks):
+        is_last = i == len(chunks) - 1
+        await message.answer(
+            chunk,
+            parse_mode="HTML",
+            reply_markup=plan_confirm_parsed(len(days)) if is_last else None,
+        )
+
+
+def _format_parsed_day_preview(d) -> str:
+    """Render one parsed PlannedDay with all exercises for the pre-save preview."""
+    focus = d.focus_label or "тренировка"
+    lines = [f"📅 <b>{_esc(d.day_label)} — {_esc(focus)}</b>"]
+    if getattr(d, "notes", None):
+        lines.append(f"💬 <i>{_esc(d.notes)}</i>")
+    if not d.exercises:
+        lines.append("  <i>отдых / упражнений нет</i>")
+        return "\n".join(lines)
+    for ex in d.exercises:
+        sets = ex.target_sets or "?"
+        r_min, r_max = ex.target_reps_min, ex.target_reps_max
+        if ex.reps_text:
+            reps = ex.reps_text
+        elif r_min and r_max and r_min != r_max:
+            reps = f"{r_min}–{r_max}"
+        elif r_min:
+            reps = str(r_min)
+        else:
+            reps = "?"
+        w = f" · {ex.target_weight:g} кг" if ex.target_weight else ""
+        sg = f" [{ex.superset_group}]" if ex.superset_group else ""
+        lines.append(f"  • {_esc(ex.name)}{sg} — {sets}×{reps}{w}")
+        if ex.notes:
+            lines.append(f"    <i>💬 {_esc(ex.notes)}</i>")
+    return "\n".join(lines)
+
+
+def _esc(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 @router.callback_query(F.data == "plan_load:confirm")
@@ -353,13 +397,14 @@ async def cb_start_from_plan(cb: CallbackQuery, state: FSMContext) -> None:
         focus_label=plan.get("focus_label"),
         planned_workout_id=plan_id,
     )
-    await state.update_data(workout_id=workout_id, last_exercise=None)
+    exercises: list[dict] = plan.get("exercises") or []
+    plan_ex_names = [e.get("name") for e in exercises if e.get("name")]
+    await state.update_data(workout_id=workout_id, last_exercise=None,
+                            plan_exercises=plan_ex_names)
     await state.set_state(WorkoutStates.active)
 
     from app.bot.keyboards import workout_active_menu
     focus = plan.get("focus_label") or "тренировка"
-    # Show planned exercises as a reminder
-    exercises: list[dict] = plan.get("exercises") or []
     plan_text = ""
     if exercises:
         lines = []

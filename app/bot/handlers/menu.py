@@ -55,10 +55,20 @@ async def menu_workout(message: Message, state: FSMContext) -> None:
         # is "not handled".
         from app.bot.handlers.workout import show_active_session
         last = await get_last_set(active["id"])
+        # Restore the plan dictionary too, so plan-aware exercise matching keeps
+        # working after a resume.
+        plan_ex_names: list[str] = []
+        planned_id = active.get("planned_workout_id")
+        if planned_id:
+            from app.db import get_planned_workout
+            plan = await get_planned_workout(planned_id)
+            if plan:
+                plan_ex_names = [e.get("name") for e in (plan.get("exercises") or []) if e.get("name")]
         await state.set_state(WorkoutStates.active)
         await state.update_data(
             workout_id=active["id"],
             last_exercise=last["exercise_name"] if last else None,
+            plan_exercises=plan_ex_names,
         )
         await show_active_session(message, active, uid)
         return
