@@ -1104,10 +1104,26 @@ class BulkPlans(BaseModel):
 
 
 @app.get("/api/plans")
-async def plans_list(days: int = 30, uid: str = Depends(current_uid)):
-    """Upcoming planned workouts within the next `days` days (status='planned')."""
+async def plans_list(
+    days: int = 30,
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    uid: str = Depends(current_uid),
+):
+    """Planned workouts (status='planned'): the next `days` days (default), or an
+    explicit range (?from=YYYY-MM-DD&to=YYYY-MM-DD). Item shape is identical."""
     today = await today_for(uid)
-    rows = await db.get_planned_workouts_range(uid, today, today + timedelta(days=days))
+    if from_ or to:
+        try:
+            fd = date.fromisoformat((from_ or "").strip())
+            td = date.fromisoformat((to or "").strip())
+        except ValueError:
+            raise HTTPException(422, "bad date, expected YYYY-MM-DD")
+        if fd > td:
+            raise HTTPException(422, "from must be <= to")
+    else:
+        fd, td = today, today + timedelta(days=days)
+    rows = await db.get_planned_workouts_range(uid, fd, td)
     out = []
     for p in rows:
         d = p.get("planned_date")

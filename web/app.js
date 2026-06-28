@@ -43,6 +43,7 @@ async function go(tab, param) {
     if (tab === 'chooseDay') return ChooseDay();
     if (tab === 'plans') return Plans();
     if (tab === 'planEdit') return PlanEdit(param);
+    if (tab === 'schedule') return Schedule();
     if (tab === 'settings') return Settings();
     if (tab === 'reports') return Reports();
     if (tab === 'photos') return Photos();
@@ -140,7 +141,8 @@ async function Train() {
     <div class="card list-item" onclick="go('chooseDay')"><div class="ic">🗓</div><div style="flex:1"><b>Другой день недели</b><div class="small muted">взять пропущенную</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>
     <div class="muted small" style="margin:18px 0 8px">Планирование</div>
-    <div class="card list-item" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Запланировать тренировки</b><div class="small muted">расписание на дни и неделю</div></div><span class="muted">›</span></div>`;
+    <div class="card list-item" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Запланировать тренировки</b><div class="small muted">расписание на дни и неделю</div></div><span class="muted">›</span></div>
+    <div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Что запланировано</b><div class="small muted">расписание: день, неделя, месяц</div></div><span class="muted">›</span></div>`;
 }
 async function freeWorkout() { const r = await api('/workouts', 'POST', {}); go('active', r.id); }
 async function ChooseDay() {
@@ -642,6 +644,116 @@ function newPlan(dateISO) {
   window._PLAN = { id: null, date: dateISO || todayISO(), focus: '', notes: '', exercises: [] };
   go('planEdit', 'new');
 }
+
+// ── Schedule (view-only: day / week / month) ────────────────────────────────
+function isoOf(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+function addDaysISO(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return isoOf(d); }
+function mondayISO(iso) { return addDaysISO(iso, -isoWeekday(iso)); }
+function fmtFullDate(iso) { return new Date(iso + 'T00:00:00').toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }); }
+function fmtDM(iso) { return new Date(iso + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
+function _byDate(list) { const m = {}; list.forEach(p => { (m[p.planned_date] = m[p.planned_date] || []).push(p); }); return m; }
+
+async function Schedule() {
+  document.getElementById('tabbar').style.display = '';
+  if (!STATE.schedMode) STATE.schedMode = 'day';
+  if (!STATE.schedDate) STATE.schedDate = todayISO();
+  const mode = STATE.schedMode;
+  const pills = [['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) =>
+    `<span class="pill ${mode === k ? 'on' : ''}" onclick="schedSet('${k}')">${l}</span>`).join('');
+  view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span><h1>Что запланировано</h1>
+    <div class="tag-row" style="justify-content:flex-start;margin-bottom:12px">${pills}</div>
+    <div id="schedBody"><div class="card muted small">Загрузка…</div></div>`;
+  try {
+    if (mode === 'day') await schedDay();
+    else if (mode === 'week') await schedWeek();
+    else await schedMonth();
+  } catch (e) {
+    if (e.status === 401 || e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
+    document.getElementById('schedBody').innerHTML = `<div class="card small" style="color:var(--danger)">${esc(e.message || 'ошибка')}</div>`;
+  }
+}
+function schedSet(mode) { STATE.schedMode = mode; Schedule(); }
+function schedNav(dir) {
+  const iso = STATE.schedDate;
+  if (STATE.schedMode === 'day') STATE.schedDate = addDaysISO(iso, dir);
+  else if (STATE.schedMode === 'week') STATE.schedDate = addDaysISO(iso, dir * 7);
+  else { const d = new Date(iso + 'T00:00:00'); d.setDate(1); d.setMonth(d.getMonth() + dir); STATE.schedDate = isoOf(d); }
+  Schedule();
+}
+function schedHeader(title) {
+  return `<div class="row sp" style="margin-bottom:10px">
+    <span class="back" style="margin:0;font-size:22px" onclick="schedNav(-1)">‹</span>
+    <b style="text-transform:capitalize">${esc(title)}</b>
+    <span class="back" style="margin:0;font-size:22px" onclick="schedNav(1)">›</span></div>`;
+}
+
+async function schedDay() {
+  const iso = STATE.schedDate;
+  const list = await api(`/plans?from=${iso}&to=${iso}`);
+  let html = schedHeader(fmtFullDate(iso));
+  if (!list.length) {
+    html += `<div class="card muted">На этот день ничего не запланировано</div>
+      <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
+  } else {
+    html += list.map(p => `<div class="card" style="cursor:pointer" onclick="go('planEdit',${p.id})">
+      <div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b><span class="muted">›</span></div>
+      ${(p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>'}
+    </div>`).join('');
+  }
+  document.getElementById('schedBody').innerHTML = html;
+}
+
+async function schedWeek() {
+  const mon = mondayISO(STATE.schedDate), sun = addDaysISO(mon, 6);
+  const byDate = _byDate(await api(`/plans?from=${mon}&to=${sun}`));
+  const today = todayISO();
+  let rows = '';
+  for (let i = 0; i < 7; i++) {
+    const d = addDaysISO(mon, i);
+    const plans = byDate[d] || [];
+    const isToday = d === today;
+    const first = plans[0];
+    const label = plans.length
+      ? `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`
+      : '—';
+    const tap = plans.length ? `go('planEdit',${first.id})` : `newPlan('${d}')`;
+    rows += `<div class="card list-item" style="${isToday ? 'border:2px solid var(--info)' : ''}" onclick="${tap}">
+      <div class="ic">${WD_SHORT[i]}</div>
+      <div style="flex:1"><b>${esc(fmtDM(d))}</b>${isToday ? ' <span class="small" style="color:var(--info)">сегодня</span>' : ''}
+        <div class="small muted">${label}</div></div>
+      <span class="muted">${plans.length ? '›' : '＋'}</span></div>`;
+  }
+  document.getElementById('schedBody').innerHTML = schedHeader(`${fmtDM(mon)} – ${fmtDM(sun)}`) + rows;
+}
+
+async function schedMonth() {
+  const a = new Date(STATE.schedDate + 'T00:00:00');
+  const y = a.getFullYear(), mo = a.getMonth();
+  const firstISO = isoOf(new Date(y, mo, 1));
+  const lastDay = new Date(y, mo + 1, 0);
+  const lastISO = isoOf(lastDay);
+  const byDate = _byDate(await api(`/plans?from=${firstISO}&to=${lastISO}`));
+  const today = todayISO();
+  const gridStart = mondayISO(firstISO);
+  const weeks = Math.ceil((isoWeekday(firstISO) + lastDay.getDate()) / 7);
+  let cells = '';
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = addDaysISO(gridStart, i);
+    const dt = new Date(d + 'T00:00:00');
+    const inMonth = dt.getMonth() === mo;
+    const plans = byDate[d] || [];
+    const isToday = d === today;
+    const tap = plans.length === 1 ? `go('planEdit',${plans[0].id})` : `schedDayAt('${d}')`;
+    const dot = plans.length ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : 'var(--info)'};margin:3px auto 0"></div>` : '<div style="height:8px"></div>';
+    cells += `<div onclick="${tap}" style="text-align:center;padding:6px 0;border-radius:8px;cursor:pointer;${isToday ? 'background:var(--info);color:#fff' : (inMonth ? '' : 'opacity:.3')}">
+      <div style="font-size:13px">${dt.getDate()}</div>${dot}</div>`;
+  }
+  const head = WD_SHORT.map(w => `<div style="text-align:center;font-size:11px;color:var(--txt2)">${w}</div>`).join('');
+  const title = a.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  document.getElementById('schedBody').innerHTML = schedHeader(title) +
+    `<div class="card"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">${head}${cells}</div></div>`;
+}
+function schedDayAt(iso) { STATE.schedDate = iso; STATE.schedMode = 'day'; Schedule(); }
 
 async function PlanEdit(param) {
   if (param && param !== 'new') {
