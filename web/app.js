@@ -627,8 +627,9 @@ async function loadPhotos() {
   const box = document.getElementById('photoList');
   try {
     const series = await api('/photos?limit=30');
+    window._PHOTOS = series;
     if (!series.length) { box.innerHTML = '<div class="card muted">Пока нет фото.</div>'; return; }
-    box.innerHTML = series.map(s => `<div class="card">
+    box.innerHTML = (series.length >= 2 ? `<button class="btn ghost" style="margin-bottom:12px" onclick="openPhotoCompare()">⇄ Сравнить «было / стало»</button>` : '') + series.map(s => `<div class="card">
       <div class="row sp"><b>${fmtPlanDate(s.taken_on)}</b><span class="small muted">${s.photo_count} фото</span></div>
       <div style="display:flex;gap:6px;overflow-x:auto;margin:8px 0">
         ${(s.photo_ids || []).map(id => `<img src="/api/photos/${id}/image" style="height:120px;border-radius:8px;object-fit:cover" loading="lazy">`).join('')}
@@ -663,6 +664,53 @@ function delPhotoSeries(sid) {
     try { await api('/photos/series/' + encodeURIComponent(sid), 'DELETE'); toast('Удалено'); loadPhotos(); }
     catch (e) { toast(e.message || 'не удалось'); }
   });
+}
+// ── Photo compare (before / after) ──────────────────────────────────────────
+function nearestWeight(dateISO, meas) {
+  if (!meas || !meas.length || !dateISO) return null;
+  const t = new Date(dateISO + 'T00:00:00').getTime();
+  let best = null, bestDiff = Infinity;
+  for (const m of meas) {
+    if (m.weight_kg == null || !m.taken_on) continue;
+    const diff = Math.abs(new Date(m.taken_on + 'T00:00:00').getTime() - t);
+    if (diff < bestDiff) { bestDiff = diff; best = m; }
+  }
+  return (best && bestDiff <= 21 * 864e5) ? best.weight_kg : null;  // within 3 weeks
+}
+async function openPhotoCompare() {
+  const series = window._PHOTOS || [];
+  if (series.length < 2) return toast('Нужно минимум 2 серии фото');
+  document.getElementById('tabbar').style.display = '';
+  let meas = [];
+  try { meas = await api('/measurements'); } catch {}
+  window._PCmeas = meas;
+  const opts = sel => series.map((s, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${fmtPlanDate(s.taken_on)} · ${s.photo_count} фото</option>`).join('');
+  const ss = 'width:100%;border:none;background:transparent;color:var(--txt);font-size:14px;outline:none';
+  view.innerHTML = `<span class="back" onclick="go('photos')">‹ Фото</span><h2>Сравнение «было / стало»</h2>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div class="mfield" style="flex:1"><label>Было</label><select id="pcA" onchange="renderPhotoCompare()" style="${ss}">${opts(series.length - 1)}</select></div>
+      <div class="mfield" style="flex:1"><label>Стало</label><select id="pcB" onchange="renderPhotoCompare()" style="${ss}">${opts(0)}</select></div>
+    </div><div id="pcResult"></div>`;
+  renderPhotoCompare();
+}
+function renderPhotoCompare() {
+  const series = window._PHOTOS || [], meas = window._PCmeas || [];
+  const a = series[+document.getElementById('pcA').value], b = series[+document.getElementById('pcB').value];
+  if (!a || !b) return;
+  const col = (s, label) => {
+    const wt = nearestWeight(s.taken_on, meas), img = (s.photo_ids || [])[0];
+    return `<div style="flex:1;min-width:0;text-align:center">
+      <div class="muted small">${label}</div>
+      <div style="font-weight:600;margin:2px 0">${fmtPlanDate(s.taken_on)}</div>
+      ${img != null ? `<img src="/api/photos/${img}/image" style="width:100%;border-radius:10px;object-fit:cover" loading="lazy">` : '<div class="card muted small">нет фото</div>'}
+      <div class="small" style="margin-top:4px">${wt != null ? fmt(wt) + ' кг' : '<span class="muted">вес —</span>'}</div>
+      ${(s.photo_ids || []).length > 1 ? `<div style="display:flex;gap:4px;overflow-x:auto;margin-top:6px">${s.photo_ids.slice(1).map(id => `<img src="/api/photos/${id}/image" style="height:52px;border-radius:6px;object-fit:cover" loading="lazy">`).join('')}</div>` : ''}</div>`;
+  };
+  const wa = nearestWeight(a.taken_on, meas), wb = nearestWeight(b.taken_on, meas);
+  const delta = (wa != null && wb != null) ? Math.round((wb - wa) * 10) / 10 : null;
+  document.getElementById('pcResult').innerHTML = `<div style="display:flex;gap:10px">${col(a, 'Было')}${col(b, 'Стало')}</div>
+    ${delta != null ? `<div class="card" style="text-align:center;margin-top:14px"><span class="muted small">Δ веса между датами</span>
+      <div style="font-size:22px;font-weight:700;color:${delta < 0 ? 'var(--success)' : delta > 0 ? 'var(--warn)' : 'var(--txt)'}">${delta > 0 ? '+' : ''}${fmt(delta)} кг</div></div>` : ''}`;
 }
 
 // ── Measurements ──────────────────────────────────────────────────────────
