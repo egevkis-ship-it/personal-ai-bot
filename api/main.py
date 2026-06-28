@@ -115,6 +115,36 @@ async def session_mw(request: Request, call_next):
     return await call_next(request)
 
 
+# Security headers. CSP is permissive for inline handlers/styles (the app uses
+# them throughout) and the Telegram Login Widget (script from telegram.org, OAuth
+# iframe from oauth.telegram.org); it still locks down object/base/frame-ancestors
+# and restricts external script/connect origins. esc() (phase 1.2) is the primary
+# XSS defense; this is defence-in-depth.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://telegram.org; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    "connect-src 'self'; "
+    "frame-src https://oauth.telegram.org https://telegram.org; "
+    "font-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("Content-Security-Policy", _CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    return resp
+
+
 def current_uid(request: Request) -> str:
     uid = getattr(request.state, "uid", None)
     if not uid:
