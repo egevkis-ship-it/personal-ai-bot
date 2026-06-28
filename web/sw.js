@@ -1,6 +1,9 @@
 // Minimal service worker — enables "Add to Home Screen" / standalone mode.
 // Network-first: always fetch fresh (prototype), fall back to cache offline.
-const CACHE = 'fit-proto-v2';
+// Bump CACHE on shell/header changes so the byte-changed sw.js replaces the old
+// worker and re-caches the app shell. v3: pick up the CSP fix (script-src
+// 'unsafe-eval') that lets the Telegram Login Widget render for cached clients.
+const CACHE = 'fit-proto-v3';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
