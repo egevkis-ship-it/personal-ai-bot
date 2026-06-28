@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import os
 import uuid
 from datetime import date, timedelta
@@ -53,6 +54,34 @@ COOKIE = "session"
 
 # Fail loudly at import (container start) on insecure production config.
 auth.assert_secure_config(IS_PROD)
+
+log = logging.getLogger("api")
+
+# ── Error monitoring (Sentry) — phase A ──────────────────────────────────────
+# No-op unless SENTRY_DSN is set: with no DSN nothing is initialised and nothing
+# is ever sent. With a DSN, sentry-sdk auto-instruments FastAPI/Starlette and
+# reports unhandled endpoint exceptions. errors-only (no tracing overhead).
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+# Coolify/most CIs expose the built commit under one of these — best-effort.
+GIT_SHA = (
+    os.getenv("SOURCE_COMMIT")
+    or os.getenv("COOLIFY_GIT_COMMIT_SHA")
+    or os.getenv("GIT_COMMIT_SHA")
+    or os.getenv("GIT_SHA")
+    or ""
+).strip()
+if SENTRY_DSN:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=APP_ENV,
+        release=GIT_SHA or None,
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+    )
+    log.info("Sentry monitoring enabled (env=%s release=%s)", APP_ENV, GIT_SHA or "unknown")
+else:
+    log.info("Sentry monitoring disabled (no SENTRY_DSN)")
 
 PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz")
 
@@ -333,6 +362,7 @@ def _access_public(row: dict, viewer_uid: str) -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
+    log.info("API startup: env=%s release=%s sentry=%s", APP_ENV, GIT_SHA or "unknown", bool(SENTRY_DSN))
     async with engine.begin() as conn:
         for stmt in (s.strip() for s in CREATE_SQL.split(";") if s.strip()):
             await conn.execute(text(stmt))
