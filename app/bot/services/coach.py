@@ -280,14 +280,14 @@ async def opus_coach_summary(facts: dict) -> str:
         return "Нет данных для разбора."
     try:
         resp = await _anthropic.messages.create(
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
             max_tokens=400,
             system=_COACH_SYSTEM,
             messages=[{"role": "user", "content": json.dumps(facts, ensure_ascii=False)}],
         )
         return resp.content[0].text.strip()
     except Exception as exc:
-        log.error("opus_coach_summary error: %s", exc)
+        log.error("opus_coach_summary error: %s", exc, exc_info=True)
         # Deterministic fallback when Opus is unavailable
         return _fallback_summary(facts)
 

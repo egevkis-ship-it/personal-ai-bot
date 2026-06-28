@@ -1217,15 +1217,17 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
         raise HTTPException(422, "пустой текст")
     await check_and_bump_ai(uid)
     try:
-        from app.bot.services.ai_parser import parse_plan_text
+        from app.bot.services.ai_parser import PlanParseError, parse_plan_text
     except Exception:
         raise HTTPException(503, "ИИ-парсер недоступен")
     try:
         days = await parse_plan_text(body.text)
-    except Exception as e:
-        raise HTTPException(502, f"ошибка разбора: {str(e)[:200]}")
+    except PlanParseError as e:
+        # The model call itself failed (outage/auth/bad model) — surface the cause
+        # as a 502 instead of a misleading "couldn't parse" 422.
+        raise HTTPException(502, f"ИИ-сервис недоступен: {str(e)[:200]}")
     if not days:
-        raise HTTPException(422, "не удалось разобрать план")
+        raise HTTPException(422, "не удалось разобрать план — проверь формат")
     today = await today_for(uid)
     out = []
     for i, day in enumerate(days):

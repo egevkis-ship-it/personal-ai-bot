@@ -109,7 +109,7 @@ async def describe_photo_series(images: list[tuple[bytes, str]]) -> dict | None:
                     "Дай SHORT и DETAILED ровно в указанном формате."
         })
         resp = await _anthropic.messages.create(
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
             max_tokens=1500,
             system=_FITNESS_VISION_SYSTEM,
             messages=[{"role": "user", "content": content}],
@@ -117,5 +117,5 @@ async def describe_photo_series(images: list[tuple[bytes, str]]) -> dict | None:
         text_out = resp.content[0].text.strip()
         return _split_short_detailed(text_out)
     except Exception as exc:
-        log.error("describe_photo_series error: %s", exc)
+        log.error("describe_photo_series error: %s", exc, exc_info=True)
         return None

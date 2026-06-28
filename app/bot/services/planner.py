@@ -184,7 +184,7 @@ async def generate_day_plan(user_id: str, target_date: date) -> PlannedDay | Non
     }
     try:
         resp = await _anthropic.messages.create(
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
             max_tokens=1500,
             system=_PLANNER_DAY_SYSTEM,
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
@@ -193,7 +193,7 @@ async def generate_day_plan(user_id: str, target_date: date) -> PlannedDay | Non
         data = json.loads(raw)
         return _parse_planned_day_json(data)
     except Exception as exc:
-        log.error("generate_day_plan error: %s", exc)
+        log.error("generate_day_plan error: %s", exc, exc_info=True)
         return None
 
 
@@ -210,7 +210,7 @@ async def generate_week_plan(user_id: str, start_date: date) -> list[PlannedDay]
     }
     try:
         resp = await _anthropic.messages.create(
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
             max_tokens=3500,
             system=_PLANNER_WEEK_SYSTEM,
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
@@ -219,5 +219,5 @@ async def generate_week_plan(user_id: str, start_date: date) -> list[PlannedDay]
         data = json.loads(raw)
         return [_parse_planned_day_json(d) for d in data.get("days", [])]
     except Exception as exc:
-        log.error("generate_week_plan error: %s", exc)
+        log.error("generate_week_plan error: %s", exc, exc_info=True)
         return []

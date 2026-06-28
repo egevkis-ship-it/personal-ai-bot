@@ -41,7 +41,7 @@ async def run_agent(request: str) -> AgentResult:
 
     for _ in range(10):  # max iterations
         response = await _claude.messages.create(
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
             max_tokens=4096,
             system=_SYSTEM,
             tools=TOOL_DEFINITIONS,

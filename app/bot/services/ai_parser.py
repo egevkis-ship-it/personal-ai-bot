@@ -27,6 +27,16 @@ log = logging.getLogger(__name__)
 _anthropic = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 _openai = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
+# Valid current model (the old "claude-opus-4-7" id no longer resolves and made
+# every AI call 404 — silently, because callers swallowed the exception).
+PARSER_MODEL = "claude-opus-4-8"
+
+
+class PlanParseError(Exception):
+    """The AI plan-parse call itself failed (model/network/auth), as opposed to
+    the model returning text we couldn't turn into days. Lets callers tell a real
+    outage (→ HTTP 502 with the cause) apart from an empty/garbled parse (→ 422)."""
+
 
 # ────────────────────────────── data models ───────────────────────────────────
 
@@ -151,53 +161,57 @@ def _extract_json(raw: str) -> str:
 
 
 async def parse_plan_text(text: str) -> list[PlannedDay]:
-    """Parse free-form plan text → list of PlannedDay."""
-    raw = ""
+    """Parse free-form plan text → list of PlannedDay.
+
+    Raises PlanParseError if the Anthropic call fails (so the web layer can return
+    a 502 with the real cause). Returns [] only when the model replied but its
+    output couldn't be parsed into days (→ the caller shows "couldn't parse")."""
     try:
         resp = await _anthropic.messages.create(
-            model="claude-opus-4-7",
+            model=PARSER_MODEL,
             max_tokens=8192,
             system=_PLAN_SYSTEM,
             messages=[{"role": "user", "content": text}],
         )
-        raw = resp.content[0].text
-        candidate = _extract_json(raw)
-        try:
-            data: dict[str, Any] = json.loads(candidate)
-        except json.JSONDecodeError as je:
-            # One more attempt: maybe trailing comma / unterminated string. Try a
-            # conservative repair — drop everything after the last balanced ']' or '}'.
-            log.warning(
-                "parse_plan_text: JSON broken at %d:%d (%s). Raw len=%d. Snippet: %r",
-                je.lineno, je.colno, je.msg, len(raw), candidate[max(0, je.pos-80):je.pos+80],
-            )
-            return []
-        days: list[PlannedDay] = []
-        for d in data.get("days", []):
-            exercises = [
-                PlannedExercise(
-                    name=e.get("name", "?"),
-                    target_sets=e.get("target_sets"),
-                    target_reps_min=e.get("target_reps_min"),
-                    target_reps_max=e.get("target_reps_max"),
-                    target_weight=e.get("target_weight"),
-                    reps_text=e.get("reps_text"),
-                    notes=e.get("notes"),
-                    superset_group=e.get("superset_group"),
-                )
-                for e in d.get("exercises", [])
-                if e.get("name")
-            ]
-            days.append(PlannedDay(
-                day_label=d.get("day_label", ""),
-                focus_label=d.get("focus_label"),
-                notes=d.get("notes"),
-                exercises=exercises,
-            ))
-        return days
     except Exception as exc:
-        log.error("parse_plan_text error: %s", exc)
+        # Do NOT swallow: a model/network/auth failure must surface, not look like
+        # an unparseable plan. Log the real error (Sentry picks this up in phase A).
+        log.error("parse_plan_text: Anthropic call failed: %s", exc, exc_info=True)
+        raise PlanParseError(str(exc)) from exc
+
+    raw = resp.content[0].text
+    candidate = _extract_json(raw)
+    try:
+        data: dict[str, Any] = json.loads(candidate)
+    except json.JSONDecodeError as je:
+        log.warning(
+            "parse_plan_text: JSON broken at %d:%d (%s). Raw len=%d. Snippet: %r",
+            je.lineno, je.colno, je.msg, len(raw), candidate[max(0, je.pos-80):je.pos+80],
+        )
         return []
+    days: list[PlannedDay] = []
+    for d in data.get("days", []):
+        exercises = [
+            PlannedExercise(
+                name=e.get("name", "?"),
+                target_sets=e.get("target_sets"),
+                target_reps_min=e.get("target_reps_min"),
+                target_reps_max=e.get("target_reps_max"),
+                target_weight=e.get("target_weight"),
+                reps_text=e.get("reps_text"),
+                notes=e.get("notes"),
+                superset_group=e.get("superset_group"),
+            )
+            for e in d.get("exercises", [])
+            if e.get("name")
+        ]
+        days.append(PlannedDay(
+            day_label=d.get("day_label", ""),
+            focus_label=d.get("focus_label"),
+            notes=d.get("notes"),
+            exercises=exercises,
+        ))
+    return days
 
 
 # ──────────────────────────── set fallback parser ─────────────────────────────

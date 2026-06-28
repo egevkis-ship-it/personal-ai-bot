@@ -26,7 +26,7 @@ from app.bot.keyboards import (
     plan_menu,
     plan_navigate,
 )
-from app.bot.services.ai_parser import PlannedDay, parse_plan_text
+from app.bot.services.ai_parser import PlanParseError, PlannedDay, parse_plan_text
 from app.bot.services.formatter import format_planned_day, format_weekly_plan
 from app.bot.states import PlanStates, WorkoutStates
 from app.db import (
@@ -131,7 +131,15 @@ async def cb_paste_mode(cb: CallbackQuery, state: FSMContext) -> None:
 @router.message(PlanStates.paste_text, F.text)
 async def handle_plan_paste(message: Message, state: FSMContext) -> None:
     await message.answer("⏳ Разбираю план...")
-    days = await parse_plan_text(message.text)
+    try:
+        days = await parse_plan_text(message.text)
+    except PlanParseError:
+        await message.answer(
+            "❌ ИИ-разбор временно недоступен. Попробуй ещё раз чуть позже или введи вручную.",
+            reply_markup=plan_load_mode(),
+        )
+        await state.set_state(PlanStates.choose_load_mode)
+        return
     if not days:
         await message.answer(
             "❌ Не удалось разобрать план. Попробуй другой формат или введи вручную.",
