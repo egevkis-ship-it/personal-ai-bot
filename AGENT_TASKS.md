@@ -197,7 +197,7 @@ AI-кэш упражнений» из общих Настроек в админ-
 
 ### Фаза 0 — безопасность
 - [x] **0.1 IDOR** — owner-lookup в `app/db` (`workout_owner`/`planned_workout_owner`/`set_owner`/`measurement_owner`) + guard'ы `_own_*` во всех 12 `{id}`-эндпоинтах; чужой id → 404. Проверено тестом изоляции двух пользователей (17/17).
-- [ ] 0.2 Хард-фейл небезопасного `SESSION_SECRET` / пустого `TELEGRAM_BOT_TOKEN` в проде
+- [x] **0.2 Хард-фейл** — `auth.assert_secure_config(IS_PROD)` на импорте `api/main.py`: в проде пустой/дефолтный `SESSION_SECRET` или пустой `TELEGRAM_BOT_TOKEN` → `RuntimeError` на старте. Вне прода — no-op. Проверено матрицей (4 fail + 2 ok).
 
 ### Фаза 1 — корректность и аренда
 - [ ] 1.1 Часовой пояс в датовой логике (`today_for(uid)` вместо `date.today()`)

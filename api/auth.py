@@ -22,6 +22,24 @@ _AUTH_MAX_AGE = 24 * 3600     # telegram payload must be fresh
 _allow_raw = os.getenv("ALLOWED_TELEGRAM_USER_IDS", "").strip()
 ALLOWED: set[str] = {x.strip() for x in _allow_raw.split(",") if x.strip()}
 
+_INSECURE_SECRET = "dev-insecure-secret-change-me"
+
+
+def assert_secure_config(is_prod: bool) -> None:
+    """Refuse to start in production with an unsafe secret or a missing bot token.
+    No-op outside production so local dev keeps working with defaults."""
+    if not is_prod:
+        return
+    if not SESSION_SECRET or SESSION_SECRET == _INSECURE_SECRET:
+        raise RuntimeError(
+            "SESSION_SECRET is unset or still the insecure default in production. "
+            "Set a strong random SESSION_SECRET in the environment before deploying."
+        )
+    if not BOT_TOKEN:
+        raise RuntimeError(
+            "TELEGRAM_BOT_TOKEN is empty in production. Set it in the environment."
+        )
+
 
 def _b64e(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode().rstrip("=")

@@ -44,6 +44,9 @@ OWNER_UID = os.getenv("OWNER_TELEGRAM_USER_ID", "").strip()
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 COOKIE = "session"
 
+# Fail loudly at import (container start) on insecure production config.
+auth.assert_secure_config(IS_PROD)
+
 PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz")
 
 GROUP_RU = {
