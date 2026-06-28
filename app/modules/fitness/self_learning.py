@@ -12,13 +12,14 @@ import json
 import re
 
 from app.ai import claude_client
-from app.db import (
-    get_last_interaction,
-    save_learning_correction,
-    get_active_corrections,
-    disable_correction,
-    set_user_preference,
-)
+
+# NOTE: the self-learning DB layer (get_last_interaction, save_learning_correction,
+# get_active_corrections, disable_correction, set_user_preference) was removed in the
+# aiogram-3 rewrite (commit c17469a) and its tables dropped in migration 010. This
+# legacy module is no longer wired into the live bot, but its pure-regex detectors
+# (is_correction_message / is_forget_message) are still imported by the test suite.
+# Keep the module importable by binding those DB helpers lazily inside the handlers
+# that use them — mirroring the lazy-import idiom in app/router.py.
 
 
 # Phrases that signal user is correcting the bot
@@ -129,6 +130,12 @@ async def extract_correction_rule(
 
 async def handle_self_correction(telegram_user_id: str | None, text: str) -> str | None:
     """Process a correction message. Returns response to user."""
+    from app.db import (
+        get_last_interaction,
+        save_learning_correction,
+        set_user_preference,
+    )
+
     if not is_correction_message(text):
         return None
 
@@ -181,6 +188,8 @@ async def handle_self_correction(telegram_user_id: str | None, text: str) -> str
 
 async def handle_forget_request(telegram_user_id: str | None, text: str) -> str | None:
     """Disable a previously saved correction."""
+    from app.db import disable_correction
+
     if not is_forget_message(text):
         return None
     m = re.search(r"#?(\d+)", text)
@@ -197,6 +206,8 @@ async def build_corrections_context(
     max_rules: int = 15,
 ) -> str:
     """Render active corrections as a short block to inject into parser prompts."""
+    from app.db import get_active_corrections
+
     corrections = await get_active_corrections(telegram_user_id, scope=scope, limit=max_rules)
     if not corrections:
         return ""
