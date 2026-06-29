@@ -543,8 +543,7 @@ async function History() {
   view.innerHTML = `<div class="row sp"><h1>История</h1><span class="back" style="margin:0" onclick="go('reports')">📄 Отчёты (PDF) ›</span></div>
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
     ${list.length ? list.map(w => swipeRow(
-      `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div>
-        <span style="display:flex;gap:12px;align-items:center"><span class="trash" onclick="event.stopPropagation();askDelWorkout(${w.id})">🗑</span><span class="muted">›</span></span></div>`,
+      `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`,
       `askDelWorkout(${w.id})`, `go('workout',${w.id})`)).join('')
       : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}`;
   const inp = document.getElementById('histQ');
@@ -818,8 +817,7 @@ async function MeasureHistory() {
     <div class="tag-row" style="justify-content:flex-start">${MFIELDS.map(([k, l]) => `<span class="pill ${k === metric ? 'on' : ''}" onclick="setMetric('${k}')">${l.split(',')[0]}</span>`).join('')}</div>
     <div class="card" style="text-align:center">${pts.length ? lineChart(pts, 'var(--success)') : '<span class="muted small">Нет данных</span>'}</div>
     ${rows.filter(r => r[metric] != null).map(r => swipeRow(
-      `<div class="row sp"><span class="muted small">${esc(fmtDate(r.taken_on, { weekday: 'short' }))}</span>
-        <span style="display:flex;gap:14px;align-items:center"><span>${fmt(r[metric])}</span><span class="trash" onclick="event.stopPropagation();askDelMeasure(${r.id})">🗑</span></span></div>`,
+      `<div class="row sp"><span class="muted small">${esc(fmtDate(r.taken_on, { weekday: 'short' }))}</span><span>${fmt(r[metric])}</span></div>`,
       `askDelMeasure(${r.id})`)).join('')}`;
 }
 function setMetric(m) { STATE._metric = m; MeasureHistory(); }
@@ -1098,10 +1096,7 @@ async function schedDay() {
       <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
   } else {
     html += list.map(p => swipeRow(
-      `<div class="row sp"><b${_isRestPlan(p) ? ' class="muted"' : ''}>${_isRestPlan(p) ? '💤 Отдых' : esc(p.focus_label || 'Тренировка')}</b>
-        <span style="display:flex;gap:12px;align-items:center">
-          <span class="trash" onclick="event.stopPropagation();askDeletePlan(${p.id}, schedDay)">🗑</span>
-          <span class="muted">›</span></span></div>
+      `<div class="row sp"><b${_isRestPlan(p) ? ' class="muted"' : ''}>${_isRestPlan(p) ? '💤 Отдых' : esc(p.focus_label || 'Тренировка')}</b><span class="muted">›</span></div>
       ${_isRestPlan(p) ? '' : ((p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>')}`,
       `askDeletePlan(${p.id}, schedDay)`, `openPlan(${p.id},'schedule')`)).join('');
   }
@@ -1121,12 +1116,15 @@ async function schedWeek() {
     const label = !plans.length ? '—'
       : (plans.every(_isRestPlan) ? '💤 Отдых'
         : `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`);
-    const tap = plans.length > 1 ? `schedDayAt('${d}')` : (plans.length === 1 ? `openPlan(${first.id},'schedule')` : `newPlan('${d}')`);
-    rows += `<div class="card list-item" style="${isToday ? 'border:2px solid var(--info)' : ''}" onclick="${tap}">
-      <div class="ic">${WD_SHORT[i]}</div>
+    const tap = plans.length > 1 ? `schedDayAt('${d}')` : `newPlan('${d}')`;
+    const rowContent = `<div class="ic">${WD_SHORT[i]}</div>
       <div style="flex:1"><b>${esc(fmtDM(d))}</b>${isToday ? ' <span class="small" style="color:var(--info)">сегодня</span>' : ''}
         <div class="small muted">${label}</div></div>
-      <span class="muted">${plans.length ? '›' : '＋'}</span></div>`;
+      <span class="muted">${plans.length ? '›' : '＋'}</span>`;
+    // exactly 1 plan → swipe-left deletes it; 0 or ≥2 → tap (create / open day list) (UX3-FIX-2)
+    rows += plans.length === 1
+      ? swipeRow(`<div class="row" style="gap:12px">${rowContent}</div>`, `askDeletePlan(${first.id}, Schedule)`, `feedOpenPlan(${first.id},'${d}')`)
+      : `<div class="card list-item" style="${isToday ? 'box-shadow:inset 0 0 0 2px var(--info)' : ''}" onclick="${tap}">${rowContent}</div>`;
   }
   document.getElementById('schedBody').innerHTML = schedHeader(`${fmtDM(mon)} – ${fmtDM(sun)}`) + rows;
 }
@@ -1164,14 +1162,17 @@ function schedFeedMore(dir) {
   Schedule();
 }
 function dayFeedCard(iso, plans, isCenter, isToday) {
-  const head = `${WD_SHORT[isoWeekday(iso)]}, ${esc(fmtDate(iso))}${isToday ? ' · сегодня' : ''}`;
-  const body = !plans.length
-    ? `<div class="small muted" style="margin-top:3px">— ничего · <span style="color:var(--info);cursor:pointer" onclick="newPlan('${iso}')">＋ запланировать</span></div>`
-    : plans.map(p => _isRestPlan(p)
-        ? `<div class="small muted" style="margin-top:4px">💤 Отдых</div>`
-        : `<div class="small" style="margin-top:4px;cursor:pointer" onclick="feedOpenPlan(${p.id},'${iso}')">• <b>${esc(p.focus_label || 'Тренировка')}</b> <span class="muted">· ${(p.exercises || []).length} упр. ›</span></div>`).join('');
   const hb = isToday ? ' style="color:var(--info)"' : (isCenter ? '' : ' class="muted"');
-  return `<div id="feed-${iso}" class="card" style="margin-bottom:10px;${isCenter ? 'border:2px solid var(--info)' : ''}"><b${hb}>${head}</b>${body}</div>`;
+  const head = `<div class="small" style="margin:8px 2px 6px"><b${hb}>${WD_SHORT[isoWeekday(iso)]}, ${esc(fmtDate(iso))}${isToday ? ' · сегодня' : ''}</b></div>`;
+  // each plan is its own swipe row (swipe left = delete that plan); rest is swipeable too (UX3-FIX-2)
+  const body = !plans.length
+    ? `<div class="card small muted">— ничего · <span style="color:var(--info);cursor:pointer" onclick="newPlan('${iso}')">＋ запланировать</span></div>`
+    : plans.map(p => swipeRow(
+        _isRestPlan(p) ? '💤 <span class="muted">Отдых</span>'
+          : `<b>${esc(p.focus_label || 'Тренировка')}</b> <span class="muted">· ${(p.exercises || []).length} упр. ›</span>`,
+        `askDeletePlan(${p.id}, Schedule)`,
+        _isRestPlan(p) ? null : `feedOpenPlan(${p.id},'${iso}')`)).join('');
+  return `<div id="feed-${iso}" style="${isCenter ? 'box-shadow:inset 0 0 0 2px var(--info);border-radius:16px;padding:0 6px 4px;margin-bottom:10px' : 'margin-bottom:2px'}">${head}${body}</div>`;
 }
 async function schedFeed() {
   const center = STATE.feedCenter || todayISO();
