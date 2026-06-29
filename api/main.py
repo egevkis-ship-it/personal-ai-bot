@@ -886,7 +886,10 @@ async def coach_generate_week(body: GenerateWeek, uid: str = Depends(current_uid
         except ValueError:
             raise HTTPException(422, "bad from_date, expected YYYY-MM-DD")
     else:
-        start = await today_for(uid)
+        # «Собери СЛЕДУЮЩУЮ неделю»: default to next week's Monday (the UI always
+        # sends it explicitly; this keeps direct API calls true to the name).
+        today = await today_for(uid)
+        start = today + timedelta(days=7 - today.weekday())
     monday = start - timedelta(days=start.weekday())
     out_days = []
     for d in result.get("days", []):

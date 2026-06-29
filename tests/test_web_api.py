@@ -274,6 +274,11 @@ def test_coach_generate_and_apply(client, monkeypatch):
     saved_date = apply["plans"][0]["planned_date"]
     plans = client.get(f"/api/plans?from={saved_date}&to={saved_date}").json()
     assert any(p["focus_label"].startswith("Грудь") for p in plans)
+    # no from_date → defaults to NEXT week's Monday (feature is «следующую неделю»)
+    import datetime as _dt
+    nf = client.post("/api/coach/generate-week", json={}).json()
+    d0 = _dt.date.fromisoformat(nf["days"][0]["date"])  # weekday-0 day
+    assert d0.weekday() == 0 and d0 > _dt.date.today()  # a Monday, strictly future
 
 
 def test_coach_generate_surfaces_ai_failure_as_502(client, monkeypatch):
