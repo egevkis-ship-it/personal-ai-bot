@@ -516,12 +516,11 @@ async function coachReview(wid) {
 async function History() {
   const q = STATE.histQ || '';
   const list = await api('/workouts?days=365' + (q ? '&q=' + encodeURIComponent(q) : ''));
-  view.innerHTML = `<h1>История</h1>
+  view.innerHTML = `<div class="row sp"><h1>История</h1><span class="back" style="margin:0" onclick="go('reports')">📄 Отчёты (PDF) ›</span></div>
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
     ${list.length ? list.map(w => `<div class="card list-item" onclick="go('workout',${w.id})">
       <div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`).join('')
-      : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}
-    <button class="btn ghost" style="margin-top:12px" onclick="go('reports')">📄 Отчёты (PDF)</button>`;
+      : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}`;
   const inp = document.getElementById('histQ');
   if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
 }

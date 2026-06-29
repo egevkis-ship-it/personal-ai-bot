@@ -12,7 +12,8 @@
 // (dashboard week counter is calendar-week, backend fix). v11: single-entry
 // Home (Планы/Расписание only via Тренировка hub) + confirm PlanEdit delete.
 // v12: clearer planning UI (create vs view, named AI buttons, Шаблоны as link).
-const CACHE = 'fit-proto-v12';
+// v13: visible «Отчёты (PDF)» at top of История.
+const CACHE = 'fit-proto-v13';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
