@@ -18,8 +18,9 @@
 // design pass — blur bars, segmented control, switches, inset lists, sticky title.
 // v17: swipe-left-to-delete on plan/history/measurement lists. v18: Plans is
 // create-only. v19: manual plan create gets a calendar picker (occupied days
+// v21: feed remembers the selected day on return + «сегодня» marker in month grid.
 // marked). v20: «💤 Отдых» days + Apple-style month → centered scrolling day feed.
-const CACHE = 'fit-proto-v20';
+const CACHE = 'fit-proto-v21';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

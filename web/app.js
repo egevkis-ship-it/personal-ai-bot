@@ -1036,10 +1036,12 @@ function monthCalendar(anchorISO, marks, sel, pick, nav) {
     const dt = new Date(d + 'T00:00:00');
     const inMonth = dt.getMonth() === mo;
     const isToday = d === today, isSel = sel && d === sel, mk = marks && marks[d];
+    // Today gets an outline ring (distinct from the filled blue «selected» day).
     const bg = isSel ? 'background:var(--info);color:#fff'
-      : (isToday ? 'background:var(--info-bg);color:var(--info);font-weight:700' : (inMonth ? '' : 'opacity:.32'));
+      : (isToday ? 'box-shadow:inset 0 0 0 2px var(--info);color:var(--info);font-weight:700' : (inMonth ? '' : 'opacity:.32'));
     const dotc = isSel ? '#fff' : (mk === 'rest' ? 'var(--txt3)' : 'var(--info)');
-    const dot = mk ? `<div style="width:5px;height:5px;border-radius:50%;background:${dotc};margin:3px auto 0"></div>` : '<div style="height:8px"></div>';
+    const dot = mk ? `<div style="width:5px;height:5px;border-radius:50%;background:${dotc};margin:3px auto 0"></div>`
+      : (isToday && !isSel ? '<div style="font-size:8px;color:var(--info);margin-top:1px;line-height:1">сегодня</div>' : '<div style="height:8px"></div>');
     cells += `<div onclick="${pick}('${d}')" style="text-align:center;padding:7px 0;border-radius:9px;cursor:pointer;${bg}">
       <div style="font-size:14px">${dt.getDate()}</div>${dot}</div>`;
   }
@@ -1139,7 +1141,7 @@ async function schedMonth() {
   const marks = {};
   Object.keys(byDate).forEach(d => { marks[d] = byDate[d].every(_isRestPlan) ? 'rest' : 'plan'; });
   document.getElementById('schedBody').innerHTML =
-    monthCalendar(firstISO, marks, null, 'schedFeedAt', 'schedMonthNav') +
+    monthCalendar(firstISO, marks, STATE.feedCenter || null, 'schedFeedAt', 'schedMonthNav') +
     '<div class="muted small" style="text-align:center;margin-top:2px">Тап по дню — лента дней с выбранным по центру</div>';
 }
 function schedMonthNav(dir) {
@@ -1150,10 +1152,12 @@ function schedDayAt(iso) { STATE.schedDate = iso; STATE.schedMode = 'day'; Sched
 
 // ── Schedule month → centered scrolling day-feed (UX3-5) ────────────────────
 function schedFeedAt(iso) {
-  STATE.schedMode = 'feed'; STATE.feedCenter = iso;
+  STATE.schedMode = 'feed'; STATE.feedCenter = iso; STATE.schedDate = iso;  // one source of truth
   STATE.feedStart = addDaysISO(iso, -14); STATE.feedEnd = addDaysISO(iso, 14);
   STATE._feedScroll = 'center'; Schedule();
 }
+// Opening a plan from the feed keeps that day selected, so returning re-centers on it (UX3-FIX-1).
+function feedOpenPlan(pid, iso) { STATE.feedCenter = iso; STATE.schedDate = iso; STATE._feedScroll = 'center'; openPlan(pid, 'schedule'); }
 function schedFeedMore(dir) {
   if (dir < 0) { STATE._feedAnchor = STATE.feedStart; STATE.feedStart = addDaysISO(STATE.feedStart, -14); }
   else { STATE.feedEnd = addDaysISO(STATE.feedEnd, 14); }
@@ -1164,8 +1168,8 @@ function dayFeedCard(iso, plans, isCenter, isToday) {
   const body = !plans.length
     ? `<div class="small muted" style="margin-top:3px">— ничего · <span style="color:var(--info);cursor:pointer" onclick="newPlan('${iso}')">＋ запланировать</span></div>`
     : plans.map(p => _isRestPlan(p)
-        ? '<div class="small muted" style="margin-top:4px">💤 Отдых</div>'
-        : `<div class="small" style="margin-top:4px;cursor:pointer" onclick="openPlan(${p.id},'schedule')">• <b>${esc(p.focus_label || 'Тренировка')}</b> <span class="muted">· ${(p.exercises || []).length} упр. ›</span></div>`).join('');
+        ? `<div class="small muted" style="margin-top:4px">💤 Отдых</div>`
+        : `<div class="small" style="margin-top:4px;cursor:pointer" onclick="feedOpenPlan(${p.id},'${iso}')">• <b>${esc(p.focus_label || 'Тренировка')}</b> <span class="muted">· ${(p.exercises || []).length} упр. ›</span></div>`).join('');
   const hb = isToday ? ' style="color:var(--info)"' : (isCenter ? '' : ' class="muted"');
   return `<div id="feed-${iso}" class="card" style="margin-bottom:10px;${isCenter ? 'border:2px solid var(--info)' : ''}"><b${hb}>${head}</b>${body}</div>`;
 }
