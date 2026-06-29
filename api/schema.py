@@ -159,4 +159,9 @@ CREATE INDEX IF NOT EXISTS idx_w_user_date  ON workouts(user_id, workout_date);
 CREATE INDEX IF NOT EXISTS idx_es_workout   ON exercise_sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_es_name      ON exercise_sets(workout_id, exercise_name);
 CREATE INDEX IF NOT EXISTS idx_bm_user_date ON body_measurements(user_id, taken_on DESC);
+-- Phase 5: support the cross-workout name lookups (stats/history/PR/dashboard
+-- group by lower(exercise_name)), the plan status filter, and the FK lookup.
+CREATE INDEX IF NOT EXISTS idx_es_lower_name ON exercise_sets (lower(exercise_name));
+CREATE INDEX IF NOT EXISTS idx_pw_user_date_status ON planned_workouts(user_id, planned_date, status);
+CREATE INDEX IF NOT EXISTS idx_w_planned ON workouts(planned_workout_id);
 """

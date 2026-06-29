@@ -716,26 +716,25 @@ async def _week_streak(uid: str, today: date) -> int:
 @app.get("/api/dashboard")
 async def dashboard(uid: str = Depends(current_uid)):
     today = await today_for(uid)
-    plans = await db.get_planned_workouts_range(uid, today, today)
-    active = await db.get_active_workout(uid)
-    last_m = await db.get_last_measurement(uid)
-    week_count = await _scalar(
-        "SELECT COUNT(*) FROM workouts WHERE user_id=:u AND finished_at IS NOT NULL AND workout_date >= :d",
-        u=uid, d=today - timedelta(days=7))
-    last_workout = await db.get_last_workout(uid)
-    week_tonnage = await _scalar(
-        """SELECT COALESCE(SUM(es.weight_kg * es.reps), 0)
+    # Phase 5: all dashboard reads are independent once `today` is known — run them
+    # in one parallel round-trip instead of ~11 serial awaits (each its own session;
+    # the pool covers the concurrency).
+    (plans, active, last_m, week_count, last_workout, week_tonnage,
+     wt_rows, pr_rows, upcoming, srow, streak) = await asyncio.gather(
+        db.get_planned_workouts_range(uid, today, today),
+        db.get_active_workout(uid),
+        db.get_last_measurement(uid),
+        _scalar("SELECT COUNT(*) FROM workouts WHERE user_id=:u AND finished_at IS NOT NULL AND workout_date >= :d",
+                u=uid, d=today - timedelta(days=7)),
+        db.get_last_workout(uid),
+        _scalar("""SELECT COALESCE(SUM(es.weight_kg * es.reps), 0)
            FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
            WHERE w.user_id=:u AND w.finished_at IS NOT NULL AND es.is_warmup=false
              AND es.weight_kg IS NOT NULL AND es.reps IS NOT NULL AND w.workout_date >= :d""",
-        u=uid, d=today - timedelta(days=7))
-    wt_rows = await _rows(
-        """SELECT taken_on, weight_kg FROM body_measurements
-           WHERE user_id=:u AND weight_kg IS NOT NULL ORDER BY taken_on DESC LIMIT 8""", u=uid)
-    weight_trend = [{"date": r["taken_on"].isoformat(), "weight_kg": _to_f(r["weight_kg"])}
-                    for r in reversed(wt_rows)]
-    pr_rows = await _rows(
-        """WITH working AS (
+                u=uid, d=today - timedelta(days=7)),
+        _rows("""SELECT taken_on, weight_kg FROM body_measurements
+           WHERE user_id=:u AND weight_kg IS NOT NULL ORDER BY taken_on DESC LIMIT 8""", u=uid),
+        _rows("""WITH working AS (
              SELECT es.exercise_name AS name, w.workout_date AS d, es.weight_kg AS weight,
                     MAX(es.weight_kg) OVER (
                       PARTITION BY lower(es.exercise_name) ORDER BY w.workout_date, es.set_number
@@ -745,18 +744,21 @@ async def dashboard(uid: str = Depends(current_uid)):
                AND es.weight_kg IS NOT NULL AND es.reps IS NOT NULL)
            SELECT name, d, weight FROM working
            WHERE prev_max IS NOT NULL AND weight > prev_max AND d >= :since
-           ORDER BY d DESC, weight DESC LIMIT 3""",
-        u=uid, since=today - timedelta(days=30))
+           ORDER BY d DESC, weight DESC LIMIT 3""", u=uid, since=today - timedelta(days=30)),
+        db.get_planned_workouts_range(uid, today + timedelta(days=1), today + timedelta(days=21)),
+        _rows("SELECT target_weight, weekly_goal, unit FROM user_settings WHERE user_id=:u", u=uid),
+        _week_streak(uid, today),
+    )
+    weight_trend = [{"date": r["taken_on"].isoformat(), "weight_kg": _to_f(r["weight_kg"])}
+                    for r in reversed(wt_rows)]
     recent_prs = [{"name": r["name"], "date": r["d"].isoformat(), "weight_kg": _to_f(r["weight"])}
                   for r in pr_rows]
-    upcoming = await db.get_planned_workouts_range(uid, today + timedelta(days=1), today + timedelta(days=21))
     next_plan = upcoming[0] if upcoming else None
-    srow = await _rows("SELECT target_weight, weekly_goal, unit FROM user_settings WHERE user_id=:u", u=uid)
     sg = srow[0] if srow else {}
     return {"today_plan": plans[0] if plans else None, "active_workout": active,
             "last_measurement": last_m, "week_workouts": week_count or 0,
             "last_workout": last_workout, "week_tonnage": round(_to_f(week_tonnage) or 0, 1),
-            "streak": await _week_streak(uid, today), "weight_trend": weight_trend,
+            "streak": streak, "weight_trend": weight_trend,
             "recent_prs": recent_prs, "next_plan": next_plan,
             "weekly_goal": sg.get("weekly_goal"), "target_weight": _to_f(sg.get("target_weight")),
             "unit": sg.get("unit") or "kg"}
@@ -878,23 +880,33 @@ async def workouts_week(uid: str = Depends(current_uid)):
 
 @app.get("/api/workouts")
 async def workouts_history(days: int = 30, q: Optional[str] = None, uid: str = Depends(current_uid)):
-    """Finished workouts in the last `days`. Optional `q` filters by a substring of
-    the focus label or any exercise name (case-insensitive)."""
+    """Finished workouts in the last `days` with set_count + tonnage, in ONE
+    aggregate query (was N+1: a sets fetch per workout). Optional `q` filters by a
+    substring of the focus label or any exercise name (case-insensitive, in SQL)."""
+    days = max(1, min(days, 366))
     today = await today_for(uid)
-    rows = [r for r in await db.get_workouts_range(uid, today - timedelta(days=days), today) if r.get("finished_at")]
     ql = (q or "").strip().lower()
-    out = []
-    for w in rows:
-        sets = await db.get_workout_sets(w["id"])
-        working = [s for s in sets if not s["is_warmup"]]
-        if ql:
-            hay = (w.get("focus_label") or "").lower() + " " + " ".join((s.get("exercise_name") or "").lower() for s in sets)
-            if ql not in hay:
-                continue
-        out.append({**w, "set_count": len(working),
-                    "tonnage": round(sum((_to_f(s["weight_kg"]) or 0) * (s["reps"] or 0) for s in working))})
-    out.reverse()
-    return out
+    rows = await _rows(
+        """
+        SELECT w.*,
+               COUNT(es.id) FILTER (WHERE es.is_warmup = false) AS set_count,
+               COALESCE(ROUND(SUM(es.weight_kg * es.reps) FILTER (WHERE es.is_warmup = false))::int, 0) AS tonnage
+        FROM workouts w
+        LEFT JOIN exercise_sets es ON es.workout_id = w.id
+        WHERE w.user_id = :u AND w.finished_at IS NOT NULL
+          AND w.workout_date >= :fd AND w.workout_date <= :td
+        GROUP BY w.id
+        HAVING (:q = '')
+            OR lower(coalesce(w.focus_label, '')) LIKE :qp
+            OR bool_or(lower(coalesce(es.exercise_name, '')) LIKE :qp)
+        ORDER BY w.workout_date DESC, w.id DESC
+        LIMIT 500
+        """,
+        u=uid, fd=today - timedelta(days=days), td=today, q=ql, qp='%' + ql + '%')
+    for r in rows:
+        r["set_count"] = int(r.get("set_count") or 0)
+        r["tonnage"] = int(r.get("tonnage") or 0)
+    return rows
 
 
 @app.get("/api/workouts/{wid}")
@@ -1105,6 +1117,7 @@ async def del_set(sid: int, uid: str = Depends(current_uid)):
 
 @app.get("/api/exercises/recent")
 async def exercises_recent(limit: int = 12, uid: str = Depends(current_uid)):
+    limit = max(1, min(limit, 200))
     rows = await _rows(
         """
         SELECT es.exercise_name AS name, MAX(es.created_at) AS last_at
@@ -1135,12 +1148,14 @@ async def exercises_catalog(group: Optional[str] = None, uid: str = Depends(curr
 
 @app.get("/api/exercises/search")
 async def exercises_search(q: str, limit: int = 8, uid: str = Depends(current_uid)):
+    limit = max(1, min(limit, 50))
     return [{"exercise_key": r["exercise_key"], "name": r["canonical_ru"], "muscle_group": r.get("muscle_group")}
             for r in possible_matches(q, limit)]
 
 
 @app.get("/api/exercises/{key}/history")
 async def exercise_history(key: str, limit: int = 10, uid: str = Depends(current_uid)):
+    limit = max(1, min(limit, 500))
     name = key_to_name(key) or key
     rows = await _rows(
         """
@@ -1666,7 +1681,7 @@ async def add_measurement(body: AddMeasurement, uid: str = Depends(current_uid))
 
 @app.get("/api/measurements")
 async def list_measurements(limit: int = 30, uid: str = Depends(current_uid)):
-    return await db.get_measurements(uid, limit)
+    return await db.get_measurements(uid, max(1, min(limit, 500)))
 
 
 @app.get("/api/measurements/last")
@@ -1685,33 +1700,39 @@ async def del_measurement(mid: int, uid: str = Depends(current_uid)):
 
 @app.get("/api/export")
 async def export_data(format: str = "json", uid: str = Depends(current_uid)):
-    """Owner-scoped export of all the user's data. format=json → one JSON file;
-    format=csv → a flat CSV of every logged set with its workout date/focus."""
+    """Owner-scoped export. format=csv → flat CSV of every set, STREAMED from a
+    server-side cursor so memory stays flat regardless of history size. format=json
+    → JSON dump with each table capped so a huge history can't OOM the process."""
+    if format == "csv":
+        async def gen():
+            import csv as _csv
+            buf = io.StringIO(); wr = _csv.writer(buf)
+            def flush():
+                v = buf.getvalue(); buf.seek(0); buf.truncate(0); return v
+            wr.writerow(["date", "focus", "exercise", "set", "weight_kg", "reps", "duration_s", "warmup"])
+            yield flush().encode("utf-8-sig")
+            async with get_session() as s:
+                res = await s.stream(text(
+                    """SELECT w.workout_date, w.focus_label, es.exercise_name, es.set_number,
+                              es.weight_kg, es.reps, es.duration_seconds, es.is_warmup
+                       FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
+                       WHERE w.user_id = :u ORDER BY es.workout_id, es.set_number"""), {"u": uid})
+                async for row in res:
+                    wr.writerow([row[0], row[1], row[2], row[3], _to_f(row[4]), row[5], row[6], row[7]])
+                    yield flush().encode("utf-8")
+        return StreamingResponse(gen(), media_type="text/csv",
+                                 headers={"Content-Disposition": 'attachment; filename="workouts.csv"'})
     from fastapi.encoders import jsonable_encoder
-    workouts = await _rows(
-        "SELECT id, workout_date, focus_label, notes, finished_at FROM workouts WHERE user_id=:u ORDER BY workout_date", u=uid)
+    CAP = 100000
+    workouts = await _rows("SELECT id, workout_date, focus_label, notes, finished_at FROM workouts WHERE user_id=:u ORDER BY workout_date LIMIT :lim", u=uid, lim=CAP)
     sets = await _rows(
         """SELECT es.workout_id, es.exercise_name, es.set_number, es.weight_kg, es.reps,
                   es.duration_seconds, es.is_warmup
            FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
-           WHERE w.user_id=:u ORDER BY es.workout_id, es.set_number""", u=uid)
-    plans = await _rows(
-        "SELECT planned_date, focus_label, exercises, notes, status FROM planned_workouts WHERE user_id=:u ORDER BY planned_date", u=uid)
-    meas = await _rows("SELECT * FROM body_measurements WHERE user_id=:u ORDER BY taken_on", u=uid)
-    routines = await _rows("SELECT name, days, created_at FROM routines WHERE user_id=:u ORDER BY id", u=uid)
-    if format == "csv":
-        import csv as _csv
-        wo = {w["id"]: w for w in workouts}
-        buf = io.StringIO()
-        wr = _csv.writer(buf)
-        wr.writerow(["date", "focus", "exercise", "set", "weight_kg", "reps", "duration_s", "warmup"])
-        for s in sets:
-            w = wo.get(s["workout_id"], {})
-            wr.writerow([w.get("workout_date"), w.get("focus_label"), s["exercise_name"], s["set_number"],
-                         _to_f(s["weight_kg"]), s["reps"], s["duration_seconds"], s["is_warmup"]])
-        data = buf.getvalue().encode("utf-8-sig")
-        return StreamingResponse(io.BytesIO(data), media_type="text/csv",
-                                 headers={"Content-Disposition": 'attachment; filename="workouts.csv"'})
+           WHERE w.user_id=:u ORDER BY es.workout_id, es.set_number LIMIT :lim""", u=uid, lim=CAP)
+    plans = await _rows("SELECT planned_date, focus_label, exercises, notes, status FROM planned_workouts WHERE user_id=:u ORDER BY planned_date LIMIT :lim", u=uid, lim=CAP)
+    meas = await _rows("SELECT * FROM body_measurements WHERE user_id=:u ORDER BY taken_on LIMIT :lim", u=uid, lim=CAP)
+    routines = await _rows("SELECT name, days, created_at FROM routines WHERE user_id=:u ORDER BY id LIMIT :lim", u=uid, lim=CAP)
     payload = jsonable_encoder({
         "exported_at": (await today_for(uid)).isoformat(),
         "user_id": uid, "workouts": workouts, "sets": sets,
@@ -1869,7 +1890,7 @@ async def upload_photos(
 
 @app.get("/api/photos")
 async def list_photos(limit: int = 30, uid: str = Depends(current_uid)):
-    series = await db.get_photo_series(uid, limit)
+    series = await db.get_photo_series(uid, max(1, min(limit, 200)))
     out = []
     for s in series:
         d = s.get("taken_on")
