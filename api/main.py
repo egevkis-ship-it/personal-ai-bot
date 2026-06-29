@@ -17,6 +17,7 @@ import asyncio
 import io
 import json
 import logging
+import time
 import os
 import uuid
 from datetime import date, timedelta
@@ -84,7 +85,7 @@ if SENTRY_DSN:
 else:
     log.info("Sentry monitoring disabled (no SENTRY_DSN)")
 
-PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz")
+PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz", "/healthz/ai")
 
 GROUP_RU = {
     "chest": "Грудь", "back": "Спина", "legs": "Ноги", "shoulders": "Плечи",
@@ -388,6 +389,22 @@ async def _startup() -> None:
         plans = await _scalar("SELECT COUNT(*) FROM planned_workouts WHERE user_id=:u", u=dev) or 0
         if have == 0 and plans == 0:
             await _seed(dev)
+    asyncio.create_task(_startup_ai_probe())  # non-blocking: a dead key pages us via log→Sentry
+
+
+async def _startup_ai_probe() -> None:
+    """One light AI ping at boot so an invalid key surfaces immediately (in the
+    log, which Sentry's logging integration turns into an event) instead of on the
+    next user. Also warms the /healthz/ai cache."""
+    try:
+        h = await _ai_health_check()
+        _ai_health["data"] = h; _ai_health["at"] = time.time()
+        if h.get("anthropic") != "ok" or h.get("openai") != "ok":
+            log.error("AI key health at startup: %s", h)
+        else:
+            log.info("AI keys OK at startup")
+    except Exception as e:
+        log.error("AI startup probe failed: %s", e)
 
 
 @app.on_event("shutdown")
@@ -440,6 +457,51 @@ def suggestion_from_plan(pe: dict) -> dict:
 async def healthz():
     ok = await _scalar("SELECT 1")
     return {"ok": ok == 1, "env": APP_ENV}
+
+
+# ── AI key health (phase 4) — make a dead key LOUD, not silent ───────────────
+_AI_HEALTH_TTL = 60.0
+_ai_health: dict = {"at": 0.0, "data": None}
+
+
+def _safe_err(e: Exception) -> str:
+    """Provider error text minus anything key-shaped, so /healthz/ai never leaks
+    secret material even when a misconfigured key is echoed back by the provider."""
+    import re
+    s = re.sub(r"sk-[A-Za-z0-9_\-]{3,}", "sk-***", str(e))
+    return "err: " + s[:160]
+
+
+async def _ai_health_check() -> dict:
+    """Cheap real ping of each provider (1-token message / models.list)."""
+    out: dict = {}
+    try:
+        from app.bot.services.ai_parser import PARSER_MODEL, _anthropic
+        await _anthropic.messages.create(model=PARSER_MODEL, max_tokens=1,
+                                          messages=[{"role": "user", "content": "ping"}])
+        out["anthropic"] = "ok"
+    except Exception as e:
+        out["anthropic"] = _safe_err(e)
+    try:
+        from app.bot.services.ai_parser import _openai
+        await _openai.models.list()
+        out["openai"] = "ok"
+    except Exception as e:
+        out["openai"] = _safe_err(e)
+    return out
+
+
+@app.get("/healthz/ai")
+async def healthz_ai():
+    """Public so an external uptime monitor can watch it. Cached for 60s so it
+    can't be used to burn AI quota by hammering. 200 if both providers ok, else 503."""
+    now = time.time()
+    if not _ai_health["data"] or now - _ai_health["at"] > _AI_HEALTH_TTL:
+        _ai_health["data"] = await _ai_health_check()
+        _ai_health["at"] = now
+    data = _ai_health["data"]
+    ok = data.get("anthropic") == "ok" and data.get("openai") == "ok"
+    return JSONResponse(data, status_code=200 if ok else 503)
 
 
 @app.get("/api/config")
