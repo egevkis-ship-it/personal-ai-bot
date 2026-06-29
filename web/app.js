@@ -863,22 +863,15 @@ function exLine(ex) {
 }
 
 // list of upcoming plans
-async function Plans() {
-  const list = await api('/plans?days=30');
-  const rows = list.length ? list.map(p => `<div class="card list-item" onclick="openPlan(${p.id},'plans')">
-      <div class="ic">${p.is_today ? '📍' : '📅'}</div>
-      <div style="flex:1"><b>${esc(p.focus_label || 'Тренировка')}</b>
-        <div class="small muted">${fmtPlanDate(p.planned_date)}${p.is_today ? ' · сегодня' : ''} · ${(p.exercises || []).length} упр.</div></div>
-      <span class="muted">›</span></div>`).join('')
-    : '<div class="card muted">Пока ничего не запланировано на 30 дней вперёд.</div>';
+// UX3-3: Plans is create-only; the schedule overview lives in «Расписание».
+function Plans() {
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span>
-    <h1>Планы</h1><div class="muted small" style="margin-bottom:14px">Запланированное на ближайшие дни — и как добавить новое</div>
-    <div class="muted small" style="margin:4px 0 8px">Создать план</div>
+    <h1>Планы</h1><div class="muted small" style="margin-bottom:16px">Создать план тренировок</div>
     <button class="btn" onclick="coachStart()">🧠 AI: собрать неделю по моим данным</button>
     <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">📝 Вставить готовый план текстом</button>
     <button class="btn ghost" style="margin-top:8px" onclick="newPlan()">➕ Запланировать день вручную</button>
-    <div class="muted small" style="margin-top:12px">Есть готовый сплит? <span style="color:var(--info);cursor:pointer" onclick="go('routines')">🗂 Шаблоны ›</span></div>
-    <div style="margin-top:16px">${list.length ? '<div class="muted small" style="margin-bottom:8px">Ближайшие планы</div>' : ''}${rows}</div>`;
+    <div class="muted small" style="margin-top:14px">Есть готовый сплит? <span style="color:var(--info);cursor:pointer" onclick="go('routines')">🗂 Шаблоны ›</span></div>
+    <div class="muted small" style="margin-top:18px">Посмотреть запланированное — в <span style="color:var(--info);cursor:pointer" onclick="go('schedule')">Расписании ›</span></div>`;
 }
 
 // ── Flagship: AI coach «Собери следующую неделю» ─────────────────────────────
