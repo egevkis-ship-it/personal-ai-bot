@@ -329,6 +329,35 @@ def test_coach_generate_surfaces_ai_failure_as_502(client, monkeypatch):
     assert "недоступен" in r.json()["detail"]
 
 
+def test_history_hides_rest_days(client):
+    # UX2-2: a real workout (has a working set) is shown; finished «Отдых» and
+    # empty-focus sessions with 0 working sets are hidden from the journal.
+    import datetime as _dt
+    from sqlalchemy.ext.asyncio import create_async_engine
+    wid = client.post("/api/workouts", json={"focus_label": "Грудь-UX22"}).json()["id"]
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Жим", "weight_kg": 80, "reps": 8})
+    client.post(f"/api/workouts/{wid}/finish")
+    rest = client.post("/api/workouts", json={"focus_label": "Отдых"}).json()["id"]
+    client.post(f"/api/workouts/{rest}/finish")
+
+    async def _seed_empty():  # the web API defaults a free workout's focus to «Свободная тренировка»,
+        eng = create_async_engine(os.environ["DATABASE_URL"])  # so insert an empty-focus rest row directly
+        try:
+            async with eng.begin() as conn:
+                await conn.execute(text("INSERT INTO workouts (user_id, workout_date, focus_label, finished_at) "
+                                        "VALUES ('local', :d, '', now())"), {"d": _dt.date.today()})
+        finally:
+            await eng.dispose()
+    asyncio.run(_seed_empty())
+
+    hist = client.get("/api/workouts?days=365").json()
+    ids = [w["id"] for w in hist]
+    foci = [(w.get("focus_label") or "") for w in hist]
+    assert wid in ids                              # real workout kept
+    assert rest not in ids                         # «Отдых» 0-set hidden
+    assert "Отдых" not in foci and "" not in foci  # no rest / empty rows in the journal
+
+
 def test_start_workout_idor_404(client):
     # user A creates a plan + a workout; user B must NOT be able to seed from them
     client.cookies.clear()

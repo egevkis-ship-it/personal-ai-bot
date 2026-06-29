@@ -1015,9 +1015,14 @@ async def workouts_history(days: int = 30, q: Optional[str] = None, uid: str = D
         WHERE w.user_id = :u AND w.finished_at IS NOT NULL
           AND w.workout_date >= :fd AND w.workout_date <= :td
         GROUP BY w.id
-        HAVING (:q = '')
+        HAVING ((:q = '')
             OR lower(coalesce(w.focus_label, '')) LIKE :qp
-            OR bool_or(lower(coalesce(es.exercise_name, '')) LIKE :qp)
+            OR bool_or(lower(coalesce(es.exercise_name, '')) LIKE :qp))
+          -- UX2-2: hide rest days (no working sets + empty/«Отдых» focus) from the journal
+          AND NOT (
+            COUNT(es.id) FILTER (WHERE es.is_warmup = false) = 0
+            AND (w.focus_label IS NULL OR btrim(w.focus_label) = '' OR lower(w.focus_label) LIKE '%отдых%')
+          )
         ORDER BY w.workout_date DESC, w.id DESC
         LIMIT 500
         """,
