@@ -371,6 +371,9 @@ def test_exercise_catalog_v2(client):
     # backward-compat: an old spelling from history resolves to the curated v2 entry
     res = client.get("/api/exercises/search?q=" + urllib.parse.quote("разводка")).json()
     assert any("Разведение гантелей" in x["name"] for x in res)
+    # new taxonomy is populated (functional + hamstrings groups didn't exist before)
+    assert len(client.get("/api/exercises/catalog?group=functional").json()) >= 5
+    assert len(client.get("/api/exercises/catalog?group=hamstrings").json()) >= 3
 
 
 def test_workout_to_template_day(client):

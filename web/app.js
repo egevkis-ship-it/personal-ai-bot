@@ -1714,7 +1714,9 @@ async function Settings() {
       <button class="btn danger sm" style="margin-top:12px" onclick="wipeAsk('all')">⚠️ ПОЛНЫЙ СБРОС</button>
     </div>
     ${admin ? adminSection(admin) : ''}
-    <button class="btn ghost" style="margin-top:20px" onclick="logout()">Выйти</button>`;
+    <div class="muted small" style="margin:16px 0 6px">ℹ️ О приложении</div>
+    <div class="card"><div class="muted small">Изображения и часть данных упражнений — <b>Free Exercise DB</b> (yuhonas/free-exercise-db), public domain.</div></div>
+    <button class="btn ghost" style="margin-top:16px" onclick="logout()">Выйти</button>`;
   renderInstallButton();
 }
 async function saveGoals() {

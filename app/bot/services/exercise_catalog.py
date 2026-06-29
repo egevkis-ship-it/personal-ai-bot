@@ -165,7 +165,10 @@ _AI_NORMALIZE_SYSTEM = """\
 
 Правила:
 - canonical_ru — короткое каноническое РУССКОЕ название с заглавной буквы и буквой "ё"
-- muscle_group ∈ {chest, back, legs, shoulders, biceps, triceps, core, glutes, calves, forearms, cardio}
+- muscle_group ∈ {chest, back, shoulders, biceps, triceps, forearms, abs, core, quads, hamstrings, glutes, calves, cardio, functional}
+  (ноги делятся: квадрицепс/присед/выпады/жим ногами/разгибания = quads; сгибания ног/бицепс бедра/румынская тяга = hamstrings; \
+ягодицы/ягодичный мост = glutes; икры/голень = calves. Пресс/скручивания = abs; кор/стабилизация/планка = core; \
+функциональные/кроссфит/берпи/гири махи = functional)
 
 ИСПРАВЛЯЙ ошибки распознавания речи (Whisper):
 - "сжим"/"зжим" → "жим"
