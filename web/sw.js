@@ -17,8 +17,9 @@
 // v15: nice round Y-axis ticks on all charts (no ugly fractions). v16: iOS
 // design pass — blur bars, segmented control, switches, inset lists, sticky title.
 // v17: swipe-left-to-delete on plan/history/measurement lists. v18: Plans is
-// create-only. v19: manual plan create gets a calendar picker (occupied days marked).
-const CACHE = 'fit-proto-v19';
+// create-only. v19: manual plan create gets a calendar picker (occupied days
+// marked). v20: «💤 Отдых» days + Apple-style month → centered scrolling day feed.
+const CACHE = 'fit-proto-v20';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

@@ -1056,14 +1056,16 @@ async function Schedule() {
   if (!STATE.schedMode) STATE.schedMode = 'day';
   if (!STATE.schedDate) STATE.schedDate = todayISO();
   const mode = STATE.schedMode;
+  const segMode = mode === 'feed' ? 'month' : mode;   // feed is a drill-down from «Месяц»
   const seg = [['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) =>
-    `<button class="${mode === k ? 'on' : ''}" onclick="schedSet('${k}')">${l}</button>`).join('');
+    `<button class="${segMode === k ? 'on' : ''}" onclick="schedSet('${k}')">${l}</button>`).join('');
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span><h1>Что запланировано</h1>
     <div class="seg">${seg}</div>
     <div id="schedBody"><div class="card muted small">Загрузка…</div></div>`;
   try {
     if (mode === 'day') await schedDay();
     else if (mode === 'week') await schedWeek();
+    else if (mode === 'feed') await schedFeed();
     else await schedMonth();
   } catch (e) {
     if (e.status === 401 || e.code === 401) { document.getElementById('tabbar').style.display = 'none'; return Login(); }
@@ -1094,11 +1096,11 @@ async function schedDay() {
       <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
   } else {
     html += list.map(p => swipeRow(
-      `<div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b>
+      `<div class="row sp"><b${_isRestPlan(p) ? ' class="muted"' : ''}>${_isRestPlan(p) ? '💤 Отдых' : esc(p.focus_label || 'Тренировка')}</b>
         <span style="display:flex;gap:12px;align-items:center">
           <span class="trash" onclick="event.stopPropagation();askDeletePlan(${p.id}, schedDay)">🗑</span>
           <span class="muted">›</span></span></div>
-      ${(p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>'}`,
+      ${_isRestPlan(p) ? '' : ((p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>')}`,
       `askDeletePlan(${p.id}, schedDay)`, `openPlan(${p.id},'schedule')`)).join('');
   }
   document.getElementById('schedBody').innerHTML = html;
@@ -1114,9 +1116,9 @@ async function schedWeek() {
     const plans = byDate[d] || [];
     const isToday = d === today;
     const first = plans[0];
-    const label = plans.length
-      ? `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`
-      : '—';
+    const label = !plans.length ? '—'
+      : (plans.every(_isRestPlan) ? '💤 Отдых'
+        : `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`);
     const tap = plans.length > 1 ? `schedDayAt('${d}')` : (plans.length === 1 ? `openPlan(${first.id},'schedule')` : `newPlan('${d}')`);
     rows += `<div class="card list-item" style="${isToday ? 'border:2px solid var(--info)' : ''}" onclick="${tap}">
       <div class="ic">${WD_SHORT[i]}</div>
@@ -1127,34 +1129,67 @@ async function schedWeek() {
   document.getElementById('schedBody').innerHTML = schedHeader(`${fmtDM(mon)} – ${fmtDM(sun)}`) + rows;
 }
 
+// Month = overview grid (dots) via the shared monthCalendar; tapping a day opens
+// the centered scrolling day-feed (UX3-5, Apple-calendar style).
 async function schedMonth() {
   const a = new Date(STATE.schedDate + 'T00:00:00');
   const y = a.getFullYear(), mo = a.getMonth();
-  const firstISO = isoOf(new Date(y, mo, 1));
-  const lastDay = new Date(y, mo + 1, 0);
-  const lastISO = isoOf(lastDay);
+  const firstISO = isoOf(new Date(y, mo, 1)), lastISO = isoOf(new Date(y, mo + 1, 0));
   const byDate = _byDate(await api(`/plans?from=${firstISO}&to=${lastISO}`));
-  const today = todayISO();
-  const gridStart = mondayISO(firstISO);
-  const weeks = Math.ceil((isoWeekday(firstISO) + lastDay.getDate()) / 7);
-  let cells = '';
-  for (let i = 0; i < weeks * 7; i++) {
-    const d = addDaysISO(gridStart, i);
-    const dt = new Date(d + 'T00:00:00');
-    const inMonth = dt.getMonth() === mo;
-    const plans = byDate[d] || [];
-    const isToday = d === today;
-    const tap = plans.length === 1 ? `openPlan(${plans[0].id},'schedule')` : `schedDayAt('${d}')`;
-    const dot = plans.length ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : 'var(--info)'};margin:3px auto 0"></div>` : '<div style="height:8px"></div>';
-    cells += `<div onclick="${tap}" style="text-align:center;padding:6px 0;border-radius:8px;cursor:pointer;${isToday ? 'background:var(--info);color:#fff' : (inMonth ? '' : 'opacity:.3')}">
-      <div style="font-size:13px">${dt.getDate()}</div>${dot}</div>`;
-  }
-  const head = WD_SHORT.map(w => `<div style="text-align:center;font-size:11px;color:var(--txt2)">${w}</div>`).join('');
-  const title = a.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
-  document.getElementById('schedBody').innerHTML = schedHeader(title) +
-    `<div class="card"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">${head}${cells}</div></div>`;
+  const marks = {};
+  Object.keys(byDate).forEach(d => { marks[d] = byDate[d].every(_isRestPlan) ? 'rest' : 'plan'; });
+  document.getElementById('schedBody').innerHTML =
+    monthCalendar(firstISO, marks, null, 'schedFeedAt', 'schedMonthNav') +
+    '<div class="muted small" style="text-align:center;margin-top:2px">Тап по дню — лента дней с выбранным по центру</div>';
+}
+function schedMonthNav(dir) {
+  const d = new Date(STATE.schedDate + 'T00:00:00'); d.setDate(1); d.setMonth(d.getMonth() + dir);
+  STATE.schedDate = isoOf(d); Schedule();
 }
 function schedDayAt(iso) { STATE.schedDate = iso; STATE.schedMode = 'day'; Schedule(); }
+
+// ── Schedule month → centered scrolling day-feed (UX3-5) ────────────────────
+function schedFeedAt(iso) {
+  STATE.schedMode = 'feed'; STATE.feedCenter = iso;
+  STATE.feedStart = addDaysISO(iso, -14); STATE.feedEnd = addDaysISO(iso, 14);
+  STATE._feedScroll = 'center'; Schedule();
+}
+function schedFeedMore(dir) {
+  if (dir < 0) { STATE._feedAnchor = STATE.feedStart; STATE.feedStart = addDaysISO(STATE.feedStart, -14); }
+  else { STATE.feedEnd = addDaysISO(STATE.feedEnd, 14); }
+  Schedule();
+}
+function dayFeedCard(iso, plans, isCenter, isToday) {
+  const head = `${WD_SHORT[isoWeekday(iso)]}, ${esc(fmtDate(iso))}${isToday ? ' · сегодня' : ''}`;
+  const body = !plans.length
+    ? `<div class="small muted" style="margin-top:3px">— ничего · <span style="color:var(--info);cursor:pointer" onclick="newPlan('${iso}')">＋ запланировать</span></div>`
+    : plans.map(p => _isRestPlan(p)
+        ? '<div class="small muted" style="margin-top:4px">💤 Отдых</div>'
+        : `<div class="small" style="margin-top:4px;cursor:pointer" onclick="openPlan(${p.id},'schedule')">• <b>${esc(p.focus_label || 'Тренировка')}</b> <span class="muted">· ${(p.exercises || []).length} упр. ›</span></div>`).join('');
+  const hb = isToday ? ' style="color:var(--info)"' : (isCenter ? '' : ' class="muted"');
+  return `<div id="feed-${iso}" class="card" style="margin-bottom:10px;${isCenter ? 'border:2px solid var(--info)' : ''}"><b${hb}>${head}</b>${body}</div>`;
+}
+async function schedFeed() {
+  const center = STATE.feedCenter || todayISO();
+  if (!STATE.feedStart) STATE.feedStart = addDaysISO(center, -14);
+  if (!STATE.feedEnd) STATE.feedEnd = addDaysISO(center, 14);
+  const byDate = _byDate(await api(`/plans?from=${STATE.feedStart}&to=${STATE.feedEnd}`));
+  const today = todayISO();
+  let rows = '';
+  for (let d = STATE.feedStart; d <= STATE.feedEnd; d = addDaysISO(d, 1)) {
+    rows += dayFeedCard(d, byDate[d] || [], d === center, d === today);
+  }
+  const head = `<div class="row sp" style="margin-bottom:10px"><span class="back" style="margin:0" onclick="schedSet('month')">‹ Месяц</span><b style="text-transform:capitalize">${esc(fmtDate(center, { weekday: 'long' }))}</b><span style="width:54px"></span></div>`;
+  document.getElementById('schedBody').innerHTML = head +
+    `<div style="text-align:center;margin-bottom:10px"><span class="back" onclick="schedFeedMore(-1)">↑ Раньше</span></div>` +
+    rows +
+    `<div style="text-align:center;margin-top:4px"><span class="back" onclick="schedFeedMore(1)">↓ Позже</span></div>`;
+  requestAnimationFrame(() => {
+    if (STATE._feedScroll === 'center') { const el = document.getElementById('feed-' + center); if (el) el.scrollIntoView({ block: 'center' }); }
+    else if (STATE._feedAnchor) { const el = document.getElementById('feed-' + STATE._feedAnchor); if (el) el.scrollIntoView({ block: 'start' }); }
+    STATE._feedScroll = null; STATE._feedAnchor = null;
+  });
+}
 
 async function PlanEdit(param) {
   if (param && param !== 'new') {
