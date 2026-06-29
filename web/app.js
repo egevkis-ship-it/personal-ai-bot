@@ -12,7 +12,7 @@ async function api(path, method = 'GET', body) {
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
 const fmt = n => (n == null ? '' : (Math.round(n * 100) / 100).toString());
-const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => (s || '').replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 1800); }
 function mmss(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
 function plural(n, one, few, many) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many; }
@@ -490,7 +490,7 @@ async function pickSearch(wid) {
   document.getElementById('pickbody').innerHTML = r.map(x => pickRow(wid, x.name, x.exercise_key)).join('') || '<div class="muted small">Ничего не найдено</div>';
 }
 function pickRow(wid, name, key) {
-  return `<div class="list-item" onclick='chooseEx(${wid},${JSON.stringify(name)},${JSON.stringify(key || '')})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+  return `<div class="list-item" onclick='chooseEx(${wid},${esc(JSON.stringify(name))},${esc(JSON.stringify(key || ''))})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
 }
 function chooseEx(wid, name, key) {
   const type = key && /план|велосипед|кардио/.test(name.toLowerCase()) ? 'time'
@@ -1039,7 +1039,7 @@ async function planPickSearch() {
   document.getElementById('ppickbody').innerHTML = r.map(x => planPickRow(x.name)).join('') || '<div class="muted small">Ничего не найдено</div>';
 }
 function planPickRow(name) {
-  return `<div class="list-item" onclick='planChooseEx(${JSON.stringify(name)})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+  return `<div class="list-item" onclick='planChooseEx(${esc(JSON.stringify(name))})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
 }
 function planChooseEx(name) { openPlanTarget(name, -1); }
 
@@ -1052,7 +1052,7 @@ function openPlanTarget(name, idx) {
     ${stepRow([['prmax', ex.target_reps_max || ex.target_reps_min || 10, 'повт. до', 1], ['pweight', wVal === '' ? 0 : wVal, 'кг', 2.5]])}
     <div class="tag-row"><span class="pill ${ex.reps_text ? 'on' : ''}" id="pfail" onclick="tag(this)" data-tag="x">До отказа</span></div>
     <div class="muted small" style="margin:2px 0 10px">Вес можно оставить 0, если без веса/по самочувствию</div>
-    <button class="btn" onclick='planSaveTarget(${idx},${JSON.stringify(name)})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+    <button class="btn" onclick='planSaveTarget(${idx},${esc(JSON.stringify(name))})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
 }
 function planEditEx(i) { planSync(); openPlanTarget(window._PLAN.exercises[i].name, i); }
 function planSaveTarget(idx, name) {
@@ -1222,7 +1222,7 @@ async function rPickTab(t) {
 }
 async function rPickGroup(g, label) { const list = await api('/exercises/catalog?group=' + g); document.getElementById('rpickbody').innerHTML = `<div class="back" onclick="rPickTab('grp')">‹ ${label}</div>` + list.map(x => rPickRow(x.name)).join(''); }
 async function rPickSearch() { const q = document.getElementById('rexq').value.trim(); if (q.length < 2) return; const r = await api('/exercises/search?q=' + encodeURIComponent(q)); document.getElementById('rpickbody').innerHTML = r.map(x => rPickRow(x.name)).join('') || '<div class="muted small">Ничего не найдено</div>'; }
-function rPickRow(name) { return `<div class="list-item" onclick='rChooseEx(${JSON.stringify(name)})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
+function rPickRow(name) { return `<div class="list-item" onclick='rChooseEx(${esc(JSON.stringify(name))})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
 function rChooseEx(name) { rOpenTarget(name, -1); }
 function rEditEx(j) { rOpenTarget(window._ROUTINE.days[window._RDi].exercises[j].name, j); }
 function rOpenTarget(name, idx) {
@@ -1233,7 +1233,7 @@ function rOpenTarget(name, idx) {
     ${stepRow([['rsets', ex.target_sets || 3, 'подх.', 1], ['rrmin', ex.target_reps_min || 10, 'повт. от', 1]])}
     ${stepRow([['rrmax', ex.target_reps_max || ex.target_reps_min || 10, 'повт. до', 1], ['rweight', wVal === '' ? 0 : wVal, 'кг', 2.5]])}
     <div class="tag-row"><span class="pill ${ex.reps_text ? 'on' : ''}" id="rfail" onclick="tag(this)" data-tag="x">До отказа</span></div>
-    <button class="btn" onclick='rSaveTarget(${idx},${JSON.stringify(name)})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+    <button class="btn" onclick='rSaveTarget(${idx},${esc(JSON.stringify(name))})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
 }
 function rSaveTarget(idx, name) {
   const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
