@@ -979,39 +979,40 @@ class AddSet(BaseModel):
 @app.post("/api/workouts/{wid}/sets")
 async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
     await _own_workout(uid, wid)
-    if body.client_op_id:
-        # Idempotent replay: if this op was already applied, do nothing.
-        async with get_session() as s:
+    # 1) Resolve WHAT to insert (free-text parse / AI name-normalize) OUTSIDE any
+    #    transaction — a slow AI call must not hold the set-write transaction open.
+    rows: list[dict] = []
+    if body.text:
+        last = await db.get_last_set(wid)
+        parsed = parse_exercise_input(body.text, last["exercise_name"] if last else None)
+        if not parsed:
+            raise HTTPException(422, "не удалось разобрать ввод")
+        rows = [dict(exercise_name=r.exercise_name, weight_kg=r.weight_kg, reps=r.reps,
+                     reps_text=r.reps_text, duration_seconds=r.duration_seconds,
+                     superset_group=r.superset_group, is_warmup=r.is_warmup,
+                     is_failure=r.is_failure, notes=r.notes) for r in parsed]
+    else:
+        name = await _canonical_name(body.exercise_name, uid) if body.exercise_name else key_to_name(body.exercise_key)
+        if not name:
+            raise HTTPException(422, "нужно упражнение")
+        rows = [dict(exercise_name=name, weight_kg=body.weight_kg, reps=body.reps,
+                     reps_text=body.reps_text, duration_seconds=body.duration_seconds,
+                     superset_group=body.superset_group, is_warmup=body.is_warmup,
+                     is_failure=body.is_failure)]
+    # 2) ONE transaction: the idempotency marker and ALL set inserts commit
+    #    atomically. If the op was already applied → duplicate, write nothing. If
+    #    the request dies mid-write → the whole tx rolls back (marker NOT kept),
+    #    so a replay re-applies it cleanly — no lost or doubled set.
+    async with get_session() as s:
+        if body.client_op_id:
             r = await s.execute(
                 text("INSERT INTO processed_ops (uid, op_id) VALUES (:u, :op) "
                      "ON CONFLICT DO NOTHING RETURNING 1"),
                 {"u": uid, "op": body.client_op_id})
             if r.scalar() is None:
                 return {"ids": [], "duplicate": True}
-    if body.text:
-        last = await db.get_last_set(wid)
-        parsed = parse_exercise_input(body.text, last["exercise_name"] if last else None)
-        if not parsed:
-            raise HTTPException(422, "не удалось разобрать ввод")
-        ids = []
-        for r in parsed:
-            ids.append(await db.add_set(wid, r.exercise_name, weight_kg=r.weight_kg, reps=r.reps,
-                       reps_text=r.reps_text, duration_seconds=r.duration_seconds,
-                       superset_group=r.superset_group, is_warmup=r.is_warmup,
-                       is_failure=r.is_failure, notes=r.notes))
-        return {"ids": ids}
-    # Explicit free-text name → AI-normalize (catalog key is already canonical).
-    if body.exercise_name:
-        name = await _canonical_name(body.exercise_name, uid)
-    else:
-        name = key_to_name(body.exercise_key)
-    if not name:
-        raise HTTPException(422, "нужно упражнение")
-    sid = await db.add_set(wid, name, weight_kg=body.weight_kg, reps=body.reps,
-                           reps_text=body.reps_text, duration_seconds=body.duration_seconds,
-                           superset_group=body.superset_group, is_warmup=body.is_warmup,
-                           is_failure=body.is_failure)
-    return {"ids": [sid]}
+        ids = [await db.add_set_tx(s, wid, **row) for row in rows]
+    return {"ids": ids}
 
 
 class PatchSet(BaseModel):

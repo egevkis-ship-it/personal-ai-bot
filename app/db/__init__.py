@@ -210,6 +210,49 @@ async def get_active_workout(user_id: str) -> dict | None:
 
 # ─────────────────────────── exercise_sets ─────────────────────────────────
 
+async def add_set_tx(
+    s,
+    workout_id: int,
+    exercise_name: str,
+    *,
+    weight_kg: float | None = None,
+    reps: int | None = None,
+    reps_text: str | None = None,
+    duration_seconds: int | None = None,
+    superset_group: str | None = None,
+    is_warmup: bool = False,
+    is_failure: bool = False,
+    notes: str | None = None,
+) -> int:
+    """Insert one set on a CALLER-PROVIDED session (does NOT commit), so it can
+    share a transaction — e.g. with the offline-replay processed_ops marker, so
+    the marker and the set commit atomically (no lost-write window)."""
+    cnt = await s.execute(
+        text("""
+            SELECT COALESCE(MAX(set_number), 0) + 1
+            FROM exercise_sets WHERE workout_id = :wid AND exercise_name = :ex
+        """),
+        {"wid": workout_id, "ex": exercise_name},
+    )
+    set_num = cnt.scalar_one()
+    r = await s.execute(
+        text("""
+            INSERT INTO exercise_sets
+                (workout_id, exercise_name, set_number,
+                 weight_kg, reps, reps_text, duration_seconds,
+                 superset_group, is_warmup, is_failure, notes)
+            VALUES (:wid,:ex,:sn,:w,:r,:rt,:dur,:sg,:iw,:if_,:notes)
+            RETURNING id
+        """),
+        {
+            "wid": workout_id, "ex": exercise_name, "sn": set_num,
+            "w": weight_kg, "r": reps, "rt": reps_text, "dur": duration_seconds,
+            "sg": superset_group, "iw": is_warmup, "if_": is_failure, "notes": notes,
+        },
+    )
+    return r.scalar_one()
+
+
 async def add_set(
     workout_id: int,
     exercise_name: str,
@@ -224,30 +267,10 @@ async def add_set(
     notes: str | None = None,
 ) -> int:
     async with get_session() as s:
-        cnt = await s.execute(
-            text("""
-                SELECT COALESCE(MAX(set_number), 0) + 1
-                FROM exercise_sets WHERE workout_id = :wid AND exercise_name = :ex
-            """),
-            {"wid": workout_id, "ex": exercise_name},
-        )
-        set_num = cnt.scalar_one()
-        r = await s.execute(
-            text("""
-                INSERT INTO exercise_sets
-                    (workout_id, exercise_name, set_number,
-                     weight_kg, reps, reps_text, duration_seconds,
-                     superset_group, is_warmup, is_failure, notes)
-                VALUES (:wid,:ex,:sn,:w,:r,:rt,:dur,:sg,:iw,:if_,:notes)
-                RETURNING id
-            """),
-            {
-                "wid": workout_id, "ex": exercise_name, "sn": set_num,
-                "w": weight_kg, "r": reps, "rt": reps_text, "dur": duration_seconds,
-                "sg": superset_group, "iw": is_warmup, "if_": is_failure, "notes": notes,
-            },
-        )
-        return r.scalar_one()
+        return await add_set_tx(
+            s, workout_id, exercise_name, weight_kg=weight_kg, reps=reps,
+            reps_text=reps_text, duration_seconds=duration_seconds, superset_group=superset_group,
+            is_warmup=is_warmup, is_failure=is_failure, notes=notes)
 
 
 async def update_set(set_id: int, **kwargs: Any) -> None:
