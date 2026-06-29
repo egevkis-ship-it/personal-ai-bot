@@ -104,6 +104,15 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .field input{flex:1;border:none;background:transparent;color:var(--txt);font-size:16px;outline:none}
 .timer{font-size:46px;font-weight:700;color:var(--info);text-align:center;font-variant-numeric:tabular-nums;margin:10px 0}
 .tag-row{display:flex;gap:8px;justify-content:center;margin-bottom:12px;flex-wrap:wrap}
+/* WK-2 multi-set rows */
+.setrow{display:flex;align-items:center;gap:7px;padding:6px 0;border-bottom:1px solid var(--line)}
+.setrow .srnum{flex:0 0 16px;color:var(--txt2);font-size:13px;text-align:center}
+.setrow .srin{flex:1 1 0;min-width:0;width:100%;background:var(--sec);border:none;border-radius:9px;
+  padding:11px 6px;text-align:center;font-size:17px;font-weight:600;color:var(--info);outline:none}
+.setrow .srin:focus{background:var(--info);color:#fff}
+.setrow .x{flex:0 0 auto;font-size:15px;opacity:.6}
+.setrow .srwu{flex:0 0 auto;padding:5px 9px;font-size:12px}
+.setrow .srdel{flex:0 0 auto;color:var(--danger);cursor:pointer;padding:4px 6px;font-size:15px}
 .spark{width:100%;height:44px}
 .mfield{background:var(--sec);border-radius:var(--r-sm);padding:8px 10px}
 .mfield label{font-size:11px;color:var(--txt2);display:block}

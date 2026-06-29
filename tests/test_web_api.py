@@ -143,6 +143,36 @@ def test_set_logging_idempotency(client):
     assert sum(len(ex["sets"]) for ex in w["exercises"]) == 1
 
 
+def test_set_batch_structured_rows(client):
+    """WK-2: a `sets` array inserts several rows at once, skips empty rows,
+    keeps per-row warmup flags, and is one idempotent op."""
+    client.cookies.clear()
+    wid = client.post("/api/workouts", json={}).json()["id"]
+    op = "op-batch-1"
+    body = {
+        "exercise_name": "Жим",
+        "client_op_id": op,
+        "sets": [
+            {"weight_kg": 80, "reps": 10, "is_warmup": True},
+            {"weight_kg": 82, "reps": 8},
+            {"weight_kg": "", "reps": ""},   # empty → skipped
+            {"weight_kg": 80, "reps": 8},
+        ],
+    }
+    r = client.post(f"/api/workouts/{wid}/sets", json=body)
+    assert r.status_code == 200 and len(r.json()["ids"]) == 3
+    # replay with the same op_id is a no-op
+    r2 = client.post(f"/api/workouts/{wid}/sets", json=body)
+    assert r2.json().get("duplicate") is True
+    w = client.get(f"/api/workouts/{wid}").json()
+    sets = [s for ex in w["exercises"] for s in ex["sets"]]
+    assert len(sets) == 3
+    assert sum(1 for s in sets if s["is_warmup"]) == 1
+    # all-empty rows → 422
+    bad = client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Жим", "sets": [{"weight_kg": ""}]})
+    assert bad.status_code == 422
+
+
 # ── admin / registration flow ───────────────────────────────────────────────
 
 def test_admin_flow_owner_and_last_admin_guards(client):

@@ -326,35 +326,86 @@ function openExercise(wid, idx) {
     <button class="btn" style="margin-top:12px" onclick="openAddSet(${wid},${idx})">➕ Добавить подход</button>`);
 }
 
-// add-set sheet — adapts to type
+// add-set sheet — WK-2: several structured rows at once + voice/text fallback
 function openAddSet(wid, idx, exObj) {
   const ex = exObj || window._WO.exercises[idx];
   const type = ex.type || 'strength';
   const tgt = ex.target || {}, last = ex.last || {};
-  let w = tgt.weight_kg ?? last.weight_kg ?? 20;
-  let reps = tgt.reps ?? last.reps ?? 10;
-  let dur = tgt.duration_seconds ?? last.duration_seconds ?? 60;
-  let useWeight = false;
-  let html = `<div class="muted small">${esc(ex.name)}</div><h2>Новый подход</h2>`;
-  if (type === 'time') {
-    html += stepRow([['min', Math.floor(dur / 60), 'мин', 1], ['sec', dur % 60, 'сек', 10]]);
-    html += `<button class="btn ghost" id="tbtn" onclick="toggleTimer()">▶ Запустить таймер</button>
-      <div id="timerbox"></div>`;
-  } else if (type === 'bodyweight') {
-    html += stepRow([['reps', reps, 'повт.', 1]]);
-    html += `<div class="row sp" style="background:var(--sec);border-radius:10px;padding:9px 12px;margin-bottom:12px">
-      <span class="small">➕ Доп. вес</span><input type="checkbox" id="usew" onchange="document.getElementById('wbox').style.display=this.checked?'block':'none'"></div>
-      <div id="wbox" style="display:none">${stepRow([['weight', 10, 'кг', 2.5]])}</div>`;
+  window._setCtx = {
+    wid, idx, ex, type,
+    w: tgt.weight_kg ?? last.weight_kg ?? 20,
+    reps: tgt.reps ?? last.reps ?? 10,
+    dur: tgt.duration_seconds ?? last.duration_seconds ?? 60,
+  };
+  // default row count = planned sets (1..12); no plan → 1 (time) / 3 (else)
+  const planned = ex.target_sets ?? tgt.target_sets ?? null;
+  const n = Math.max(1, Math.min(12, planned || (type === 'time' ? 1 : 3)));
+  window._setRows = Array.from({ length: n }, () => ({}));
+  const timer = type === 'time'
+    ? `<button class="btn ghost sm" id="tbtn" style="margin-bottom:8px" onclick="toggleSetTimer()">▶ Таймер (запишет подход)</button><div id="timerbox"></div>`
+    : '';
+  sheet(`<div class="muted small">${esc(ex.name)}</div><h2>Подходы</h2>
+    ${timer}
+    <div id="setrows"></div>
+    <button class="btn ghost sm" style="margin-top:2px" onclick="addSetRow()">➕ Добавить ещё подход</button>
+    <button class="btn" id="savesets" style="margin-top:12px" onclick="confirmSets()">✓ Сохранить</button>
+    <div class="muted small" style="text-align:center;margin:14px 0 4px">или голосом / текстом — «80×10, 82×8, 80×8»</div>
+    <div class="field"><input id="freetext" placeholder="80x10, 82x8, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`);
+  renderSetRows();
+}
+function _setAttr(v) { return esc(String(v ?? '')); }
+function setInputRow(c, i, r) {
+  const del = window._setRows.length > 1
+    ? `<span class="srdel" onclick="rmSetRow(${i})">✕</span>`
+    : `<span class="srdel" style="visibility:hidden">✕</span>`;
+  const wu = `<span class="pill srwu ${r.warmup ? 'on' : ''}" onclick="this.classList.toggle('on')" title="Разминка">Р</span>`;
+  let fields;
+  if (c.type === 'time') {
+    const dur = r.dur ?? c.dur;
+    fields = `<input class="srin sr-min" inputmode="numeric" value="${_setAttr(Math.floor(dur / 60))}" placeholder="мин"><span class="x">:</span><input class="srin sr-sec" inputmode="numeric" value="${_setAttr(dur % 60)}" placeholder="сек">`;
+  } else if (c.type === 'bodyweight') {
+    fields = `<input class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт."><span class="x" style="flex:0 0 auto">повт.</span>`;
   } else {
-    html += stepRow([['weight', w, 'кг', 2.5], ['reps', reps, 'повт.', 1]]);
+    fields = `<input class="srin sr-w" inputmode="decimal" value="${_setAttr(r.weight ?? c.w)}" placeholder="кг"><span class="x">×</span><input class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт.">`;
   }
-  html += `<div class="tag-row">
-    <span class="pill" data-tag="warmup" onclick="tag(this)">Разминка</span>
-    <span class="pill" data-tag="failure" onclick="tag(this)">До отказа</span></div>
-    <button class="btn" onclick="confirmSet(${wid},'${type}')">✓ Подтвердить</button>
-    <div class="muted small" style="text-align:center;margin:12px 0 4px">или ввести другое</div>
-    <div class="field"><input id="freetext" placeholder="80x10, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`;
-  sheet(html); window._addCtx = { wid, ex };
+  return `<div class="setrow row" data-i="${i}"><span class="srnum">${i + 1}</span>${fields}${wu}${del}</div>`;
+}
+function renderSetRows() {
+  const box = document.getElementById('setrows'); if (!box) return;
+  box.innerHTML = window._setRows.map((r, i) => setInputRow(window._setCtx, i, r)).join('');
+  const b = document.getElementById('savesets'); if (b) b.textContent = `✓ Сохранить (${window._setRows.length})`;
+}
+function _readSetRows() {
+  const c = window._setCtx;
+  document.querySelectorAll('#setrows .setrow').forEach((el, i) => {
+    const r = window._setRows[i] = (window._setRows[i] || {});
+    const wuEl = el.querySelector('.srwu');
+    r.warmup = !!(wuEl && wuEl.classList.contains('on'));
+    if (c.type === 'time') {
+      const mn = parseInt((el.querySelector('.sr-min') || {}).value || '0', 10) || 0;
+      const sc = parseInt((el.querySelector('.sr-sec') || {}).value || '0', 10) || 0;
+      r.dur = mn * 60 + sc;
+    } else {
+      const wv = el.querySelector('.sr-w'); if (wv) r.weight = wv.value;
+      const rv = el.querySelector('.sr-r'); if (rv) r.reps = rv.value;
+    }
+  });
+}
+function addSetRow() { _readSetRows(); window._setRows.push({}); renderSetRows(); }
+function rmSetRow(i) { _readSetRows(); window._setRows.splice(i, 1); if (!window._setRows.length) window._setRows.push({}); renderSetRows(); }
+// live count-up timer for time-based exercises: stop appends a row with the elapsed time
+function toggleSetTimer() {
+  if (TMR) {
+    stopTimer(); const v = window.TMR_VAL || 0;
+    const b = document.getElementById('tbtn'); if (b) b.textContent = '▶ Таймер (запишет подход)';
+    const box = document.getElementById('timerbox'); if (box) box.innerHTML = '';
+    if (v) { _readSetRows(); window._setRows.push({ dur: v }); renderSetRows(); }
+    return;
+  }
+  let s = 0; const box = document.getElementById('timerbox');
+  const b = document.getElementById('tbtn'); if (b) b.textContent = '■ Стоп и записать';
+  window.TMR_VAL = 0;
+  TMR = setInterval(() => { s++; window.TMR_VAL = s; if (box) box.innerHTML = `<div class="timer">${mmss(s)}</div>`; }, 1000);
 }
 function stepRow(fields) {
   const cells = fields.map(([id, val, unit, step]) =>
@@ -366,21 +417,44 @@ function stepRow(fields) {
 function bump(id, d) { const el = document.getElementById('f_' + id); let v = parseFloat(el.value || 0) + d; if (v < 0) v = 0; el.value = (Math.round(v * 100) / 100); }
 function tag(el) { el.classList.toggle('on'); }
 function getTags() { const t = {}; document.querySelectorAll('.pill[data-tag].on').forEach(e => t['is_' + e.dataset.tag] = true); return t; }
-async function confirmSet(wid, type) {
-  const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
-  const body = { exercise_name: window._addCtx.ex.name, ...getTags() };
-  if (type === 'time') body.duration_seconds = (g('min') || 0) * 60 + (g('sec') || 0);
-  else if (type === 'bodyweight') { body.reps = g('reps'); if (document.getElementById('usew')?.checked) body.weight_kg = g('weight'); }
-  else { body.weight_kg = g('weight'); body.reps = g('reps'); }
+async function confirmSets() {
+  _readSetRows();
+  const c = window._setCtx;
+  const sets = window._setRows.map(r => {
+    const o = { is_warmup: !!r.warmup };
+    if (c.type === 'time') o.duration_seconds = r.dur || null;
+    else {
+      o.reps = (r.reps === '' || r.reps == null) ? null : parseInt(r.reps, 10);
+      if (c.type !== 'bodyweight') o.weight_kg = (r.weight === '' || r.weight == null) ? null : parseFloat(r.weight);
+    }
+    return o;
+  }).filter(o => o.weight_kg != null || o.reps != null || o.duration_seconds != null);
+  if (!sets.length) return toast('Заполни хотя бы один подход');
   closeSheet(); stopTimer();
-  await submitSet(wid, body);
+  await submitSets(c.wid, { exercise_name: c.ex.name, sets });
   const st = window._SETTINGS || {};
   if (st.rest_timer_enabled !== false) restTimer(st.rest_timer_seconds || 90);  // auto-start unless disabled
 }
+// post several structured sets as ONE idempotent op; offline-aware like submitSet
+async function submitSets(wid, body) {
+  body.client_op_id = _opId();
+  try { await api('/workouts/' + wid + '/sets', 'POST', body); go('active', wid); }
+  catch (e) {
+    if (isNetworkErr(e)) {
+      await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
+      const W = window._WO;
+      if (W && W.id === wid) { (body.sets || []).forEach((s, k) => _insertSet(W, { ...s, exercise_name: body.exercise_name, client_op_id: body.client_op_id + '-' + k })); renderActive(W); }
+      toast('Оффлайн — сохранится при сети');
+    } else { toast(e.message || 'не удалось'); }
+  }
+}
 async function confirmText(wid) {
   const t = document.getElementById('freetext').value.trim(); if (!t) return;
-  try { await api('/workouts/' + wid + '/sets', 'POST', { text: t }); closeSheet(); go('active', wid); }
-  catch (e) { toast(e.message); }
+  // the field is scoped to the current exercise: pass its name so numbers-only
+  // input («80x10, 82x8») attaches to it (the backend uses it as the parse hint).
+  const name = (window._setCtx && window._setCtx.ex && window._setCtx.ex.name) || undefined;
+  try { await api('/workouts/' + wid + '/sets', 'POST', { text: t, exercise_name: name }); closeSheet(); go('active', wid); }
+  catch (e) { toast(e.message || 'не удалось разобрать'); }
 }
 
 // voice → text: record with MediaRecorder, transcribe via Whisper, fill a field

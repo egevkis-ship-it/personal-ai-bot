@@ -1201,6 +1201,7 @@ class AddSet(BaseModel):
     is_warmup: bool = False
     is_failure: bool = False
     superset_group: Optional[str] = None
+    sets: Optional[list[dict]] = None    # WK-2: several structured rows at once
     client_op_id: Optional[str] = None   # idempotency key for offline replay
 
 
@@ -1212,13 +1213,54 @@ async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
     rows: list[dict] = []
     if body.text:
         last = await db.get_last_set(wid)
-        parsed = parse_exercise_input(body.text, last["exercise_name"] if last else None)
+        ctx = (last["exercise_name"] if last else None) or body.exercise_name
+        parsed = parse_exercise_input(body.text, ctx)
+        # The regex parser only takes the FIRST set of a comma/«и»-separated list
+        # and can't read conversational/voice phrasing. Mirror the bot: fall back
+        # to the AI parser when nothing parsed, or a multi-set separator hints
+        # there should be several. AI runs OUTSIDE the write transaction.
+        import re as _re
+        if (not parsed) or (len(parsed) == 1 and _re.search(r"[,;\n]|\bи\b", body.text)):
+            try:
+                from app.bot.services.ai_parser import parse_set_text_ai
+                ai = await parse_set_text_ai(body.text, exercise_hint=ctx)
+            except Exception:
+                ai = None
+            if ai and len(ai) > len(parsed or []):
+                from app.bot.services.set_parser import SetResult
+                parsed = [SetResult(
+                    exercise_name=d.get("exercise_name") or ctx or "Упражнение",
+                    weight_kg=d.get("weight_kg"), reps=d.get("reps"), reps_text=d.get("reps_text"),
+                    duration_seconds=d.get("duration_seconds"),
+                    is_warmup=d.get("is_warmup", False), is_failure=d.get("is_failure", False),
+                ) for d in ai]
         if not parsed:
             raise HTTPException(422, "не удалось разобрать ввод")
         rows = [dict(exercise_name=r.exercise_name, weight_kg=r.weight_kg, reps=r.reps,
                      reps_text=r.reps_text, duration_seconds=r.duration_seconds,
                      superset_group=r.superset_group, is_warmup=r.is_warmup,
                      is_failure=r.is_failure, notes=r.notes) for r in parsed]
+    elif body.sets is not None:
+        # WK-2: several structured rows at once. One name; each row carries its
+        # own weight/reps/duration + warmup/failure flags. Empty rows are skipped.
+        name = await _canonical_name(body.exercise_name, uid) if body.exercise_name else key_to_name(body.exercise_key)
+        if not name:
+            raise HTTPException(422, "нужно упражнение")
+
+        def _num(v, cast):
+            try:
+                return cast(v) if v is not None and v != "" else None
+            except (TypeError, ValueError):
+                return None
+        for r in body.sets:
+            w, rp, du, rt = r.get("weight_kg"), r.get("reps"), r.get("duration_seconds"), r.get("reps_text")
+            if w in (None, "") and rp in (None, "") and du in (None, "") and not rt:
+                continue
+            rows.append(dict(exercise_name=name, weight_kg=_num(w, float), reps=_num(rp, int),
+                             reps_text=(str(rt)[:80] if rt else None), duration_seconds=_num(du, int),
+                             superset_group=None, is_warmup=bool(r.get("is_warmup")), is_failure=bool(r.get("is_failure"))))
+        if not rows:
+            raise HTTPException(422, "нет подходов")
     else:
         name = await _canonical_name(body.exercise_name, uid) if body.exercise_name else key_to_name(body.exercise_key)
         if not name:
