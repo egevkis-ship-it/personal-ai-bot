@@ -5,8 +5,9 @@
 // 'unsafe-eval') + stop proxying cross-origin requests (see fetch handler) so the
 // Telegram Login Widget loads for installed-PWA clients. v5: flagship AI coach
 // («Собери следующую неделю») — new coach UI in app.js. v6: UX brief — 4-tab nav
-// (no «Ещё»), Photos→Замеры, Reports→История.
-const CACHE = 'fit-proto-v6';
+// (no «Ещё»), Photos→Замеры, Reports→История. v7: plan delete + multi-plan
+// day + Replace/Add-second dialog.
+const CACHE = 'fit-proto-v7';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

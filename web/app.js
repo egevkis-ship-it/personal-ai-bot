@@ -929,7 +929,8 @@ async function PlanView(pid) {
     ${p.notes ? `<div class="card small muted">📝 ${esc(p.notes)}</div>` : ''}
     ${exItems}
     <button class="btn success" style="margin-top:14px" onclick="startFromPlan(${p.id})">▶ Начать тренировку</button>
-    <button class="btn ghost" style="margin-top:8px" onclick="go('planEdit',${p.id})">✏️ Редактировать</button>`;
+    <button class="btn ghost" style="margin-top:8px" onclick="go('planEdit',${p.id})">✏️ Редактировать</button>
+    <button class="btn danger" style="margin-top:8px" onclick="askDeletePlan(${p.id}, () => go(STATE.planFrom||'schedule'))">🗑 Удалить</button>`;
 }
 
 // ── Schedule (view-only: day / week / month) ────────────────────────────────
@@ -983,7 +984,10 @@ async function schedDay() {
       <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
   } else {
     html += list.map(p => `<div class="card" style="cursor:pointer" onclick="openPlan(${p.id},'schedule')">
-      <div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b><span class="muted">›</span></div>
+      <div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b>
+        <span style="display:flex;gap:12px;align-items:center">
+          <span style="color:var(--danger);cursor:pointer;font-size:16px" onclick="event.stopPropagation();askDeletePlan(${p.id}, schedDay)">🗑</span>
+          <span class="muted">›</span></span></div>
       ${(p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>'}
     </div>`).join('');
   }
@@ -1003,7 +1007,7 @@ async function schedWeek() {
     const label = plans.length
       ? `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`
       : '—';
-    const tap = plans.length ? `openPlan(${first.id},'schedule')` : `newPlan('${d}')`;
+    const tap = plans.length > 1 ? `schedDayAt('${d}')` : (plans.length === 1 ? `openPlan(${first.id},'schedule')` : `newPlan('${d}')`);
     rows += `<div class="card list-item" style="${isToday ? 'border:2px solid var(--info)' : ''}" onclick="${tap}">
       <div class="ic">${WD_SHORT[i]}</div>
       <div style="flex:1"><b>${esc(fmtDM(d))}</b>${isToday ? ' <span class="small" style="color:var(--info)">сегодня</span>' : ''}
@@ -1161,15 +1165,48 @@ async function savePlan() {
   if (!P.date) return toast('Укажи дату');
   if (!P.exercises.length && !P.focus) return toast('Добавь фокус или упражнения');
   const payload = { date: P.date, focus_label: P.focus || null, notes: P.notes || null, exercises: P.exercises };
+  if (P.id) {  // editing an existing plan — keep its identity, no busy-day prompt
+    try { await api('/plans/' + P.id, 'PATCH', payload); window._PLAN = null; toast('План сохранён'); go('plans'); }
+    catch (e) { toast(e.message || 'не удалось сохранить'); }
+    return;
+  }
+  // NEW plan: if the day already has plan(s), ask Replace / Add-second.
+  let existing = [];
+  try { existing = await api(`/plans?from=${P.date}&to=${P.date}`); } catch {}
+  if (existing.length) {
+    window._BUSY = existing.map(p => p.id);
+    sheet(`<h2>На этот день уже есть план</h2>
+      <div class="muted small" style="margin:4px 0 14px">${esc(fmtPlanDate(P.date))} — ${existing.length} ${plural(existing.length, 'план', 'плана', 'планов')}. Что сделать?</div>
+      <button class="btn danger" onclick="planResolveBusy('replace')">Заменить существующий</button>
+      <button class="btn" style="margin-top:8px" onclick="planResolveBusy('add')">Добавить вторым</button>
+      <button class="btn ghost" style="margin-top:8px" onclick="closeSheet()">Отмена</button>`);
+    return;
+  }
+  planCreate(payload);
+}
+async function planCreate(payload) {
+  try { await api('/plans', 'POST', payload); window._PLAN = null; toast('План сохранён'); go('plans'); }
+  catch (e) { toast(e.message || 'не удалось сохранить'); }
+}
+async function planResolveBusy(mode) {
+  const P = window._PLAN; if (!P) { closeSheet(); return; }
+  const payload = { date: P.date, focus_label: P.focus || null, notes: P.notes || null, exercises: P.exercises };
+  closeSheet();
   try {
-    if (P.id) await api('/plans/' + P.id, 'PATCH', payload);
-    else await api('/plans', 'POST', payload);
-    window._PLAN = null; toast('План сохранён'); go('plans');
+    if (mode === 'replace') { for (const id of (window._BUSY || [])) await api('/plans/' + id, 'DELETE'); }
+    window._BUSY = null;
+    await planCreate(payload);
   } catch (e) { toast(e.message || 'не удалось сохранить'); }
 }
-async function deletePlan(id) {
-  try { await api('/plans/' + id, 'DELETE'); window._PLAN = null; toast('План удалён'); go('plans'); }
-  catch (e) { toast(e.message); }
+async function deletePlan(id, after) {
+  try {
+    await api('/plans/' + id, 'DELETE'); window._PLAN = null; toast('План удалён');
+    if (typeof after === 'function') after(); else go('plans');
+  } catch (e) { toast(e.message); }
+}
+// Confirm wrapper shared by PlanView, PlanEdit and the day-list quick delete.
+function askDeletePlan(id, after) {
+  confirmSheet('Удалить план?', 'План будет убран из расписания.', 'Да, удалить', true, () => deletePlan(id, after));
 }
 
 // AI free-text → preview → bulk save
