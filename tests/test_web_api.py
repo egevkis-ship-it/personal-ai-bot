@@ -358,6 +358,17 @@ def test_history_hides_rest_days(client):
     assert "Отдых" not in foci and "" not in foci  # no rest / empty rows in the journal
 
 
+def test_choose_day_excludes_deleted_plans(client):
+    # UX3-FIX-3: a soft-deleted plan must not resurface in /workouts/week as «пропущено».
+    import datetime as _dt
+    today = _dt.datetime.now(_dt.timezone.utc).date()
+    d = (today - _dt.timedelta(days=today.weekday()) + _dt.timedelta(days=2)).isoformat()  # a day this week
+    pid = client.post("/api/plans", json={"date": d, "focus_label": "F3", "exercises": [{"name": "X", "target_sets": 1}]}).json()["id"]
+    assert any(p["focus_label"] == "F3" for p in client.get("/api/workouts/week").json())   # live plan shows
+    client.delete(f"/api/plans/{pid}")
+    assert not any(p["id"] == pid for p in client.get("/api/workouts/week").json())          # deleted plan gone
+
+
 def test_bulk_create_conflict_guard(client):
     # UX2-4: mass create over an occupied day asks (409 + occupied), then add/replace.
     D = "2099-05-04"

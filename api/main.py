@@ -992,11 +992,14 @@ async def workouts_week(uid: str = Depends(current_uid)):
           EXISTS(SELECT 1 FROM workouts w WHERE w.planned_workout_id = pw.id
                  AND w.finished_at IS NOT NULL) AS done
         FROM planned_workouts pw
-        WHERE pw.user_id = :u AND pw.planned_date BETWEEN :a AND :b
+        WHERE pw.user_id = :u AND pw.status = 'planned' AND pw.planned_date BETWEEN :a AND :b
         ORDER BY pw.planned_date ASC
         """, u=uid, a=monday, b=sunday)
+    # UX3-FIX-3: only live ('planned') plans — soft-deleted ones (status='skipped')
+    # no longer leak in. «Пропущено» is derived: a past planned day with no finished
+    # workout (not the overloaded 'skipped' status that delete also uses).
     return [{"id": r["id"], "planned_date": r["planned_date"], "focus_label": r["focus_label"],
-             "status": "completed" if r["done"] else r["status"],
+             "status": ("completed" if r["done"] else ("skipped" if r["planned_date"] < today else "planned")),
              "is_today": r["planned_date"] == today, "exercises": r["exercises"]} for r in rows]
 
 
