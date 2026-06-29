@@ -358,6 +358,21 @@ def test_history_hides_rest_days(client):
     assert "Отдых" not in foci and "" not in foci  # no rest / empty rows in the journal
 
 
+def test_exercise_catalog_v2(client):
+    # DB-1: v2 catalog drives the picker — 14 groups, no duplicate labels (the old
+    # biceps/triceps→«Руки», abs/core→«Пресс» bug is gone), and legacy names resolve.
+    import urllib.parse
+    g = client.get("/api/exercises/groups").json()
+    labels = [x["label"] for x in g]
+    assert len(g) == 14 and len(set(labels)) == 14
+    assert {"Бицепс", "Трицепс", "Пресс", "Кор"} <= set(labels)   # distinct, not merged
+    cat = client.get("/api/exercises/catalog").json()
+    assert len(cat) >= 109 and "image" in cat[0]
+    # backward-compat: an old spelling from history resolves to the curated v2 entry
+    res = client.get("/api/exercises/search?q=" + urllib.parse.quote("разводка")).json()
+    assert any("Разведение гантелей" in x["name"] for x in res)
+
+
 def test_workout_to_template_day(client):
     # UX3-FEAT-1: a finished workout maps to a routine day; per exercise the target is
     # (# working sets) × reps @ the heaviest working set's weight (warmups excluded).

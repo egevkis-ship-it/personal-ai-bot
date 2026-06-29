@@ -35,7 +35,6 @@ import app.db as db
 from app.db.engine import engine, get_session
 from app.bot.services import tz
 from app.bot.services.set_parser import parse_exercise_input
-from app.modules.fitness.exercise_normalizer import EXERCISE_LIBRARY, possible_matches
 
 from api.schema import CREATE_SQL
 from api import auth
@@ -87,20 +86,13 @@ else:
 
 PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz", "/healthz/ai")
 
-GROUP_RU = {
-    "chest": "Грудь", "back": "Спина", "legs": "Ноги", "shoulders": "Плечи",
-    "biceps": "Руки", "triceps": "Руки", "abs": "Пресс", "core": "Пресс",
-    "calves": "Икры", "glutes": "Ягодицы", "posterior_chain": "Задняя цепь",
-    "cardio": "Кардио",
-}
+# DB-1: the merged v2 catalog (14 groups, no duplicate labels) drives the picker,
+# while folding legacy names in as aliases so history keeps resolving.
+from app.bot.services.catalog_v2 import GROUPS as GROUP_RU, GROUP_ORDER, CATALOG, NAME_INDEX  # noqa: E402
+from app.bot.services.catalog_v2 import search as _catalog_search  # noqa: E402
 
-_NAME_TO_KEY: dict[str, str] = {}
-_KEY_TO_RU: dict[str, str] = {}
-for _k, _it in EXERCISE_LIBRARY.items():
-    _KEY_TO_RU[_k] = _it["canonical_ru"]
-    _NAME_TO_KEY[_it["canonical_ru"].lower()] = _k
-    for _a in _it.get("aliases", []):
-        _NAME_TO_KEY.setdefault(_a.lower(), _k)
+_NAME_TO_KEY = NAME_INDEX
+_KEY_TO_RU = {_k: _it["canonical_ru"] for _k, _it in CATALOG.items()}
 
 
 def key_to_name(key): return None if not key else _KEY_TO_RU.get(key, key)
@@ -110,7 +102,7 @@ def _to_f(v): return float(v) if v is not None else None
 
 def exercise_type(name: str, key: str | None = None) -> str:
     n = (name or "").lower()
-    mg = EXERCISE_LIBRARY.get(key or "", {}).get("muscle_group")
+    mg = (CATALOG.get(key or "") or {}).get("muscle_group")
     if mg == "cardio" or "планк" in n or "велосипед" in n:
         return "time"
     if any(w in n for w in ("подтяг", "отжим", "брус")):
@@ -1294,25 +1286,26 @@ async def exercises_recent(limit: int = 12, uid: str = Depends(current_uid)):
 @app.get("/api/exercises/groups")
 async def exercises_groups(uid: str = Depends(current_uid)):
     counts: dict[str, int] = {}
-    for it in EXERCISE_LIBRARY.values():
+    for it in CATALOG.values():
         g = it.get("muscle_group") or "other"
         counts[g] = counts.get(g, 0) + 1
-    return [{"group": g, "label": GROUP_RU.get(g, g), "count": c} for g, c in counts.items()]
+    # 14 groups, in the curated order, with one row per group (no duplicate labels).
+    return [{"group": g, "label": GROUP_RU.get(g, g), "count": counts.get(g, 0)}
+            for g in GROUP_ORDER if counts.get(g)]
 
 
 @app.get("/api/exercises/catalog")
 async def exercises_catalog(group: Optional[str] = None, uid: str = Depends(current_uid)):
-    out = [{"exercise_key": k, "name": it["canonical_ru"], "muscle_group": it.get("muscle_group")}
-           for k, it in EXERCISE_LIBRARY.items() if not group or it.get("muscle_group") == group]
+    out = [{"exercise_key": k, "name": it["canonical_ru"], "muscle_group": it.get("muscle_group"),
+            "image": it.get("image")}
+           for k, it in CATALOG.items() if not group or it.get("muscle_group") == group]
     out.sort(key=lambda x: x["name"])
     return out
 
 
 @app.get("/api/exercises/search")
 async def exercises_search(q: str, limit: int = 8, uid: str = Depends(current_uid)):
-    limit = max(1, min(limit, 50))
-    return [{"exercise_key": r["exercise_key"], "name": r["canonical_ru"], "muscle_group": r.get("muscle_group")}
-            for r in possible_matches(q, limit)]
+    return _catalog_search(q, max(1, min(limit, 50)))
 
 
 @app.get("/api/exercises/{key}/history")
