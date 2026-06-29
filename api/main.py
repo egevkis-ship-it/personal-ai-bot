@@ -833,6 +833,7 @@ class GenerateWeek(BaseModel):
 
 class ApplyWeek(BaseModel):
     days: list[dict]
+    mode: Optional[str] = None   # UX2-4: None→ask on conflict | 'replace' | 'add'
 
 
 @app.get("/api/coach/context")
@@ -917,9 +918,11 @@ async def coach_generate_week(body: GenerateWeek, uid: str = Depends(current_uid
 async def coach_apply(body: ApplyWeek, uid: str = Depends(current_uid)):
     """Save a confirmed coach week into planned_workouts (reuses the plan path)."""
     today = await today_for(uid)
+    days = body.days or []
+    targets = [_resolve_plan_date(d.get("date"), _opt_int(d.get("weekday"), "weekday", 0, 6), today) for d in days]
+    await _guard_bulk_plan_conflict(uid, targets, body.mode)   # UX2-4
     saved = []
-    for d in body.days or []:
-        dt = _resolve_plan_date(d.get("date"), _opt_int(d.get("weekday"), "weekday", 0, 6), today)
+    for d, dt in zip(days, targets):
         exs = await _normalize_plan_exercises(_clean_plan_exercises(d.get("exercises") or []), uid)
         pid = await db.create_planned_workout(uid, dt, _opt_str(d.get("focus_label"), 200), exs)
         if d.get("notes"):
@@ -1365,6 +1368,46 @@ def _resolve_plan_date(date_str: Optional[str], weekday: Optional[int], today: d
     return today
 
 
+# UX2-4: shared duplicate-day guard for MASS plan creation (coach week, paste
+# bulk, template apply). Detects target days that already hold a plan and lets
+# the client choose Отменить / Заменить / Добавить.
+async def _occupied_plan_dates(uid: str, dates: list[date]) -> list[str]:
+    """ISO dates among `dates` that already hold a planned ('planned') workout."""
+    uniq = sorted({d for d in dates})
+    if not uniq:
+        return []
+    rows = await _rows(
+        "SELECT DISTINCT planned_date FROM planned_workouts "
+        "WHERE user_id=:u AND status='planned' AND planned_date = ANY(:ds)",
+        u=uid, ds=uniq)
+    return sorted(r["planned_date"].isoformat() for r in rows)
+
+
+async def _replace_plans_on(uid: str, dates: list[date]) -> None:
+    """Soft-delete (status='skipped') the user's planned workouts on these dates."""
+    uniq = sorted({d for d in dates})
+    if not uniq:
+        return
+    async with get_session() as s:
+        await s.execute(text(
+            "UPDATE planned_workouts SET status='skipped', updated_at=now() "
+            "WHERE user_id=:u AND status='planned' AND planned_date = ANY(:ds)"),
+            {"u": uid, "ds": uniq})
+
+
+async def _guard_bulk_plan_conflict(uid: str, targets: list[date], mode: Optional[str]) -> None:
+    """mode None → raise 409 {occupied:[...]} if any target day already has a plan;
+    'replace' → soft-delete existing plans on the target days first; 'add' → no-op."""
+    if mode == "add":
+        return
+    if mode == "replace":
+        await _replace_plans_on(uid, targets)
+        return
+    occ = await _occupied_plan_dates(uid, targets)
+    if occ:
+        raise HTTPException(409, detail={"reason": "occupied", "occupied": occ})
+
+
 def _opt_int(v, field: str, lo: int = 0, hi: int = 1000):
     if v is None or v == "":
         return None
@@ -1500,6 +1543,7 @@ class BulkDay(BaseModel):
 
 class BulkPlans(BaseModel):
     days: list[BulkDay] = []
+    mode: Optional[str] = None   # UX2-4: None→ask on conflict | 'replace' | 'add'
 
 
 @app.get("/api/plans")
@@ -1654,10 +1698,11 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
 @app.post("/api/plans/bulk")
 async def create_plans_bulk(body: BulkPlans, uid: str = Depends(current_uid)):
     """Save multiple planned days at once (confirmed preview)."""
-    saved = []
     today = await today_for(uid)
-    for day in body.days:
-        d = _resolve_plan_date(day.date, day.weekday, today)
+    targets = [_resolve_plan_date(day.date, day.weekday, today) for day in body.days]
+    await _guard_bulk_plan_conflict(uid, targets, body.mode)   # UX2-4
+    saved = []
+    for day, d in zip(body.days, targets):
         exs = await _normalize_plan_exercises(_clean_plan_exercises([e.model_dump() for e in day.exercises]), uid)
         pid = await db.create_planned_workout(uid, d, (day.focus_label or None), exs)
         if day.notes:
@@ -1676,6 +1721,7 @@ class RoutineBody(BaseModel):
 class ApplyRoutine(BaseModel):
     from_date: Optional[str] = None
     weeks: int = 1
+    mode: Optional[str] = None   # UX2-4: None→ask on conflict | 'replace' | 'add'
 
 
 def _clean_routine_days(days: list[dict]) -> list[dict]:
@@ -1767,16 +1813,22 @@ async def apply_routine(rid: int, body: ApplyRoutine, uid: str = Depends(current
             raise HTTPException(422, "bad from_date, expected YYYY-MM-DD")
     else:
         start = await today_for(uid)
-    created = 0
+    # Resolve every target (date, routine-day) pair first, skipping past days, so
+    # the duplicate guard sees the whole set (UX2-4).
+    plan_items: list[tuple[date, dict]] = []
     for wk in range(weeks):
         monday = start - timedelta(days=start.weekday()) + timedelta(days=7 * wk)
         for d in days:
             target = monday + timedelta(days=int(d.get("weekday", 0)))
             if target < start:
                 continue
-            exs = await _normalize_plan_exercises(_clean_plan_exercises(d.get("exercises") or []), uid)
-            await db.create_planned_workout(uid, target, d.get("focus_label") or None, exs)
-            created += 1
+            plan_items.append((target, d))
+    await _guard_bulk_plan_conflict(uid, [t for t, _ in plan_items], body.mode)
+    created = 0
+    for target, d in plan_items:
+        exs = await _normalize_plan_exercises(_clean_plan_exercises(d.get("exercises") or []), uid)
+        await db.create_planned_workout(uid, target, d.get("focus_label") or None, exs)
+        created += 1
     return {"created": created}
 
 

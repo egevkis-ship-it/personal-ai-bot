@@ -358,6 +358,39 @@ def test_history_hides_rest_days(client):
     assert "Отдых" not in foci and "" not in foci  # no rest / empty rows in the journal
 
 
+def test_bulk_create_conflict_guard(client):
+    # UX2-4: mass create over an occupied day asks (409 + occupied), then add/replace.
+    D = "2099-05-04"
+    client.post("/api/plans", json={"date": D, "focus_label": "A", "exercises": [{"name": "X", "target_sets": 1}]})
+    r = client.post("/api/plans/bulk", json={"days": [{"date": D, "focus_label": "B", "exercises": []}]})
+    assert r.status_code == 409 and r.json()["detail"]["occupied"] == [D]
+    assert client.post("/api/plans/bulk", json={"mode": "add", "days": [{"date": D, "focus_label": "B", "exercises": []}]}).status_code == 200
+    assert len(client.get(f"/api/plans?from={D}&to={D}").json()) == 2          # added a second
+    assert client.post("/api/plans/bulk", json={"mode": "replace", "days": [{"date": D, "focus_label": "C", "exercises": []}]}).status_code == 200
+    after = client.get(f"/api/plans?from={D}&to={D}").json()
+    assert len(after) == 1 and after[0]["focus_label"] == "C"                  # replaced both
+
+
+def test_coach_apply_conflict_guard(client):
+    D = "2099-05-05"
+    client.post("/api/plans", json={"date": D, "focus_label": "A", "exercises": [{"name": "X", "target_sets": 1}]})
+    r = client.post("/api/coach/apply", json={"days": [{"date": D, "weekday": 0, "focus_label": "B", "exercises": []}]})
+    assert r.status_code == 409 and D in r.json()["detail"]["occupied"]
+    assert client.post("/api/coach/apply", json={"mode": "replace", "days": [{"date": D, "weekday": 0, "focus_label": "B", "exercises": []}]}).status_code == 200
+
+
+def test_routine_apply_conflict_guard(client):
+    import datetime as _dt
+    base = _dt.date(2099, 6, 1)
+    mon = (base - _dt.timedelta(days=base.weekday())).isoformat()   # a Monday → weekday-0 day lands on it
+    rid = client.post("/api/routines", json={"name": "R",
+        "days": [{"weekday": 0, "focus_label": "Mon", "exercises": [{"name": "X", "target_sets": 1}]}]}).json()["id"]
+    assert client.post(f"/api/routines/{rid}/apply", json={"from_date": mon, "weeks": 1}).json()["created"] == 1
+    r = client.post(f"/api/routines/{rid}/apply", json={"from_date": mon, "weeks": 1})  # day now occupied
+    assert r.status_code == 409 and mon in r.json()["detail"]["occupied"]
+    assert client.post(f"/api/routines/{rid}/apply", json={"from_date": mon, "weeks": 1, "mode": "replace"}).json()["created"] == 1
+
+
 def test_start_workout_idor_404(client):
     # user A creates a plan + a workout; user B must NOT be able to seed from them
     client.cookies.clear()

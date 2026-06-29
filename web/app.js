@@ -923,15 +923,33 @@ function coachDropDay(i) {
   if (!window._COACHWEEK) return;
   window._COACHWEEK.days.splice(i, 1); coachPreview();
 }
-async function coachApply() {
+// UX2-4: guard for MASS plan creation (coach week, paste bulk, template apply).
+// doCreate(mode) POSTs; on 409 (some target days already have plans) we ask
+// Отменить / Заменить / Добавить and retry with the chosen mode.
+async function createGuard(doCreate, onDone) {
+  try { onDone(await doCreate(null)); }
+  catch (e) {
+    const occ = e.status === 409 && e.body && e.body.detail && e.body.detail.occupied;
+    if (occ && occ.length) {
+      window._cgFn = async (mode) => {
+        closeSheet();
+        try { onDone(await doCreate(mode)); } catch (err) { toast(err.message || 'не удалось'); }
+      };
+      sheet(`<h2>На некоторые дни уже есть планы</h2>
+        <div class="muted small" style="margin:4px 0 12px">Заняты: ${occ.map(d => esc(fmtDate(d, { weekday: 'short' }))).join(', ')}. Что сделать?</div>
+        <button class="btn danger" onclick="_cgPick('replace')">Заменить старое</button>
+        <button class="btn" style="margin-top:8px" onclick="_cgPick('add')">Добавить вторым</button>
+        <button class="btn ghost" style="margin-top:8px" onclick="closeSheet()">Отменить</button>`);
+    } else { toast(e.message || 'не удалось сохранить'); }
+  }
+}
+function _cgPick(mode) { const f = window._cgFn; window._cgFn = null; if (f) f(mode); }
+function coachApply() {
   const r = window._COACHWEEK || { days: [] };
   if (!(r.days || []).length) return toast('Нет дней для сохранения');
-  try {
-    const res = await api('/coach/apply', 'POST', { days: r.days });
-    window._COACHWEEK = null;
-    toast(`Сохранено в расписание: ${res.saved}`);
-    go('schedule');
-  } catch (e) { toast(e.message || 'не удалось сохранить'); }
+  createGuard(
+    mode => api('/coach/apply', 'POST', { days: r.days, mode }),
+    res => { window._COACHWEEK = null; toast(`Сохранено в расписание: ${res.saved}`); go('schedule'); });
 }
 
 function newPlan(dateISO) {
@@ -1263,11 +1281,11 @@ async function planParse() {
     btn.textContent = '⏳ Разобрать'; btn.disabled = false;
   }
 }
-async function planConfirmBulk() {
-  try {
-    const r = await api('/plans/bulk', 'POST', { days: window._PARSED });
-    window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans');
-  } catch (e) { toast(e.message); }
+function planConfirmBulk() {
+  const days = window._PARSED;
+  createGuard(
+    mode => api('/plans/bulk', 'POST', { days, mode }),
+    r => { window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans'); });
 }
 
 // ── Routines (reusable weekly templates) ────────────────────────────────────
@@ -1396,10 +1414,11 @@ function routineApplySheet(id) {
     <div class="mfield" style="margin-bottom:12px"><label>Недель</label><input id="ra_weeks" type="number" min="1" max="12" value="4"></div>
     <button class="btn" onclick="routineApplyDo(${id})">Применить</button>`);
 }
-async function routineApplyDo(id) {
+function routineApplyDo(id) {
   const from = document.getElementById('ra_from').value, weeks = parseInt(document.getElementById('ra_weeks').value || '1', 10);
-  try { const r = await api('/routines/' + id + '/apply', 'POST', { from_date: from, weeks }); closeSheet(); toast(`Создано планов: ${r.created}`); go('schedule'); }
-  catch (e) { toast(e.message || 'не удалось'); }
+  createGuard(
+    mode => api('/routines/' + id + '/apply', 'POST', { from_date: from, weeks, mode }),
+    r => { closeSheet(); toast(`Создано планов: ${r.created}`); go('schedule'); });
 }
 
 // ── Settings (service for all + access management for admins) ────────────────
