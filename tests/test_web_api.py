@@ -358,6 +358,23 @@ def test_history_hides_rest_days(client):
     assert "Отдых" not in foci and "" not in foci  # no rest / empty rows in the journal
 
 
+def test_workout_to_template_day(client):
+    # UX3-FEAT-1: a finished workout maps to a routine day; per exercise the target is
+    # (# working sets) × reps @ the heaviest working set's weight (warmups excluded).
+    wid = client.post("/api/workouts", json={"focus_label": "Грудь"}).json()["id"]
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Жим", "weight_kg": 80, "reps": 8})
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Жим", "weight_kg": 85, "reps": 6})
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Жим", "weight_kg": 70, "reps": 12, "is_warmup": True})
+    client.post(f"/api/workouts/{wid}/finish")
+    day = client.get(f"/api/workouts/{wid}/template-day").json()
+    assert day["focus_label"] == "Грудь" and len(day["exercises"]) == 1
+    e = day["exercises"][0]
+    assert e["name"] == "Жим" and e["target_sets"] == 2          # 2 working sets (warmup excluded)
+    assert e["target_weight"] == 85 and e["target_reps_min"] == 6  # heaviest working set
+    rid = client.post("/api/routines", json={"name": "From-WO", "days": [day]}).json()["id"]
+    assert rid                                                    # saveable as a routine
+
+
 def test_choose_day_excludes_deleted_plans(client):
     # UX3-FIX-3: a soft-deleted plan must not resurface in /workouts/week as «пропущено».
     import datetime as _dt

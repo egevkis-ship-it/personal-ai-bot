@@ -1045,6 +1045,38 @@ async def workout_detail(wid: int, uid: str = Depends(current_uid)):
     return await assemble_workout(uid, wid)
 
 
+@app.get("/api/workouts/{wid}/template-day")
+async def workout_as_template_day(wid: int, uid: str = Depends(current_uid)):
+    """UX3-FEAT-1: map a finished workout to one routine day. Per exercise the
+    target = (# working sets) × reps @ weight of the TOP (heaviest) working set."""
+    await _own_workout(uid, wid)
+    w = await db.get_workout(wid)
+    if not w:
+        raise HTTPException(404, "workout not found")
+    grouped: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for s in await db.get_workout_sets(wid):
+        if s["is_warmup"]:
+            continue
+        nm = (s["exercise_name"] or "").strip()
+        if not nm:
+            continue
+        if nm.lower() not in grouped:
+            grouped[nm.lower()] = []
+            order.append(nm)
+        grouped[nm.lower()].append(s)
+    exercises = []
+    for nm in order:
+        ws = grouped[nm.lower()]
+        top = max(ws, key=lambda x: (_to_f(x["weight_kg"]) or 0))
+        reps = top["reps"]
+        exercises.append({"name": nm, "target_sets": len(ws),
+                          "target_reps_min": reps, "target_reps_max": reps,
+                          "target_weight": _to_f(top["weight_kg"]),
+                          "reps_text": top["reps_text"] if reps is None else None})
+    return {"weekday": w["workout_date"].weekday(), "focus_label": w.get("focus_label"), "exercises": exercises}
+
+
 async def assemble_workout(uid: str, wid: int) -> dict:
     w = await db.get_workout(wid)
     if not w:

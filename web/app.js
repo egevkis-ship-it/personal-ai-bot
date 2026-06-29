@@ -562,7 +562,8 @@ async function WorkoutDetail(id) {
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
     <button class="btn ghost" onclick="go('active',${w.id})">✏️ Редактировать подходы</button>
-    <button class="btn ghost" style="margin-top:8px" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>`;
+    <button class="btn ghost" style="margin-top:8px" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="workoutToTemplate(${w.id})">💾 В шаблон</button>`;
 }
 
 // ── Exercise progress (charts + PR) ─────────────────────────────────────────
@@ -1005,6 +1006,7 @@ async function PlanView(pid) {
     ${exItems}
     <button class="btn success" style="margin-top:14px" onclick="startFromPlan(${p.id})">▶ Начать тренировку</button>
     <button class="btn ghost" style="margin-top:8px" onclick="go('planEdit',${p.id})">✏️ Редактировать</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="planToTemplate(${p.id})">💾 Сохранить как шаблон</button>
     <button class="btn danger" style="margin-top:8px" onclick="askDeletePlan(${p.id}, () => go(STATE.planFrom||'schedule'))">🗑 Удалить</button>`;
 }
 
@@ -1130,7 +1132,8 @@ async function schedWeek() {
       ? swipeRow(`<div class="row" style="gap:12px">${rowContent}</div>`, `askDeletePlan(${first.id}, Schedule)`, `feedOpenPlan(${first.id},'${d}')`)
       : `<div class="card list-item" style="${isToday ? 'box-shadow:inset 0 0 0 2px var(--info)' : ''}" onclick="${tap}">${rowContent}</div>`;
   }
-  document.getElementById('schedBody').innerHTML = schedHeader(`${fmtDM(mon)} – ${fmtDM(sun)}`) + rows;
+  document.getElementById('schedBody').innerHTML = schedHeader(`${fmtDM(mon)} – ${fmtDM(sun)}`) + rows +
+    `<button class="btn ghost sm" style="margin-top:12px" onclick="weekToTemplate()">💾 Сохранить неделю как шаблон</button>`;
 }
 
 // Month = overview grid (dots) via the shared monthCalendar; tapping a day opens
@@ -1436,7 +1439,10 @@ async function Routines() {
   const list = await api('/routines');
   view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span><h1>Шаблоны</h1>
     <div class="muted small" style="margin-bottom:10px">Недельный сплит, который можно раскатать на несколько недель вперёд.</div>
-    <button class="btn" onclick="routineEditNew()">➕ Создать шаблон</button>
+    <div class="muted small" style="margin:4px 0 6px">Создать шаблон</div>
+    <button class="btn ghost" onclick="weekToTemplate()">📅 Из недели расписания</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="routineEditNew()">✍️ Вручную</button>
+    <div class="muted small" style="margin-top:10px">Ещё: «💾 Сохранить как шаблон» в дне плана и «💾 В шаблон» в тренировке из Истории.</div>
     <div style="margin-top:14px">${list.length ? list.map(r => `<div class="card">
       <div class="row sp"><b>${esc(r.name)}</b><span class="small muted">${(r.days || []).length} ${plural((r.days || []).length, 'день', 'дня', 'дней')}</span></div>
       <div class="small muted" style="margin:4px 0 8px">${(r.days || []).map(d => WD_SHORT[d.weekday]).join(' · ') || 'нет дней'}</div>
@@ -1445,6 +1451,43 @@ async function Routines() {
         <button class="btn sm" style="flex:1;margin:0" onclick="routineApplySheet(${r.id})">Применить</button></div></div>`).join('') : '<div class="card muted">Пока нет шаблонов.</div>'}</div>`;
 }
 function routineEditNew() { window._ROUTINE = { id: null, name: '', days: [] }; go('routineEdit', 'new'); }
+// UX3-FEAT-1: «Сохранить как шаблон» from existing data (plan day / week / workout),
+// with a mandatory editable name. Reuses POST /api/routines (apply keeps its dup guard).
+function saveAsTemplate(days, defaultName) {
+  window._TPL = days;
+  sheet(`<h2>Сохранить как шаблон</h2>
+    <div class="muted small" style="margin-bottom:10px">${days.length} ${plural(days.length, 'день', 'дня', 'дней')} · название можно изменить</div>
+    <div class="mfield" style="margin-bottom:12px"><label>Название шаблона</label><input id="tplName" value="${esc(defaultName || '')}" placeholder="напр. Мой сплит"></div>
+    <button class="btn" onclick="saveTemplateDo()">💾 Сохранить шаблон</button>`);
+}
+async function saveTemplateDo() {
+  const name = (document.getElementById('tplName').value || '').trim();
+  if (!name) return toast('Укажите название');
+  try { await api('/routines', 'POST', { name, days: window._TPL || [] }); window._TPL = null; closeSheet(); toast('Шаблон сохранён'); go('routines'); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+async function planToTemplate(pid) {
+  try {
+    const p = await api('/plans/' + pid);
+    saveAsTemplate([{ weekday: isoWeekday(p.planned_date), focus_label: _isRestPlan(p) ? 'Отдых' : (p.focus_label || null), exercises: _isRestPlan(p) ? [] : (p.exercises || []) }], p.focus_label || 'Шаблон');
+  } catch (e) { toast(e.message || 'не удалось'); }
+}
+async function weekToTemplate() {
+  const mon = mondayISO(STATE.schedDate || todayISO()), sun = addDaysISO(mon, 6);
+  const byDate = _byDate(await api(`/plans?from=${mon}&to=${sun}`));
+  const days = [];
+  for (let i = 0; i < 7; i++) (byDate[addDaysISO(mon, i)] || []).forEach(p =>
+    days.push({ weekday: i, focus_label: _isRestPlan(p) ? 'Отдых' : (p.focus_label || null), exercises: _isRestPlan(p) ? [] : (p.exercises || []) }));
+  if (!days.length) return toast('На этой неделе нет планов');
+  saveAsTemplate(days, `Неделя ${fmtDM(mon)}`);
+}
+async function workoutToTemplate(wid) {
+  try {
+    const day = await api(`/workouts/${wid}/template-day`);
+    if (!(day.exercises || []).length) return toast('В тренировке нет рабочих подходов');
+    saveAsTemplate([day], day.focus_label || 'Шаблон');
+  } catch (e) { toast(e.message || 'не удалось'); }
+}
 async function RoutineEdit(param) {
   document.getElementById('tabbar').style.display = '';
   if (param && param !== 'new') {
