@@ -179,6 +179,11 @@ async def security_headers(request: Request, call_next):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    # Always revalidate the unhashed static shell (index.html/app.js/sw.js/styles)
+    # so a deploy is never masked by a stale HTTP/heuristic cache. ETag still gives
+    # cheap 304s when unchanged; this kills the stale-shell class of bug.
+    if not request.url.path.startswith("/api/") and request.url.path != "/healthz":
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 

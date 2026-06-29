@@ -43,6 +43,7 @@ async function go(tab, param) {
     if (tab === 'workout') return WorkoutDetail(param);
     if (tab === 'chooseDay') return ChooseDay();
     if (tab === 'plans') return Plans();
+    if (tab === 'planView') return PlanView(param);
     if (tab === 'planEdit') return PlanEdit(param);
     if (tab === 'schedule') return Schedule();
     if (tab === 'settings') return Settings();
@@ -186,8 +187,8 @@ function More() {
 async function Train() {
   const plan = await api('/plans/today');
   view.innerHTML = `<h1>Тренировка</h1><div class="muted small" style="margin-bottom:14px">Что тренируем?</div>
-    ${plan ? `<div class="banner info" onclick="startFromPlan(${plan.id})"><div class="small" style="color:var(--info)">📅 План на сегодня</div>
-      <div class="b-title" style="color:var(--info)">${esc(plan.focus_label || '')} →</div></div>` : ''}
+    ${plan ? `<div class="banner info" onclick="openPlan(${plan.id},'train')"><div class="small" style="color:var(--info)">📅 План на сегодня</div>
+      <div class="b-title" style="color:var(--info)">${esc(plan.focus_label || '')} ›</div></div>` : ''}
     <div class="card list-item" onclick="go('chooseDay')"><div class="ic">🗓</div><div style="flex:1"><b>Другой день недели</b><div class="small muted">взять пропущенную</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>
     <div class="muted small" style="margin:18px 0 8px">Планирование</div>
@@ -199,7 +200,7 @@ async function ChooseDay() {
   const wk = await api('/workouts/week');
   const ic = s => s === 'completed' ? '✅' : s === 'skipped' ? '⚠️' : '⚪️';
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Назад</span><h2>Тренировки недели</h2>
-    ${wk.length ? wk.map(p => `<div class="card list-item" onclick="startFromPlan(${p.id})">
+    ${wk.length ? wk.map(p => `<div class="card list-item" onclick="openPlan(${p.id},'chooseDay')">
       <div class="ic">${ic(p.status)}</div><div style="flex:1"><b>${esc(p.focus_label || '')}</b>
       <div class="small muted">${p.planned_date}${p.is_today ? ' · сегодня' : ''}${p.status === 'skipped' ? ' · пропущено' : ''}</div></div><span class="muted">›</span></div>`).join('')
       : '<div class="card muted">На этой неделе нет планов.</div>'}`;
@@ -793,7 +794,7 @@ function exLine(ex) {
 // list of upcoming plans
 async function Plans() {
   const list = await api('/plans?days=30');
-  const rows = list.length ? list.map(p => `<div class="card list-item" onclick="go('planEdit',${p.id})">
+  const rows = list.length ? list.map(p => `<div class="card list-item" onclick="openPlan(${p.id},'plans')">
       <div class="ic">${p.is_today ? '📍' : '📅'}</div>
       <div style="flex:1"><b>${esc(p.focus_label || 'Тренировка')}</b>
         <div class="small muted">${fmtPlanDate(p.planned_date)}${p.is_today ? ' · сегодня' : ''} · ${(p.exercises || []).length} упр.</div></div>
@@ -810,6 +811,25 @@ async function Plans() {
 function newPlan(dateISO) {
   window._PLAN = { id: null, date: dateISO || todayISO(), focus: '', notes: '', exercises: [] };
   go('planEdit', 'new');
+}
+// Phase 1: a tap on a planned workout opens read-only PlanView; starting is an
+// explicit button only (no accidental start). `from` is where Back returns.
+function openPlan(pid, from) { STATE.planFrom = from || 'schedule'; go('planView', pid); }
+async function PlanView(pid) {
+  document.getElementById('tabbar').style.display = '';
+  let p;
+  try { p = await api('/plans/' + pid); }
+  catch (e) { if (e.code === 401) throw e; view.innerHTML = `<span class="back" onclick="go(STATE.planFrom||'schedule')">‹ Назад</span><div class="card">План не найден.</div>`; return; }
+  const exItems = (p.exercises || []).length ? p.exercises.map(ex => `<div class="card">
+      <b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div>${ex.notes ? `<div class="small muted" style="margin-top:3px">📝 ${esc(ex.notes)}</div>` : ''}</div>`).join('')
+    : '<div class="card muted small">Упражнения не добавлены</div>';
+  view.innerHTML = `<span class="back" onclick="go(STATE.planFrom||'schedule')">‹ Назад</span>
+    <h2 style="margin-bottom:2px">${esc(p.focus_label || 'Тренировка')}</h2>
+    <div class="muted small" style="margin-bottom:12px">${fmtPlanDate(p.planned_date)}</div>
+    ${p.notes ? `<div class="card small muted">📝 ${esc(p.notes)}</div>` : ''}
+    ${exItems}
+    <button class="btn success" style="margin-top:14px" onclick="startFromPlan(${p.id})">▶ Начать тренировку</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="go('planEdit',${p.id})">✏️ Редактировать</button>`;
 }
 
 // ── Schedule (view-only: day / week / month) ────────────────────────────────
@@ -862,7 +882,7 @@ async function schedDay() {
     html += `<div class="card muted">На этот день ничего не запланировано</div>
       <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
   } else {
-    html += list.map(p => `<div class="card" style="cursor:pointer" onclick="go('planEdit',${p.id})">
+    html += list.map(p => `<div class="card" style="cursor:pointer" onclick="openPlan(${p.id},'schedule')">
       <div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b><span class="muted">›</span></div>
       ${(p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>'}
     </div>`).join('');
@@ -883,7 +903,7 @@ async function schedWeek() {
     const label = plans.length
       ? `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`
       : '—';
-    const tap = plans.length ? `go('planEdit',${first.id})` : `newPlan('${d}')`;
+    const tap = plans.length ? `openPlan(${first.id},'schedule')` : `newPlan('${d}')`;
     rows += `<div class="card list-item" style="${isToday ? 'border:2px solid var(--info)' : ''}" onclick="${tap}">
       <div class="ic">${WD_SHORT[i]}</div>
       <div style="flex:1"><b>${esc(fmtDM(d))}</b>${isToday ? ' <span class="small" style="color:var(--info)">сегодня</span>' : ''}
@@ -910,7 +930,7 @@ async function schedMonth() {
     const inMonth = dt.getMonth() === mo;
     const plans = byDate[d] || [];
     const isToday = d === today;
-    const tap = plans.length === 1 ? `go('planEdit',${plans[0].id})` : `schedDayAt('${d}')`;
+    const tap = plans.length === 1 ? `openPlan(${plans[0].id},'schedule')` : `schedDayAt('${d}')`;
     const dot = plans.length ? `<div style="width:5px;height:5px;border-radius:50%;background:${isToday ? '#fff' : 'var(--info)'};margin:3px auto 0"></div>` : '<div style="height:8px"></div>';
     cells += `<div onclick="${tap}" style="text-align:center;padding:6px 0;border-radius:8px;cursor:pointer;${isToday ? 'background:var(--info);color:#fff' : (inMonth ? '' : 'opacity:.3')}">
       <div style="font-size:13px">${dt.getDate()}</div>${dot}</div>`;
