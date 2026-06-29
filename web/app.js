@@ -1093,7 +1093,8 @@ async function schedDay() {
   let html = schedHeader(fmtFullDate(iso));
   if (!list.length) {
     html += `<div class="card muted">На этот день ничего не запланировано</div>
-      <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
+      <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать тренировку</button>
+      <button class="btn ghost" style="margin-top:8px" onclick="quickRest('${iso}')">💤 Отметить отдыхом</button>`;
   } else {
     html += list.map(p => swipeRow(
       `<div class="row sp"><b${_isRestPlan(p) ? ' class="muted"' : ''}>${_isRestPlan(p) ? '💤 Отдых' : esc(p.focus_label || 'Тренировка')}</b><span class="muted">›</span></div>
@@ -1117,10 +1118,13 @@ async function schedWeek() {
       : (plans.every(_isRestPlan) ? '💤 Отдых'
         : `${esc(first.focus_label || 'Тренировка')} · ${(first.exercises || []).length} упр.${plans.length > 1 ? ` (+${plans.length - 1})` : ''}`);
     const tap = plans.length > 1 ? `schedDayAt('${d}')` : `newPlan('${d}')`;
+    const trail = plans.length
+      ? '<span class="muted">›</span>'
+      : `<span style="display:flex;gap:12px;align-items:center"><span style="cursor:pointer" onclick="event.stopPropagation();quickRest('${d}')" title="Отметить отдыхом">💤</span><span class="muted">＋</span></span>`;
     const rowContent = `<div class="ic">${WD_SHORT[i]}</div>
       <div style="flex:1"><b>${esc(fmtDM(d))}</b>${isToday ? ' <span class="small" style="color:var(--info)">сегодня</span>' : ''}
         <div class="small muted">${label}</div></div>
-      <span class="muted">${plans.length ? '›' : '＋'}</span>`;
+      ${trail}`;
     // exactly 1 plan → swipe-left deletes it; 0 or ≥2 → tap (create / open day list) (UX3-FIX-2)
     rows += plans.length === 1
       ? swipeRow(`<div class="row" style="gap:12px">${rowContent}</div>`, `askDeletePlan(${first.id}, Schedule)`, `feedOpenPlan(${first.id},'${d}')`)
@@ -1156,6 +1160,11 @@ function schedFeedAt(iso) {
 }
 // Opening a plan from the feed keeps that day selected, so returning re-centers on it (UX3-FIX-1).
 function feedOpenPlan(pid, iso) { STATE.feedCenter = iso; STATE.schedDate = iso; STATE._feedScroll = 'center'; openPlan(pid, 'schedule'); }
+// UX3-FIX-4: one-tap rest day on an empty day — no editor.
+async function quickRest(iso) {
+  try { await api('/plans', 'POST', { date: iso, focus_label: 'Отдых', exercises: [] }); toast('💤 Отдых'); Schedule(); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
 function schedFeedMore(dir) {
   if (dir < 0) { STATE._feedAnchor = STATE.feedStart; STATE.feedStart = addDaysISO(STATE.feedStart, -14); }
   else { STATE.feedEnd = addDaysISO(STATE.feedEnd, 14); }
@@ -1166,7 +1175,7 @@ function dayFeedCard(iso, plans, isCenter, isToday) {
   const head = `<div class="small" style="margin:8px 2px 6px"><b${hb}>${WD_SHORT[isoWeekday(iso)]}, ${esc(fmtDate(iso))}${isToday ? ' · сегодня' : ''}</b></div>`;
   // each plan is its own swipe row (swipe left = delete that plan); rest is swipeable too (UX3-FIX-2)
   const body = !plans.length
-    ? `<div class="card small muted">— ничего · <span style="color:var(--info);cursor:pointer" onclick="newPlan('${iso}')">＋ запланировать</span></div>`
+    ? `<div class="card small muted">— ничего · <span style="color:var(--info);cursor:pointer" onclick="newPlan('${iso}')">＋ план</span> · <span style="color:var(--info);cursor:pointer" onclick="quickRest('${iso}')">💤 отдых</span></div>`
     : plans.map(p => swipeRow(
         _isRestPlan(p) ? '💤 <span class="muted">Отдых</span>'
           : `<b>${esc(p.focus_label || 'Тренировка')}</b> <span class="muted">· ${(p.exercises || []).length} упр. ›</span>`,
