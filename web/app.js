@@ -140,16 +140,17 @@ async function Home() {
     <div class="row sp"><span class="muted small">Вес${d.target_weight != null ? ` · цель ${fmt(d.target_weight)} кг` : ''}</span>
       <span class="small">${fmt(last_w)} кг${delta != null && delta !== 0 ? ` <span class="muted">(${delta > 0 ? '+' : ''}${fmt(delta)})</span>` : ''}</span></div>
     ${toGoal != null && toGoal !== 0 ? `<div class="small muted" style="margin-top:2px">до цели ${fmt(Math.abs(toGoal))} кг ${toGoal > 0 ? '↓' : '↑'}</div>` : (toGoal === 0 ? '<div class="small" style="margin-top:2px;color:var(--success)">цель достигнута 🎯</div>' : '')}
-    ${trend.length >= 2 ? spark(trend.map(p => p.weight_kg)) : ''}</div>` : '';
+    ${trend.length >= 2 ? lineChart(trend.map(p => ({ label: shortDate(p.date), value: p.weight_kg })), 'var(--info)') : ''}</div>` : '';
   const prs = d.recent_prs || [];
   const prCard = prs.length ? `<div class="card"><div class="muted small" style="margin-bottom:4px">🏆 Свежие рекорды</div>
     ${prs.map(p => `<div class="row sp" style="padding:3px 0"><span>${esc(p.name)}</span><span class="small muted">${fmt(p.weight_kg)} кг · ${shortDate(p.date)}</span></div>`).join('')}</div>` : '';
   const np = d.next_plan;
-  const nextCard = (np && !d.active_workout && !d.today_plan) ? `<div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Ближайший план</b><div class="small muted">${esc(np.planned_date)} · ${esc(np.focus_label || 'тренировка')}</div></div><span class="muted">›</span></div>` : '';
+  const nextCard = (np && !d.active_workout && !d.today_plan) ? `<div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Ближайший план</b><div class="small muted">${esc(np.planned_date)} · ${esc(np.focus_label || 'тренировка')}</div></div><span class="muted">›</span></div>` : '';
   const isNew = !d.last_workout && (d.week_workouts || 0) === 0 && !d.active_workout;
   const onboardCard = isNew ? `<div class="card" style="border:1px dashed var(--line)"><b>Добро пожаловать! 👋</b>
     <div class="small muted" style="margin-top:4px">Начни первую тренировку или запланируй неделю в «Планы». Записывай подходы — здесь появятся графики, рекорды и прогресс.</div></div>` : '';
-  view.innerHTML = `<div class="row sp"><h1>Привет!</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div><div class="muted small" style="margin-bottom:14px">${new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}</div>
+  view.innerHTML = `<div class="row sp"><h1 style="font-size:22px;text-transform:capitalize">${new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div>
+    <div class="muted small" style="margin-bottom:14px">${streak > 0 ? `🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')} · ` : ''}${d.week_workouts} ${plural(d.week_workouts, 'тренировка', 'тренировки', 'тренировок')} за неделю</div>
     ${banner}
     ${onboardCard}
     ${summaryCard}
@@ -163,8 +164,8 @@ async function Home() {
       <div class="tile" onclick="repeatLast(${d.last_workout?d.last_workout.id:0})">🔁<div class="small" style="margin-top:6px">Повторить прошлую</div></div>
       <div class="tile" onclick="go('train')">📅<div class="small" style="margin-top:6px">Тренировки</div></div>
     </div>
-    <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>
-    <div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Расписание</b><div class="small muted">что запланировано: день / неделя / месяц</div></div><span class="muted">›</span></div>
+    <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>
+    <div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Расписание</b><div class="small muted">что запланировано: день / неделя / месяц</div></div><span class="muted">›</span></div>
     <button class="btn ghost" style="margin-top:6px" onclick="go('reports')">📄 Отчёты (PDF)</button>`;
 }
 async function startFromPlan(pid) { const r = await api('/workouts', 'POST', { from_plan_id: pid }); go('active', r.id); }
@@ -176,9 +177,9 @@ function More() {
   const item = (tab, icon, title, sub) => `<div class="card list-item" onclick="go('${tab}')">
     <div class="ic">${icon}</div><div style="flex:1"><b>${title}</b><div class="small muted">${sub}</div></div><span class="muted">›</span></div>`;
   view.innerHTML = `<h1>Ещё</h1>
-    ${item('plans', '📅', 'Планы', 'планирование тренировок')}
+    ${item('plans', '📝', 'Планы', 'планирование тренировок')}
     ${item('routines', '🗂', 'Шаблоны', 'недельный сплит → раскатать на недели')}
-    ${item('schedule', '📆', 'Расписание', 'день / неделя / месяц')}
+    ${item('schedule', '🗓', 'Расписание', 'день / неделя / месяц')}
     ${item('reports', '📄', 'Отчёты', 'PDF за период')}
     ${item('photos', '📷', 'Прогресс-фото', 'снимки и сравнение «было/стало»')}
     ${item('settings', '⚙️', 'Настройки', 'часовой пояс, доступ, экспорт данных')}`;
@@ -193,8 +194,8 @@ async function Train() {
     <div class="card list-item" onclick="go('chooseDay')"><div class="ic">🗓</div><div style="flex:1"><b>Другой день недели</b><div class="small muted">взять пропущенную</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>
     <div class="muted small" style="margin:18px 0 8px">Планирование</div>
-    <div class="card list-item" onclick="go('plans')"><div class="ic">📅</div><div style="flex:1"><b>Запланировать тренировки</b><div class="small muted">расписание на дни и неделю</div></div><span class="muted">›</span></div>
-    <div class="card list-item" onclick="go('schedule')"><div class="ic">📆</div><div style="flex:1"><b>Что запланировано</b><div class="small muted">расписание: день, неделя, месяц</div></div><span class="muted">›</span></div>`;
+    <div class="card list-item" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Запланировать тренировки</b><div class="small muted">расписание на дни и неделю</div></div><span class="muted">›</span></div>
+    <div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Что запланировано</b><div class="small muted">расписание: день, неделя, месяц</div></div><span class="muted">›</span></div>`;
 }
 async function freeWorkout() { const r = await api('/workouts', 'POST', {}); go('active', r.id); }
 async function ChooseDay() {
@@ -771,11 +772,10 @@ async function MeasureHistory() {
   const rows = await api('/measurements?limit=30');
   STATE._m = rows;
   const metric = STATE._metric || 'weight_kg';
-  const vals = rows.slice().reverse().map(r => r[metric]).filter(v => v != null).map(Number);
-  const label = (MFIELDS.find(f => f[0] === metric) || [])[1] || '';
+  const pts = rows.slice().reverse().filter(r => r[metric] != null).map(r => ({ label: shortDate(r.taken_on), value: Number(r[metric]) }));
   view.innerHTML = `<span class="back" onclick="go('measure')">‹ Замеры</span><h2>История</h2>
     <div class="tag-row" style="justify-content:flex-start">${MFIELDS.map(([k, l]) => `<span class="pill ${k === metric ? 'on' : ''}" onclick="setMetric('${k}')">${l.split(',')[0]}</span>`).join('')}</div>
-    <div class="card">${vals.length ? spark(vals, 'var(--success)') : '<span class="muted small">Нет данных</span>'}</div>
+    <div class="card" style="text-align:center">${pts.length ? lineChart(pts, 'var(--success)') : '<span class="muted small">Нет данных</span>'}</div>
     ${rows.filter(r => r[metric] != null).map(r => `<div class="row sp" style="padding:9px 0;border-bottom:1px solid var(--line)"><span class="muted small">${r.taken_on}</span><span>${fmt(r[metric])}</span></div>`).join('')}`;
 }
 function setMetric(m) { STATE._metric = m; MeasureHistory(); }
