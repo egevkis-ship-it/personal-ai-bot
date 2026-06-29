@@ -821,10 +821,104 @@ async function Plans() {
     : '<div class="card muted">Пока ничего не запланировано на 30 дней вперёд.</div>';
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span>
     <h1>Планы</h1><div class="muted small" style="margin-bottom:14px">Расписание на ближайшие дни</div>
-    <button class="btn" onclick="newPlan()">➕ Запланировать день</button>
+    <button class="btn" onclick="coachStart()">🧠 Собрать следующую неделю (AI)</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="newPlan()">➕ Запланировать день</button>
     <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">📝 Вставить планом (ИИ)</button>
     <button class="btn ghost" style="margin-top:8px" onclick="go('routines')">🗂 Шаблоны (недельный сплит)</button>
     <div style="margin-top:16px">${rows}</div>`;
+}
+
+// ── Flagship: AI coach «Собери следующую неделю» ─────────────────────────────
+// Thin client: the survey is optional; the heavy lifting (reading the user's own
+// training data + deep analysis) happens server-side in app/bot/services/week_coach.
+const COACH_Q = [
+  ['energy', 'Самочувствие / энергия', 'бодрый · средне · вымотан'],
+  ['sleep', 'Сон последние дни', 'хорошо · 5–6 ч · плохо'],
+  ['stress', 'Стресс / нагрузка вне зала', 'норма · высокий'],
+  ['injury', 'Травмы / боли', 'нет · тянет поясницу'],
+  ['focus', 'На чём сделать акцент', 'грудь · ноги · общая форма'],
+];
+function nextWeekMondayISO() { // Monday of the NEXT calendar week
+  const t = new Date(todayISO() + 'T00:00:00'); const cur = (t.getDay() + 6) % 7;
+  t.setDate(t.getDate() + (7 - cur));
+  return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+async function coachStart() {
+  let cfg = {}; try { cfg = await api('/coach/context'); } catch {}
+  const a = cfg.answers || {}; window._coachMode = cfg.recovery_mode || 'natural';
+  const mon = nextWeekMondayISO();
+  sheet(`<h2 style="margin-bottom:4px">🧠 Собрать следующую неделю</h2>
+    <div class="muted small" style="margin-bottom:12px">Неделя с ${fmtPlanDate(mon)}. Пару слов о себе — всё опционально, можно пропустить. Остальное наставник возьмёт из твоих тренировок.</div>
+    ${COACH_Q.map(([k, l, ph]) => `<div class="mfield" style="margin-bottom:8px"><label>${l}</label><input id="cq_${k}" value="${esc(a[k] || '')}" placeholder="${esc(ph)}"></div>`).join('')}
+    <div class="muted small" style="margin:10px 0 6px">Режим восстановления</div>
+    <div class="tag-row" style="justify-content:flex-start">
+      <span class="pill ${window._coachMode !== 'enhanced' ? 'on' : ''}" id="cm_natural" onclick="coachMode('natural')">Натуральное</span>
+      <span class="pill ${window._coachMode === 'enhanced' ? 'on' : ''}" id="cm_enhanced" onclick="coachMode('enhanced')">Усиленное</span>
+    </div>
+    <div class="muted small" style="margin:6px 0 12px">Влияет только на объём, частоту и прогрессию нагрузки. Наставник не даёт медицинских или фарм-советов.</div>
+    <button class="btn" onclick="coachGenerate('${mon}')">🧠 Собрать неделю</button>`);
+}
+function coachMode(m) {
+  window._coachMode = m;
+  const n = document.getElementById('cm_natural'), e = document.getElementById('cm_enhanced');
+  if (n) n.classList.toggle('on', m === 'natural');
+  if (e) e.classList.toggle('on', m === 'enhanced');
+}
+async function coachGenerate(fromDate) {
+  const answers = {};
+  COACH_Q.forEach(([k]) => { const el = document.getElementById('cq_' + k); if (el && el.value.trim()) answers[k] = el.value.trim(); });
+  const mode = window._coachMode || 'natural';
+  try { await api('/coach/context', 'POST', { answers, recovery_mode: mode }); } catch {}
+  closeSheet();
+  document.getElementById('tabbar').style.display = '';
+  view.scrollTo(0, 0);
+  view.innerHTML = `<div class="card" style="text-align:center;padding:46px 16px">
+    <div style="font-size:34px">🧠</div>
+    <div style="margin-top:12px"><b>Наставник анализирует твои данные…</b></div>
+    <div class="muted small" style="margin-top:6px">Разбирает прогресс, объём и заметки и собирает неделю. Это глубокая модель — обычно 10–40 секунд.</div></div>`;
+  try {
+    const r = await api('/coach/generate-week', 'POST', { from_date: fromDate || null });
+    window._COACHWEEK = r;
+    coachPreview();
+  } catch (e) {
+    view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span>
+      <div class="banner warn"><div class="b-title" style="color:var(--warn)">Наставник недоступен</div>
+        <div class="small" style="margin-top:4px;color:var(--warn)">${esc(e.message || 'попробуй ещё раз')}</div></div>
+      <button class="btn" onclick="coachStart()">↻ Попробовать снова</button>`;
+  }
+}
+function coachPreview() {
+  const r = window._COACHWEEK || { days: [] };
+  const days = r.days || [];
+  const dayCard = (d, i) => `<div class="card">
+      <div class="row sp"><b>${WD_FULL[d.weekday] || ''}${d.focus_label ? ' · ' + esc(d.focus_label) : ''}</b>
+        <span style="color:var(--danger);cursor:pointer;font-size:13px" onclick="coachDropDay(${i})">убрать</span></div>
+      <div class="small muted" style="margin:2px 0 4px">${fmtPlanDate(d.date)}</div>
+      ${(d.exercises || []).map(ex => `<div class="small" style="margin-top:2px">• ${esc(ex.name)} <span class="muted">— ${exLine(ex)}</span></div>`).join('')}
+      ${d.notes ? `<div class="small muted" style="margin-top:5px">📝 ${esc(d.notes)}</div>` : ''}</div>`;
+  view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span>
+    <h1 style="margin-bottom:2px">🧠 Неделя от наставника</h1>
+    <div class="muted small" style="margin-bottom:12px">Предпросмотр — ничего ещё не сохранено.</div>
+    ${r.rationale ? `<div class="banner info"><div class="small" style="color:var(--info)"><b>Почему так</b></div><div class="small" style="margin-top:4px;color:var(--info)">${esc(r.rationale)}</div></div>` : ''}
+    ${(r.flags || []).length ? `<div class="banner warn"><div class="small" style="color:var(--warn)"><b>⚠️ Обрати внимание</b></div>${r.flags.map(f => `<div class="small" style="margin-top:3px;color:var(--warn)">• ${esc(f)}</div>`).join('')}</div>` : ''}
+    ${days.length ? days.map(dayCard).join('') : '<div class="card muted">Наставник не вернул дней. Попробуй перегенерировать.</div>'}
+    ${days.length ? `<button class="btn success" style="margin-top:6px" onclick="coachApply()">💾 Сохранить в расписание</button>` : ''}
+    <button class="btn ghost" style="margin-top:8px" onclick="coachStart()">↻ Перегенерировать</button>
+    <div class="muted small" style="margin-top:12px;text-align:center">Тренировочные рекомендации, не медицинский совет.</div>`;
+}
+function coachDropDay(i) {
+  if (!window._COACHWEEK) return;
+  window._COACHWEEK.days.splice(i, 1); coachPreview();
+}
+async function coachApply() {
+  const r = window._COACHWEEK || { days: [] };
+  if (!(r.days || []).length) return toast('Нет дней для сохранения');
+  try {
+    const res = await api('/coach/apply', 'POST', { days: r.days });
+    window._COACHWEEK = null;
+    toast(`Сохранено в расписание: ${res.saved}`);
+    go('schedule');
+  } catch (e) { toast(e.message || 'не удалось сохранить'); }
 }
 
 function newPlan(dateISO) {
@@ -1296,6 +1390,7 @@ async function Settings() {
     return toast(e.message || 'Не удалось загрузить настройки');
   }
   window._ADMIN = admin;
+  window._recoveryMode = cfg.recovery_mode || 'natural';
   const statRow = (l, v) => `<div class="row sp" style="padding:6px 0"><span class="muted small">${l}</span><span>${v}</span></div>`;
   document.getElementById('setBody').innerHTML = `
     <div class="muted small" style="margin:8px 0 6px">🌍 Часовой пояс</div>
@@ -1327,6 +1422,17 @@ async function Settings() {
       <div class="mfield" style="margin-top:10px"><label>Длительность, сек</label><input id="rtSeconds" type="number" min="5" max="600" value="${cfg.rest_timer_seconds || 90}"></div>
       <div class="tag-row" style="justify-content:flex-start;margin-top:8px">${[60, 90, 120, 180].map(s => `<span class="pill" onclick="document.getElementById('rtSeconds').value=${s}">${s} сек</span>`).join('')}</div>
       <button class="btn sm" style="margin-top:10px" onclick="saveRestTimer()">Сохранить таймер</button>
+    </div>
+    <div class="muted small" style="margin:14px 0 6px">🧠 ИИ-наставник</div>
+    <div class="card">
+      <div class="row sp" style="padding:2px 0"><span>Режим восстановления</span></div>
+      <div class="tag-row" style="justify-content:flex-start;margin-top:6px">
+        <span class="pill ${cfg.recovery_mode !== 'enhanced' ? 'on' : ''}" id="rmNatural" onclick="setRecoveryPill('natural')">Натуральное</span>
+        <span class="pill ${cfg.recovery_mode === 'enhanced' ? 'on' : ''}" id="rmEnhanced" onclick="setRecoveryPill('enhanced')">Усиленное</span>
+      </div>
+      <div class="muted small" style="margin:8px 0 0">Влияет только на объём, частоту и прогрессию, которые подбирает наставник. Это не медицинский и не фарм-совет.</div>
+      <button class="btn sm" style="margin-top:10px" onclick="saveRecoveryMode()">Сохранить режим</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="clearCoachContext()">Очистить ответы опроса</button>
     </div>
     <div class="muted small" style="margin:14px 0 6px">📦 Экспорт данных</div>
     <div class="card">
@@ -1362,6 +1468,21 @@ async function saveRestTimer() {
     window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs };
     toast('Таймер сохранён');
   } catch (e) { toast(e.message || 'не удалось'); }
+}
+function setRecoveryPill(m) {
+  window._recoveryMode = m;
+  const n = document.getElementById('rmNatural'), e = document.getElementById('rmEnhanced');
+  if (n) n.classList.toggle('on', m === 'natural');
+  if (e) e.classList.toggle('on', m === 'enhanced');
+}
+async function saveRecoveryMode() {
+  const m = window._recoveryMode || 'natural';
+  try { await api('/settings', 'PATCH', { recovery_mode: m }); toast('Режим сохранён'); }
+  catch (e) { toast(e.message || 'не удалось'); }
+}
+async function clearCoachContext() {
+  try { await api('/coach/context', 'DELETE'); toast('Ответы опроса очищены'); }
+  catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── PWA install (Add to Home Screen) ────────────────────────────────────────

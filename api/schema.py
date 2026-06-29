@@ -78,6 +78,16 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS unit          TEXT NOT NULL D
 -- Rest-timer preference (phase 2).
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS rest_timer_enabled BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS rest_timer_seconds INTEGER NOT NULL DEFAULT 90;
+-- Per-user recovery context (flagship coach). 'natural' (default) | 'enhanced'.
+-- NEVER hard-code per a specific user — it is the user's own declared setting.
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS recovery_mode TEXT NOT NULL DEFAULT 'natural';
+
+-- Last coach-survey answers (sleep / energy / stress / injuries / notes), owner-scoped.
+CREATE TABLE IF NOT EXISTS coach_context (
+    uid        TEXT        PRIMARY KEY,
+    data       JSONB       NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS exercise_aliases (
     id              SERIAL PRIMARY KEY,

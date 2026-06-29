@@ -224,6 +224,70 @@ def test_history_search_filter(client):
     assert len(client.get("/api/workouts?days=365&q=несуществующее-zzz").json()) == 0
 
 
+def test_coach_context_roundtrip_and_recovery_mode(client):
+    # default
+    c = client.get("/api/coach/context").json()
+    assert c == {"answers": {}, "recovery_mode": "natural"}
+    # save survey answers + switch recovery mode
+    assert client.post("/api/coach/context",
+                       json={"answers": {"sleep": "плохо", "energy": "средне"},
+                             "recovery_mode": "enhanced"}).status_code == 200
+    c = client.get("/api/coach/context").json()
+    assert c["answers"] == {"sleep": "плохо", "energy": "средне"}
+    assert c["recovery_mode"] == "enhanced"
+    # recovery_mode is mirrored into /settings (single source for the coach)
+    assert client.get("/api/settings").json()["recovery_mode"] == "enhanced"
+    # clearing wipes survey answers (mode stays a user setting)
+    assert client.delete("/api/coach/context").status_code == 200
+    assert client.get("/api/coach/context").json()["answers"] == {}
+
+
+def test_coach_generate_and_apply(client, monkeypatch):
+    import app.bot.services.week_coach as wc
+
+    async def fake_generate(brief, recovery_mode, answers):
+        assert recovery_mode in ("natural", "enhanced")
+        assert isinstance(brief, dict) and "exercise_summary" in brief  # brief was built
+        return {
+            "days": [
+                {"weekday": 0, "focus_label": "Грудь / Трицепс", "notes": "акцент на жиме",
+                 "exercises": [{"name": "Жим штанги лёжа", "target_sets": 4,
+                                "target_reps_min": 6, "target_reps_max": 8, "target_weight": 95}]},
+                {"weekday": 3, "focus_label": "Отдых", "exercises": []},  # rest → dropped
+            ],
+            "rationale": "Жим стоит на плато — добавил объём.",
+            "flags": ["Следи за поясницей в тяге."],
+        }
+
+    monkeypatch.setattr(wc, "generate_week", fake_generate)
+    r = client.post("/api/coach/generate-week", json={"from_date": "2099-03-02"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rationale"] and body["flags"] and body["recovery_mode"] in ("natural", "enhanced")
+    assert len(body["days"]) == 1                       # the rest day was dropped
+    day = body["days"][0]
+    assert day["weekday"] == 0 and day["focus_label"].startswith("Грудь")
+    assert day["exercises"][0]["name"] == "Жим штанги лёжа"
+    # nothing saved yet — apply confirms it into the schedule
+    apply = client.post("/api/coach/apply", json={"days": body["days"]}).json()
+    assert apply["saved"] == 1
+    saved_date = apply["plans"][0]["planned_date"]
+    plans = client.get(f"/api/plans?from={saved_date}&to={saved_date}").json()
+    assert any(p["focus_label"].startswith("Грудь") for p in plans)
+
+
+def test_coach_generate_surfaces_ai_failure_as_502(client, monkeypatch):
+    import app.bot.services.week_coach as wc
+
+    async def boom(brief, recovery_mode, answers):
+        raise wc.CoachError("invalid x-api-key")
+
+    monkeypatch.setattr(wc, "generate_week", boom)
+    r = client.post("/api/coach/generate-week", json={"from_date": "2099-03-02"})
+    assert r.status_code == 502
+    assert "недоступен" in r.json()["detail"]
+
+
 def test_start_workout_idor_404(client):
     # user A creates a plan + a workout; user B must NOT be able to seed from them
     client.cookies.clear()

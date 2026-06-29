@@ -3,8 +3,9 @@
 // Bump CACHE on shell/header changes so the byte-changed sw.js replaces the old
 // worker and re-caches the app shell. v4: only the CSP fix (script-src
 // 'unsafe-eval') + stop proxying cross-origin requests (see fetch handler) so the
-// Telegram Login Widget loads for installed-PWA clients.
-const CACHE = 'fit-proto-v4';
+// Telegram Login Widget loads for installed-PWA clients. v5: flagship AI coach
+// («Собери следующую неделю») — new coach UI in app.js.
+const CACHE = 'fit-proto-v5';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

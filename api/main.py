@@ -770,19 +770,21 @@ class SettingsPatch(BaseModel):
     unit: Optional[str] = None
     rest_timer_enabled: Optional[bool] = None
     rest_timer_seconds: Optional[int] = None
+    recovery_mode: Optional[str] = None
     clear_target: bool = False
 
 
 @app.get("/api/settings")
 async def get_settings(uid: str = Depends(current_uid)):
     rows = await _rows(
-        "SELECT tz_name, target_weight, weekly_goal, unit, rest_timer_enabled, rest_timer_seconds "
+        "SELECT tz_name, target_weight, weekly_goal, unit, rest_timer_enabled, rest_timer_seconds, recovery_mode "
         "FROM user_settings WHERE user_id=:u", u=uid)
     r = rows[0] if rows else {}
     return {"tz_name": r.get("tz_name") or "UTC", "target_weight": _to_f(r.get("target_weight")),
             "weekly_goal": r.get("weekly_goal"), "unit": r.get("unit") or "kg",
             "rest_timer_enabled": r.get("rest_timer_enabled") if r.get("rest_timer_enabled") is not None else True,
-            "rest_timer_seconds": r.get("rest_timer_seconds") if r.get("rest_timer_seconds") is not None else 90}
+            "rest_timer_seconds": r.get("rest_timer_seconds") if r.get("rest_timer_seconds") is not None else 90,
+            "recovery_mode": r.get("recovery_mode") or "natural"}
 
 
 @app.patch("/api/settings")
@@ -801,12 +803,121 @@ async def patch_settings(body: SettingsPatch, uid: str = Depends(current_uid)):
         sets.append("rest_timer_enabled = :rte"); params["rte"] = bool(body.rest_timer_enabled)
     if body.rest_timer_seconds is not None:
         sets.append("rest_timer_seconds = :rts"); params["rts"] = _opt_int(body.rest_timer_seconds, "rest_timer_seconds", 5, 600)
+    if body.recovery_mode is not None:
+        sets.append("recovery_mode = :rm"); params["rm"] = body.recovery_mode if body.recovery_mode in ("natural", "enhanced") else "natural"
     if not sets:
         return {"ok": True}
     async with get_session() as s:
         await s.execute(text("INSERT INTO user_settings (user_id) VALUES (:u) ON CONFLICT (user_id) DO NOTHING"), {"u": uid})
         await s.execute(text(f"UPDATE user_settings SET {', '.join(sets)}, updated_at = now() WHERE user_id = :u"), params)
     return {"ok": True}
+
+
+# ───────────────────── AI coach: "build next week" (flagship) ────────────────
+
+class CoachContext(BaseModel):
+    answers: Optional[dict] = None
+    recovery_mode: Optional[str] = None
+
+
+class GenerateWeek(BaseModel):
+    from_date: Optional[str] = None
+    weeks: int = 1
+    answers: Optional[dict] = None
+
+
+class ApplyWeek(BaseModel):
+    days: list[dict]
+
+
+@app.get("/api/coach/context")
+async def coach_context_get(uid: str = Depends(current_uid)):
+    crow = await _rows("SELECT data FROM coach_context WHERE uid=:u", u=uid)
+    srow = await _rows("SELECT recovery_mode FROM user_settings WHERE user_id=:u", u=uid)
+    return {"answers": (crow[0]["data"] if crow else {}) or {},
+            "recovery_mode": (srow[0]["recovery_mode"] if srow else None) or "natural"}
+
+
+@app.post("/api/coach/context")
+async def coach_context_post(body: CoachContext, uid: str = Depends(current_uid)):
+    async with get_session() as s:
+        if body.answers is not None:
+            await s.execute(text("""
+                INSERT INTO coach_context (uid, data) VALUES (:u, CAST(:d AS jsonb))
+                ON CONFLICT (uid) DO UPDATE SET data = CAST(:d AS jsonb), updated_at = now()
+            """), {"u": uid, "d": json.dumps(body.answers, ensure_ascii=False)})
+        if body.recovery_mode is not None:
+            rm = body.recovery_mode if body.recovery_mode in ("natural", "enhanced") else "natural"
+            await s.execute(text("INSERT INTO user_settings (user_id) VALUES (:u) ON CONFLICT (user_id) DO NOTHING"), {"u": uid})
+            await s.execute(text("UPDATE user_settings SET recovery_mode=:rm, updated_at=now() WHERE user_id=:u"), {"u": uid, "rm": rm})
+    return {"ok": True}
+
+
+@app.delete("/api/coach/context")
+async def coach_context_delete(uid: str = Depends(current_uid)):
+    async with get_session() as s:
+        await s.execute(text("DELETE FROM coach_context WHERE uid=:u"), {"u": uid})
+    return {"ok": True}
+
+
+@app.post("/api/coach/generate-week")
+async def coach_generate_week(body: GenerateWeek, uid: str = Depends(current_uid)):
+    """Deep-analysis week from the user's own DB data + recovery mode + survey.
+    Returns a PREVIEW (not saved); the client confirms via /api/coach/apply."""
+    await check_and_bump_ai(uid)
+    try:
+        from app.bot.services.week_coach import CoachError, build_week_brief, generate_week
+    except Exception:
+        raise HTTPException(503, "AI-наставник недоступен")
+    brief = await build_week_brief(uid)
+    srow = await _rows("SELECT recovery_mode FROM user_settings WHERE user_id=:u", u=uid)
+    recovery_mode = (srow[0]["recovery_mode"] if srow else None) or "natural"
+    answers = body.answers
+    if answers is None:
+        crow = await _rows("SELECT data FROM coach_context WHERE uid=:u", u=uid)
+        answers = (crow[0]["data"] if crow else {}) or {}
+    try:
+        result = await generate_week(brief, recovery_mode, answers)
+    except CoachError as e:
+        raise HTTPException(502, f"ИИ-наставник недоступен: {str(e)[:200]}")
+    if body.from_date:
+        try:
+            start = date.fromisoformat(body.from_date.strip())
+        except ValueError:
+            raise HTTPException(422, "bad from_date, expected YYYY-MM-DD")
+    else:
+        start = await today_for(uid)
+    monday = start - timedelta(days=start.weekday())
+    out_days = []
+    for d in result.get("days", []):
+        wd = _opt_int(d.get("weekday"), "weekday", 0, 6) or 0
+        target = monday + timedelta(days=wd)
+        if target < start:
+            target += timedelta(days=7)
+        exs = _clean_plan_exercises(d.get("exercises") or [])
+        if not exs:
+            continue  # rest day — no plan row
+        out_days.append({"date": target.isoformat(), "weekday": wd,
+                         "focus_label": _opt_str(d.get("focus_label"), 200),
+                         "notes": _opt_str(d.get("notes")), "exercises": exs})
+    out_days.sort(key=lambda x: x["date"])
+    return {"days": out_days, "rationale": result.get("rationale", ""),
+            "flags": result.get("flags", []), "recovery_mode": recovery_mode}
+
+
+@app.post("/api/coach/apply")
+async def coach_apply(body: ApplyWeek, uid: str = Depends(current_uid)):
+    """Save a confirmed coach week into planned_workouts (reuses the plan path)."""
+    today = await today_for(uid)
+    saved = []
+    for d in body.days or []:
+        dt = _resolve_plan_date(d.get("date"), _opt_int(d.get("weekday"), "weekday", 0, 6), today)
+        exs = await _normalize_plan_exercises(_clean_plan_exercises(d.get("exercises") or []), uid)
+        pid = await db.create_planned_workout(uid, dt, _opt_str(d.get("focus_label"), 200), exs)
+        if d.get("notes"):
+            await db.update_planned_workout_notes(pid, _opt_str(d.get("notes")))
+        saved.append({"id": pid, "planned_date": dt.isoformat()})
+    return {"saved": len(saved), "plans": saved}
 
 
 # ────────────────────────────── workouts ────────────────────────────────────
