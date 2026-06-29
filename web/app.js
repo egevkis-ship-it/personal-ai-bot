@@ -1676,7 +1676,7 @@ async function Settings() {
     <div class="muted small" style="margin:14px 0 6px">⏱ Таймер отдыха</div>
     <div class="card">
       <div class="row sp" style="padding:2px 0"><span>Автозапуск после подхода</span>
-        <span class="switch ${cfg.rest_timer_enabled !== false ? 'on' : ''}" id="rtEnabled" onclick="this.classList.toggle('on')"></span></div>
+        <span class="switch ${cfg.rest_timer_enabled !== false ? 'on' : ''}" id="rtEnabled" onclick="toggleRestTimer(this)"></span></div>
       <div class="mfield" style="margin-top:10px"><label>Длительность, сек</label><input id="rtSeconds" type="number" min="5" max="600" value="${cfg.rest_timer_seconds || 90}"></div>
       <div class="tag-row" style="justify-content:flex-start;margin-top:8px">${[60, 90, 120, 180].map(s => `<span class="pill" onclick="document.getElementById('rtSeconds').value=${s}">${s} сек</span>`).join('')}</div>
       <button class="btn sm" style="margin-top:10px" onclick="saveRestTimer()">Сохранить таймер</button>
@@ -1735,6 +1735,17 @@ async function saveRestTimer() {
     window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs };
     toast('Таймер сохранён');
   } catch (e) { toast(e.message || 'не удалось'); }
+}
+// WK-1: the iOS switch applies immediately — updates the single source of truth
+// (window._SETTINGS), persists, and kills any running rest countdown when turned off.
+async function toggleRestTimer(el) {
+  el.classList.toggle('on');
+  const enabled = el.classList.contains('on');
+  const secs = Math.max(5, Math.min(600, parseInt((document.getElementById('rtSeconds') || {}).value || '90', 10) || 90));
+  window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs };
+  if (!enabled) { stopTimer(); closeRest(); }   // disabling stops any countdown immediately
+  try { await api('/settings', 'PATCH', { rest_timer_enabled: enabled, rest_timer_seconds: secs }); }
+  catch (e) { toast(e.message || 'не сохранилось'); }
 }
 function setRecoveryPill(m) {
   window._recoveryMode = m;
