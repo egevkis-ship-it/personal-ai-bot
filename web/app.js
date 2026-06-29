@@ -25,7 +25,7 @@ function spark(vals, color = 'var(--info)') {
 let STATE = { tab: 'home' };
 
 // ── navigation ───────────────────────────────────────────────────────────
-const TABS = [['home', '🏠', 'Главная'], ['train', '🏋️', 'Тренировка'], ['measure', '📏', 'Замеры'], ['history', '📖', 'История'], ['more', '☰', 'Ещё']];
+const TABS = [['home', '🏠', 'Главная'], ['train', '🏋️', 'Тренировка'], ['measure', '📏', 'Замеры'], ['history', '📖', 'История']];
 function renderTabs() {
   document.getElementById('tabbar').innerHTML = TABS.map(([k, i, l]) =>
     `<div class="tab ${STATE.tab === k ? 'active' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</div>`).join('');
@@ -50,7 +50,6 @@ async function go(tab, param) {
     if (tab === 'reports') return Reports();
     if (tab === 'photos') return Photos();
     if (tab === 'exercise') return ExerciseDetail(param);
-    if (tab === 'more') return More();
     if (tab === 'routines') return Routines();
     if (tab === 'routineEdit') return RoutineEdit(param);
     if (tab === 'routineDay') return RoutineDay(param);
@@ -160,30 +159,14 @@ async function Home() {
     <div class="muted small" style="margin:4px 0 8px">Быстрые действия</div>
     <div class="grid2">
       <div class="tile" onclick="go('measure')">📏<div class="small" style="margin-top:6px">Записать замер</div></div>
-      <div class="tile" onclick="go('photos')">📷<div class="small" style="margin-top:6px">Прогресс-фото</div></div>
       <div class="tile" onclick="repeatLast(${d.last_workout?d.last_workout.id:0})">🔁<div class="small" style="margin-top:6px">Повторить прошлую</div></div>
-      <div class="tile" onclick="go('train')">📅<div class="small" style="margin-top:6px">Тренировки</div></div>
+      <div class="tile" onclick="go('train')">🏋️<div class="small" style="margin-top:6px">Тренировка</div></div>
+      <div class="tile" onclick="go('schedule')">🗓<div class="small" style="margin-top:6px">Расписание</div></div>
     </div>
-    <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>
-    <div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Расписание</b><div class="small muted">что запланировано: день / неделя / месяц</div></div><span class="muted">›</span></div>
-    <button class="btn ghost" style="margin-top:6px" onclick="go('reports')">📄 Отчёты (PDF)</button>`;
+    <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>`;
 }
 async function startFromPlan(pid) { const r = await api('/workouts', 'POST', { from_plan_id: pid }); go('active', r.id); }
 async function repeatLast(id) { if (!id) return toast('Нет прошлых тренировок'); const r = await api('/workouts', 'POST', { repeat_from: id }); go('active', r.id); }
-
-// ── More (secondary navigation hub) ─────────────────────────────────────────
-function More() {
-  document.getElementById('tabbar').style.display = '';
-  const item = (tab, icon, title, sub) => `<div class="card list-item" onclick="go('${tab}')">
-    <div class="ic">${icon}</div><div style="flex:1"><b>${title}</b><div class="small muted">${sub}</div></div><span class="muted">›</span></div>`;
-  view.innerHTML = `<h1>Ещё</h1>
-    ${item('plans', '📝', 'Планы', 'планирование тренировок')}
-    ${item('routines', '🗂', 'Шаблоны', 'недельный сплит → раскатать на недели')}
-    ${item('schedule', '🗓', 'Расписание', 'день / неделя / месяц')}
-    ${item('reports', '📄', 'Отчёты', 'PDF за период')}
-    ${item('photos', '📷', 'Прогресс-фото', 'снимки и сравнение «было/стало»')}
-    ${item('settings', '⚙️', 'Настройки', 'часовой пояс, доступ, экспорт данных')}`;
-}
 
 // ── Train (start) ─────────────────────────────────────────────────────────
 async function Train() {
@@ -544,7 +527,8 @@ async function History() {
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
     ${list.length ? list.map(w => `<div class="card list-item" onclick="go('workout',${w.id})">
       <div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${w.workout_date} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`).join('')
-      : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}`;
+      : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}
+    <button class="btn ghost" style="margin-top:12px" onclick="go('reports')">📄 Отчёты (PDF)</button>`;
   const inp = document.getElementById('histQ');
   if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
 }
@@ -628,7 +612,7 @@ function Reports() {
   const t = todayISO();
   const from30 = new Date(new Date(t + 'T00:00:00').getTime() - 30 * 864e5);
   const fromDefault = new Date(from30.getTime() - from30.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  view.innerHTML = `<span class="back" onclick="go('home')">‹ Главная</span><h1>Отчёты</h1>
+  view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span><h1>Отчёты</h1>
     <div class="muted small" style="margin-bottom:12px">PDF за период: тренировки, тоннаж, замеры и фото.</div>
     <div class="card">
       <button class="btn ghost sm" onclick="openReport('days=7')">За неделю</button>
@@ -655,7 +639,7 @@ function openReportCustom() {
 // ── Progress photos ─────────────────────────────────────────────────────────
 function Photos() {
   document.getElementById('tabbar').style.display = '';
-  view.innerHTML = `<span class="back" onclick="go('home')">‹ Главная</span><h1>Прогресс-фото</h1>
+  view.innerHTML = `<span class="back" onclick="go('measure')">‹ Замеры</span><h1>Прогресс-фото</h1>
     <div class="muted small" style="margin-bottom:10px">Загрузи фото — ИИ опишет серию. Хранится на сервере.</div>
     <input id="photoFiles" type="file" accept="image/*" multiple style="display:none" onchange="uploadPhotos()">
     <button class="btn" onclick="document.getElementById('photoFiles').click()">📷 Добавить фото</button>
@@ -759,7 +743,10 @@ async function Measure() {
   view.innerHTML = `<div class="row sp"><h1>Замеры</h1><span class="back" onclick="go('measureHistory')">История ›</span></div>
     <div class="grid2" style="margin-top:8px">${MFIELDS.map(([k, l]) => `<div class="mfield"><label>${l}</label><input id="m_${k}" inputmode="decimal" value="${last && last[k] != null ? fmt(last[k]) : ''}" placeholder="—"></div>`).join('')}</div>
     <div class="field" style="margin-top:12px"><input id="mtext" placeholder="или: вес 82 талия 84"><span onclick="recToField('mtext',this)" style="cursor:pointer">🎤</span><span onclick="saveMeasureText()" style="color:var(--info);cursor:pointer">↑</span></div>
-    <button class="btn" style="margin-top:12px" onclick="saveMeasure()">Сохранить замер</button>`;
+    <button class="btn" style="margin-top:12px" onclick="saveMeasure()">Сохранить замер</button>
+    <div class="muted small" style="margin:18px 0 8px">Прогресс тела</div>
+    <div class="card list-item" onclick="go('photos')"><div class="ic">📷</div><div style="flex:1"><b>Прогресс-фото</b><div class="small muted">снимки и сравнение «было / стало»</div></div><span class="muted">›</span></div>
+    <div class="card list-item" onclick="go('measureHistory')"><div class="ic">📈</div><div style="flex:1"><b>Графики и история замеров</b><div class="small muted">динамика веса и объёмов</div></div><span class="muted">›</span></div>`;
 }
 async function saveMeasure() {
   const values = {};
@@ -1224,7 +1211,7 @@ async function planConfirmBulk() {
 async function Routines() {
   document.getElementById('tabbar').style.display = '';
   const list = await api('/routines');
-  view.innerHTML = `<span class="back" onclick="go('more')">‹ Ещё</span><h1>Шаблоны</h1>
+  view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span><h1>Шаблоны</h1>
     <div class="muted small" style="margin-bottom:10px">Недельный сплит, который можно раскатать на несколько недель вперёд.</div>
     <button class="btn" onclick="routineEditNew()">➕ Создать шаблон</button>
     <div style="margin-top:14px">${list.length ? list.map(r => `<div class="card">
