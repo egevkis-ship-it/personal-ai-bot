@@ -169,9 +169,9 @@ async function Train() {
       <div class="b-title" style="color:var(--info)">${esc(plan.focus_label || '')} ›</div></div>` : ''}
     <div class="card list-item" onclick="go('chooseDay')"><div class="ic">🗓</div><div style="flex:1"><b>Другой день недели</b><div class="small muted">взять пропущенную</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>
-    <div class="muted small" style="margin:18px 0 8px">Планирование</div>
-    <div class="card list-item" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Запланировать тренировки</b><div class="small muted">расписание на дни и неделю</div></div><span class="muted">›</span></div>
-    <div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Что запланировано</b><div class="small muted">расписание: день, неделя, месяц</div></div><span class="muted">›</span></div>`;
+    <div class="muted small" style="margin:18px 0 8px">Планы и расписание</div>
+    <div class="card list-item" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Запланировать</b><div class="small muted">создать план: день, неделя, AI или текстом</div></div><span class="muted">›</span></div>
+    <div class="card list-item" onclick="go('schedule')"><div class="ic">📅</div><div style="flex:1"><b>Расписание</b><div class="small muted">посмотреть запланированное: день / неделя / месяц</div></div><span class="muted">›</span></div>`;
 }
 async function freeWorkout() { const r = await api('/workouts', 'POST', {}); go('active', r.id); }
 async function ChooseDay() {
@@ -833,12 +833,13 @@ async function Plans() {
       <span class="muted">›</span></div>`).join('')
     : '<div class="card muted">Пока ничего не запланировано на 30 дней вперёд.</div>';
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span>
-    <h1>Планы</h1><div class="muted small" style="margin-bottom:14px">Расписание на ближайшие дни</div>
-    <button class="btn" onclick="coachStart()">🧠 Собрать следующую неделю (AI)</button>
-    <button class="btn ghost" style="margin-top:8px" onclick="newPlan()">➕ Запланировать день</button>
-    <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">📝 Вставить планом (ИИ)</button>
-    <button class="btn ghost" style="margin-top:8px" onclick="go('routines')">🗂 Шаблоны (недельный сплит)</button>
-    <div style="margin-top:16px">${rows}</div>`;
+    <h1>Планы</h1><div class="muted small" style="margin-bottom:14px">Запланированное на ближайшие дни — и как добавить новое</div>
+    <div class="muted small" style="margin:4px 0 8px">Создать план</div>
+    <button class="btn" onclick="coachStart()">🧠 AI: собрать неделю по моим данным</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="planPasteSheet()">📝 Вставить готовый план текстом</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="newPlan()">➕ Запланировать день вручную</button>
+    <div class="muted small" style="margin-top:12px">Есть готовый сплит? <span style="color:var(--info);cursor:pointer" onclick="go('routines')">🗂 Шаблоны ›</span></div>
+    <div style="margin-top:16px">${list.length ? '<div class="muted small" style="margin-bottom:8px">Ближайшие планы</div>' : ''}${rows}</div>`;
 }
 
 // ── Flagship: AI coach «Собери следующую неделю» ─────────────────────────────
