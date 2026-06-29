@@ -18,6 +18,22 @@ function mmss(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':
 function plural(n, one, few, many) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many; }
 let STATE = { tab: 'home' };
 
+// iOS sticky compact title: reveal the blurred top bar with the screen title on scroll.
+(function navbarInit() {
+  const nb = document.getElementById('navbar');
+  if (!nb) return;
+  let raf = 0;
+  addEventListener('scroll', () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const t = view.querySelector('h1, h2');
+      if (t && scrollY > 52) { nb.textContent = t.textContent.trim(); nb.classList.add('show'); }
+      else nb.classList.remove('show');
+    });
+  }, { passive: true });
+})();
+
 // ── navigation ───────────────────────────────────────────────────────────
 const TABS = [['home', '🏠', 'Главная'], ['train', '🏋️', 'Тренировка'], ['measure', '📏', 'Замеры'], ['history', '📖', 'История']];
 function renderTabs() {
@@ -25,7 +41,8 @@ function renderTabs() {
     `<div class="tab ${STATE.tab === k ? 'active' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</div>`).join('');
 }
 async function go(tab, param) {
-  STATE.tab = tab; renderTabs(); view.scrollTo(0, 0);
+  STATE.tab = tab; renderTabs(); window.scrollTo(0, 0);
+  const _nb = document.getElementById('navbar'); if (_nb) _nb.classList.remove('show');
   try {
     if (tab === 'login') return Login();
     if (tab === 'home') return Home();
@@ -1001,10 +1018,10 @@ async function Schedule() {
   if (!STATE.schedMode) STATE.schedMode = 'day';
   if (!STATE.schedDate) STATE.schedDate = todayISO();
   const mode = STATE.schedMode;
-  const pills = [['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) =>
-    `<span class="pill ${mode === k ? 'on' : ''}" onclick="schedSet('${k}')">${l}</span>`).join('');
+  const seg = [['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) =>
+    `<button class="${mode === k ? 'on' : ''}" onclick="schedSet('${k}')">${l}</button>`).join('');
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Тренировка</span><h1>Что запланировано</h1>
-    <div class="tag-row" style="justify-content:flex-start;margin-bottom:12px">${pills}</div>
+    <div class="seg">${seg}</div>
     <div id="schedBody"><div class="card muted small">Загрузка…</div></div>`;
   try {
     if (mode === 'day') await schedDay();
@@ -1498,7 +1515,7 @@ async function Settings() {
     <div class="muted small" style="margin:14px 0 6px">⏱ Таймер отдыха</div>
     <div class="card">
       <div class="row sp" style="padding:2px 0"><span>Автозапуск после подхода</span>
-        <span class="pill ${cfg.rest_timer_enabled !== false ? 'on' : ''}" id="rtEnabled" style="cursor:pointer" onclick="this.classList.toggle('on'); this.textContent = this.classList.contains('on') ? 'вкл' : 'выкл'">${cfg.rest_timer_enabled !== false ? 'вкл' : 'выкл'}</span></div>
+        <span class="switch ${cfg.rest_timer_enabled !== false ? 'on' : ''}" id="rtEnabled" onclick="this.classList.toggle('on')"></span></div>
       <div class="mfield" style="margin-top:10px"><label>Длительность, сек</label><input id="rtSeconds" type="number" min="5" max="600" value="${cfg.rest_timer_seconds || 90}"></div>
       <div class="tag-row" style="justify-content:flex-start;margin-top:8px">${[60, 90, 120, 180].map(s => `<span class="pill" onclick="document.getElementById('rtSeconds').value=${s}">${s} сек</span>`).join('')}</div>
       <button class="btn sm" style="margin-top:10px" onclick="saveRestTimer()">Сохранить таймер</button>
@@ -1506,9 +1523,9 @@ async function Settings() {
     <div class="muted small" style="margin:14px 0 6px">🧠 ИИ-наставник</div>
     <div class="card">
       <div class="row sp" style="padding:2px 0"><span>Режим восстановления</span></div>
-      <div class="tag-row" style="justify-content:flex-start;margin-top:6px">
-        <span class="pill ${cfg.recovery_mode !== 'enhanced' ? 'on' : ''}" id="rmNatural" onclick="setRecoveryPill('natural')">Натуральное</span>
-        <span class="pill ${cfg.recovery_mode === 'enhanced' ? 'on' : ''}" id="rmEnhanced" onclick="setRecoveryPill('enhanced')">Усиленное</span>
+      <div class="seg" style="margin-top:8px;margin-bottom:0">
+        <button class="${cfg.recovery_mode !== 'enhanced' ? 'on' : ''}" id="rmNatural" onclick="setRecoveryPill('natural')">Натуральное</button>
+        <button class="${cfg.recovery_mode === 'enhanced' ? 'on' : ''}" id="rmEnhanced" onclick="setRecoveryPill('enhanced')">Усиленное</button>
       </div>
       <div class="muted small" style="margin:8px 0 0">Влияет только на объём, частоту и прогрессию, которые подбирает наставник. Это не медицинский и не фарм-совет.</div>
       <button class="btn sm" style="margin-top:10px" onclick="saveRecoveryMode()">Сохранить режим</button>
@@ -1516,8 +1533,8 @@ async function Settings() {
     </div>
     <div class="muted small" style="margin:14px 0 6px">📅 Формат даты</div>
     <div class="card">
-      <div class="tag-row" style="justify-content:flex-start">
-        ${[['DMY', 'ДД-ММ-ГГГГ'], ['YMD', 'ГГГГ-ММ-ДД'], ['MDY', 'ММ/ДД/ГГГГ']].map(([k, l]) => `<span class="pill ${(cfg.date_format || 'DMY') === k ? 'on' : ''}" onclick="saveDateFormat('${k}')">${l}</span>`).join('')}
+      <div class="seg">
+        ${[['DMY', 'ДД-ММ-ГГГГ'], ['YMD', 'ГГГГ-ММ-ДД'], ['MDY', 'ММ/ДД/ГГГГ']].map(([k, l]) => `<button class="${(cfg.date_format || 'DMY') === k ? 'on' : ''}" onclick="saveDateFormat('${k}')">${l}</button>`).join('')}
       </div>
       <div class="muted small" style="margin-top:8px">Применяется везде, где показывается дата. На хранение не влияет.</div>
     </div>
