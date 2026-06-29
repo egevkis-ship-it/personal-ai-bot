@@ -1855,8 +1855,22 @@ function sheet(html) {
   closeSheet();
   const bg = document.createElement('div'); bg.className = 'sheet-bg'; bg.id = 'sheetbg';
   bg.onclick = e => { if (e.target === bg) closeSheet(); };
-  bg.innerHTML = `<div class="sheet"><div class="grip"></div>${html}</div>`;
+  // UX3-FIX-5: tappable + swipe-down-to-dismiss grip; capped height (CSS) keeps the
+  // dimmed top area tappable; content scrolls inside the sheet.
+  bg.innerHTML = `<div class="sheet"><div class="grip-zone" onclick="closeSheet()"><div class="grip"></div></div>${html}</div>`;
   document.body.appendChild(bg);
+  const sheetEl = bg.querySelector('.sheet'), grip = bg.querySelector('.grip-zone');
+  let startY = 0, dragging = false;
+  grip.addEventListener('touchstart', e => { startY = e.touches[0].clientY; dragging = true; sheetEl.style.transition = 'none'; }, { passive: true });
+  grip.addEventListener('touchmove', e => {
+    if (!dragging) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 0) sheetEl.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  grip.addEventListener('touchend', e => {
+    if (!dragging) return; dragging = false; sheetEl.style.transition = '';
+    if (e.changedTouches[0].clientY - startY > 90) closeSheet(); else sheetEl.style.transform = '';
+  }, { passive: true });
 }
 function closeSheet() { const b = document.getElementById('sheetbg'); if (b) b.remove(); stopTimer(); }
 
