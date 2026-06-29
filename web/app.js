@@ -16,12 +16,6 @@ const esc = s => (s || '').replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 1800); }
 function mmss(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
 function plural(n, one, few, many) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many; }
-function spark(vals, color = 'var(--info)') {
-  if (!vals.length) return '';
-  const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx - mn) || 1;
-  const pts = vals.map((v, i) => `${(i / Math.max(1, vals.length - 1)) * 160},${44 - ((v - mn) / rng) * 40 - 2}`).join(' ');
-  return `<svg class="spark" viewBox="0 0 160 44" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
-}
 let STATE = { tab: 'home' };
 
 // ── navigation ───────────────────────────────────────────────────────────
@@ -550,27 +544,49 @@ async function WorkoutDetail(id) {
 
 // ── Exercise progress (charts + PR) ─────────────────────────────────────────
 function shortDate(iso) { return iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) : ''; }
-// Simple line chart with axes (extends spark for a labelled progression view).
+// Line chart with axes: ~4 labelled Y ticks + horizontal gridlines and several
+// X date ticks (UX-4). pts = [{label, value}]. Gridlines use var(--line),
+// labels var(--txt2) (both defined light+dark).
 function lineChart(pts, color = 'var(--info)') {
   if (!pts.length) return '<div class="muted small">нет данных</div>';
-  const W = 300, H = 130, padL = 34, padR = 10, padT = 10, padB = 20;
+  const W = 300, H = 130, padL = 36, padR = 10, padT = 10, padB = 22;
   const vals = pts.map(p => p.value);
   let mn = Math.min(...vals), mx = Math.max(...vals);
   if (mn === mx) { mn -= 1; mx += 1; }
-  const rng = mx - mn;
-  const x = i => padL + (pts.length <= 1 ? (W - padL - padR) / 2 : (i / (pts.length - 1)) * (W - padL - padR));
-  const y = v => padT + (1 - (v - mn) / rng) * (H - padT - padB);
+  const rng = mx - mn, plotW = W - padL - padR, plotH = H - padT - padB;
+  const x = i => padL + (pts.length <= 1 ? plotW / 2 : (i / (pts.length - 1)) * plotW);
+  const y = v => padT + (1 - (v - mn) / rng) * plotH;
+  const ax = 'font-size:9px;fill:var(--txt2)';
+  // Y ticks + horizontal gridlines (endpoints coincide with mn & mx).
+  const yN = 4; let grid = '', yLabels = '';
+  for (let t = 0; t < yN; t++) {
+    const val = mn + (rng * t) / (yN - 1), yy = y(val).toFixed(1);
+    grid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
+    yLabels += `<text x="${padL - 3}" y="${(+yy + 3).toFixed(1)}" text-anchor="end" style="${ax}">${fmt(val)}</text>`;
+  }
+  // X date ticks: evenly-spaced indices, always incl. first & last, deduped.
+  const xN = Math.min(pts.length, 4), idxs = [];
+  for (let t = 0; t < xN; t++) {
+    const idx = pts.length <= 1 ? 0 : Math.round((t / (xN - 1)) * (pts.length - 1));
+    if (!idxs.includes(idx)) idxs.push(idx);
+  }
+  let xTicks = '', xLabels = '';
+  idxs.forEach(idx => {
+    const xx = x(idx).toFixed(1);
+    xTicks += `<line x1="${xx}" y1="${H - padB}" x2="${xx}" y2="${H - padB + 3}" stroke="var(--line)" stroke-width="1"/>`;
+    const anchor = idx === 0 ? 'start' : (idx === pts.length - 1 ? 'end' : 'middle');
+    xLabels += `<text x="${xx}" y="${H - 5}" text-anchor="${anchor}" style="${ax}">${esc(pts[idx].label)}</text>`;
+  });
   const poly = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
   const dots = pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3" fill="${color}"/>`).join('');
-  const ax = 'font-size:9px;fill:var(--muted)';
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:340px">
+    ${grid}
     <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="var(--line)"/>
     <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" stroke="var(--line)"/>
+    ${xTicks}
     ${pts.length > 1 ? `<polyline points="${poly}" fill="none" stroke="${color}" stroke-width="2"/>` : ''}${dots}
-    <text x="2" y="${padT + 7}" style="${ax}">${fmt(mx)}</text>
-    <text x="2" y="${H - padB + 2}" style="${ax}">${fmt(mn)}</text>
-    <text x="${padL}" y="${H - 5}" style="${ax}">${esc(pts[0].label)}</text>
-    ${pts.length > 1 ? `<text x="${W - padR}" y="${H - 5}" text-anchor="end" style="${ax}">${esc(pts[pts.length - 1].label)}</text>` : ''}
+    ${yLabels}
+    ${xLabels}
   </svg>`;
 }
 // Entry points stash the source screen so "back" returns there.

@@ -7,8 +7,9 @@
 // («Собери следующую неделю») — new coach UI in app.js. v6: UX brief — 4-tab nav
 // (no «Ещё»), Photos→Замеры, Reports→История. v7: plan delete + multi-plan
 // day + Replace/Add-second dialog. v8: weekday everywhere + configurable
-// date format (one fmtDate helper).
-const CACHE = 'fit-proto-v8';
+// date format (one fmtDate helper). v9: charts with Y gridlines/ticks + X date
+// ticks (one axed lineChart), dead spark() removed.
+const CACHE = 'fit-proto-v9';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
