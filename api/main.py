@@ -704,15 +704,21 @@ class SettingsPatch(BaseModel):
     target_weight: Optional[float] = None
     weekly_goal: Optional[int] = None
     unit: Optional[str] = None
+    rest_timer_enabled: Optional[bool] = None
+    rest_timer_seconds: Optional[int] = None
     clear_target: bool = False
 
 
 @app.get("/api/settings")
 async def get_settings(uid: str = Depends(current_uid)):
-    rows = await _rows("SELECT tz_name, target_weight, weekly_goal, unit FROM user_settings WHERE user_id=:u", u=uid)
+    rows = await _rows(
+        "SELECT tz_name, target_weight, weekly_goal, unit, rest_timer_enabled, rest_timer_seconds "
+        "FROM user_settings WHERE user_id=:u", u=uid)
     r = rows[0] if rows else {}
     return {"tz_name": r.get("tz_name") or "UTC", "target_weight": _to_f(r.get("target_weight")),
-            "weekly_goal": r.get("weekly_goal"), "unit": r.get("unit") or "kg"}
+            "weekly_goal": r.get("weekly_goal"), "unit": r.get("unit") or "kg",
+            "rest_timer_enabled": r.get("rest_timer_enabled") if r.get("rest_timer_enabled") is not None else True,
+            "rest_timer_seconds": r.get("rest_timer_seconds") if r.get("rest_timer_seconds") is not None else 90}
 
 
 @app.patch("/api/settings")
@@ -727,6 +733,10 @@ async def patch_settings(body: SettingsPatch, uid: str = Depends(current_uid)):
         sets.append("weekly_goal = :wg"); params["wg"] = _opt_int(body.weekly_goal, "weekly_goal", 0, 14)
     if body.unit is not None:
         sets.append("unit = :un"); params["un"] = body.unit if body.unit in ("kg", "lb") else "kg"
+    if body.rest_timer_enabled is not None:
+        sets.append("rest_timer_enabled = :rte"); params["rte"] = bool(body.rest_timer_enabled)
+    if body.rest_timer_seconds is not None:
+        sets.append("rest_timer_seconds = :rts"); params["rts"] = _opt_int(body.rest_timer_seconds, "rest_timer_seconds", 5, 600)
     if not sets:
         return {"ok": True}
     async with get_session() as s:

@@ -211,6 +211,7 @@ async function ChooseDay() {
 // ── Active workout ────────────────────────────────────────────────────────
 async function Active(id) {
   let w;
+  if (!window._SETTINGS) { try { window._SETTINGS = await api('/settings'); } catch {} }  // rest-timer prefs
   try { w = id ? await api('/workouts/' + id) : await api('/workouts/active'); }
   catch (e) {
     if (isNetworkErr(e)) { w = loadActiveCache(id); if (w) { await overlayQueue(w); return renderActive(w); } }
@@ -238,6 +239,7 @@ function renderActive(w) {
     <div class="muted small" style="margin-bottom:12px">${navigator.onLine ? 'идёт' : '⚠️ оффлайн — подходы сохранятся при сети'}</div>
     ${items || '<div class="card muted">Пусто</div>'}
     <button class="btn ghost" style="margin-top:6px" onclick="openPicker(${w.id})">➕ Добавить упражнение</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="restTimer((window._SETTINGS&&window._SETTINGS.rest_timer_seconds)||90)">⏱ Таймер отдыха</button>
     <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>
     <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelWorkout(${w.id})">✖ Отменить тренировку</button>`;
 }
@@ -368,7 +370,8 @@ async function confirmSet(wid, type) {
   else { body.weight_kg = g('weight'); body.reps = g('reps'); }
   closeSheet(); stopTimer();
   await submitSet(wid, body);
-  restTimer();
+  const st = window._SETTINGS || {};
+  if (st.rest_timer_enabled !== false) restTimer(st.rest_timer_seconds || 90);  // auto-start unless disabled
 }
 async function confirmText(wid) {
   const t = document.getElementById('freetext').value.trim(); if (!t) return;
@@ -425,8 +428,8 @@ function stopTimer(write) {
 }
 
 // rest timer overlay
-function restTimer() {
-  let s = 90;
+function restTimer(seconds) {
+  let s = seconds || 90;
   const bg = document.createElement('div'); bg.className = 'sheet-bg'; bg.id = 'restbg';
   const draw = () => bg.innerHTML = `<div class="sheet" style="text-align:center"><div class="grip"></div>
     <div class="muted small">Отдых</div><div class="timer">${mmss(s)}</div>
@@ -1317,6 +1320,14 @@ async function Settings() {
       <div class="mfield" style="margin-bottom:10px"><label>Тренировок в неделю</label><input id="goalWeekly" type="number" min="0" max="14" value="${cfg.weekly_goal != null ? cfg.weekly_goal : ''}" placeholder="напр. 3"></div>
       <button class="btn sm" onclick="saveGoals()">Сохранить цели</button>
     </div>
+    <div class="muted small" style="margin:14px 0 6px">⏱ Таймер отдыха</div>
+    <div class="card">
+      <div class="row sp" style="padding:2px 0"><span>Автозапуск после подхода</span>
+        <span class="pill ${cfg.rest_timer_enabled !== false ? 'on' : ''}" id="rtEnabled" style="cursor:pointer" onclick="this.classList.toggle('on'); this.textContent = this.classList.contains('on') ? 'вкл' : 'выкл'">${cfg.rest_timer_enabled !== false ? 'вкл' : 'выкл'}</span></div>
+      <div class="mfield" style="margin-top:10px"><label>Длительность, сек</label><input id="rtSeconds" type="number" min="5" max="600" value="${cfg.rest_timer_seconds || 90}"></div>
+      <div class="tag-row" style="justify-content:flex-start;margin-top:8px">${[60, 90, 120, 180].map(s => `<span class="pill" onclick="document.getElementById('rtSeconds').value=${s}">${s} сек</span>`).join('')}</div>
+      <button class="btn sm" style="margin-top:10px" onclick="saveRestTimer()">Сохранить таймер</button>
+    </div>
     <div class="muted small" style="margin:14px 0 6px">📦 Экспорт данных</div>
     <div class="card">
       <button class="btn ghost sm" onclick="window.open('/api/export?format=json','_blank')">Скачать всё (JSON)</button>
@@ -1342,6 +1353,15 @@ async function saveGoals() {
   if (tw === '') body.clear_target = true; else body.target_weight = parseFloat(tw);
   try { await api('/settings', 'PATCH', body); toast('Цели сохранены'); }
   catch (e) { toast(e.message || 'не удалось'); }
+}
+async function saveRestTimer() {
+  const enabled = document.getElementById('rtEnabled').classList.contains('on');
+  const secs = Math.max(5, Math.min(600, parseInt(document.getElementById('rtSeconds').value || '90', 10) || 90));
+  try {
+    await api('/settings', 'PATCH', { rest_timer_enabled: enabled, rest_timer_seconds: secs });
+    window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs };
+    toast('Таймер сохранён');
+  } catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── PWA install (Add to Home Screen) ────────────────────────────────────────

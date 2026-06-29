@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS user_settings (
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS target_weight NUMERIC;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS weekly_goal   INTEGER;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS unit          TEXT NOT NULL DEFAULT 'kg';
+-- Rest-timer preference (phase 2).
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS rest_timer_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS rest_timer_seconds INTEGER NOT NULL DEFAULT 90;
 
 CREATE TABLE IF NOT EXISTS exercise_aliases (
     id              SERIAL PRIMARY KEY,
