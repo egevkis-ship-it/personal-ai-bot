@@ -143,7 +143,7 @@ async function Home() {
   const onboardCard = isNew ? `<div class="card" style="border:1px dashed var(--line)"><b>Добро пожаловать! 👋</b>
     <div class="small muted" style="margin-top:4px">Начни первую тренировку или запланируй неделю в «Планы». Записывай подходы — здесь появятся графики, рекорды и прогресс.</div></div>` : '';
   view.innerHTML = `<div class="row sp"><h1 style="font-size:22px;text-transform:capitalize">${fmtDate(todayISO(), { weekday: 'long' })}</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div>
-    <div class="muted small" style="margin-bottom:14px">${streak > 0 ? `🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')} · ` : ''}${d.week_workouts} ${plural(d.week_workouts, 'тренировка', 'тренировки', 'тренировок')} за неделю</div>
+    <div class="muted small" style="margin-bottom:14px">${streak > 0 ? `🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')} · ` : ''}${d.week_workouts} ${plural(d.week_workouts, 'тренировка', 'тренировки', 'тренировок')} на этой неделе</div>
     ${banner}
     ${onboardCard}
     ${summaryCard}

@@ -216,6 +216,30 @@ def test_settings_date_format(client):
     assert client.get("/api/settings").json()["date_format"] == "DMY"
 
 
+def test_dashboard_week_is_calendar_week(client):
+    # UX-5: «на этой неделе» must be the current calendar week (Mon–Sun), not a
+    # rolling 7-day window. Seed one finished workout earlier THIS week and one
+    # LAST week (within a rolling-7 window). Only this week's must count.
+    import datetime as _dt
+    from sqlalchemy.ext.asyncio import create_async_engine
+    today = _dt.datetime.now(_dt.timezone.utc).date()   # matches today_for(default tz=UTC)
+    monday = today - _dt.timedelta(days=today.weekday())
+
+    async def _seed():  # fresh engine bound to this transient loop (don't reuse the app's)
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        try:
+            async with eng.begin() as conn:
+                await conn.execute(text("INSERT INTO workouts (user_id, workout_date, focus_label, finished_at) "
+                                        "VALUES ('local', :d, 'this-week', now())"), {"d": monday})
+                await conn.execute(text("INSERT INTO workouts (user_id, workout_date, focus_label, finished_at) "
+                                        "VALUES ('local', :d, 'last-week', now())"), {"d": monday - _dt.timedelta(days=1)})
+        finally:
+            await eng.dispose()
+    asyncio.run(_seed())
+    d = client.get("/api/dashboard").json()
+    assert d["week_workouts"] == 1   # last week's (Sunday) workout excluded despite being <7 days ago
+
+
 def test_export_json_and_csv(client):
     wid = client.post("/api/workouts", json={}).json()["id"]
     client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Присед", "weight_kg": 100, "reps": 5})

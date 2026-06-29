@@ -716,6 +716,7 @@ async def _week_streak(uid: str, today: date) -> int:
 @app.get("/api/dashboard")
 async def dashboard(uid: str = Depends(current_uid)):
     today = await today_for(uid)
+    monday = today - timedelta(days=today.weekday())  # UX-5: current calendar week (Mon–Sun), user-tz
     # Phase 5: all dashboard reads are independent once `today` is known — run them
     # in one parallel round-trip instead of ~11 serial awaits (each its own session;
     # the pool covers the concurrency).
@@ -725,13 +726,13 @@ async def dashboard(uid: str = Depends(current_uid)):
         db.get_active_workout(uid),
         db.get_last_measurement(uid),
         _scalar("SELECT COUNT(*) FROM workouts WHERE user_id=:u AND finished_at IS NOT NULL AND workout_date >= :d",
-                u=uid, d=today - timedelta(days=7)),
+                u=uid, d=monday),
         db.get_last_workout(uid),
         _scalar("""SELECT COALESCE(SUM(es.weight_kg * es.reps), 0)
            FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
            WHERE w.user_id=:u AND w.finished_at IS NOT NULL AND es.is_warmup=false
              AND es.weight_kg IS NOT NULL AND es.reps IS NOT NULL AND w.workout_date >= :d""",
-                u=uid, d=today - timedelta(days=7)),
+                u=uid, d=monday),
         _rows("""SELECT taken_on, weight_kg FROM body_measurements
            WHERE user_id=:u AND weight_kg IS NOT NULL ORDER BY taken_on DESC LIMIT 8""", u=uid),
         _rows("""WITH working AS (
