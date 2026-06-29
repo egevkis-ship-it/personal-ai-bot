@@ -114,7 +114,8 @@ async function Home() {
   if (d.active_workout) {
     banner = `<div class="banner warn"><div class="small" style="color:var(--warn)">⏸ Незавершённая тренировка</div>
       <div class="b-title" style="color:var(--warn)">${esc(d.active_workout.focus_label || 'Тренировка')}</div>
-      <button class="btn" style="margin-top:9px;background:var(--warn)" onclick="go('active',${d.active_workout.id})">Продолжить</button></div>`;
+      <button class="btn" style="margin-top:9px;background:var(--warn)" onclick="go('active',${d.active_workout.id})">Продолжить</button>
+      <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelActiveFromHome(${d.active_workout.id})">✖ Отменить</button></div>`;
   } else if (d.today_plan) {
     banner = `<div class="banner info"><div class="small" style="color:var(--info)">📅 Сегодня по плану</div>
       <div class="b-title" style="color:var(--info)">${esc(d.today_plan.focus_label || '')} · ${(d.today_plan.exercises || []).length} упр.</div>
@@ -236,7 +237,22 @@ function renderActive(w) {
     <div class="muted small" style="margin-bottom:12px">${navigator.onLine ? 'идёт' : '⚠️ оффлайн — подходы сохранятся при сети'}</div>
     ${items || '<div class="card muted">Пусто</div>'}
     <button class="btn ghost" style="margin-top:6px" onclick="openPicker(${w.id})">➕ Добавить упражнение</button>
-    <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>`;
+    <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>
+    <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelWorkout(${w.id})">✖ Отменить тренировку</button>`;
+}
+// Phase 1Б: explicit cancel. Empty workout (accidental start) → delete in one tap;
+// with sets → confirm. delWorkout clears cache + returns Home.
+function cancelWorkout(wid) {
+  const w = window._WO;
+  const hasSets = w && w.exercises.some(e => (e.sets || []).length);
+  if (!hasSets) return delWorkout(wid);
+  confirmSheet('Отменить тренировку?', 'Удалить тренировку со всеми подходами? Действие необратимо.', 'Удалить', true, () => delWorkout(wid));
+}
+async function cancelActiveFromHome(wid) {
+  let hasSets = false;
+  try { const w = await api('/workouts/' + wid); hasSets = (w.exercises || []).some(e => (e.sets || []).length); } catch {}
+  if (!hasSets) return delWorkout(wid);
+  confirmSheet('Отменить тренировку?', 'Удалить тренировку со всеми подходами? Действие необратимо.', 'Удалить', true, () => delWorkout(wid));
 }
 
 // ── offline support: IndexedDB queue + optimistic set logging ───────────────
