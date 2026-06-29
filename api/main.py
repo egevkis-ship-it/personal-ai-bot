@@ -154,7 +154,7 @@ _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org; "
     "style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data: blob:; "
+    "img-src 'self' data: blob: https://raw.githubusercontent.com; "
     "connect-src 'self'; "
     "frame-src https://oauth.telegram.org https://telegram.org; "
     "font-src 'self'; "
@@ -1280,6 +1280,7 @@ async def exercises_recent(limit: int = 12, uid: str = Depends(current_uid)):
         """, u=uid, lim=limit)
     for r in rows:
         r["key"] = name_to_key(r["name"])
+        r["image"] = (CATALOG.get(r["key"] or "") or {}).get("image")   # DB-2: thumbnail
     return rows
 
 

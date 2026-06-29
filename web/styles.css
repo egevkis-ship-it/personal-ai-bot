@@ -120,3 +120,8 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .swipe-del{min-width:82px;flex:none;scroll-snap-align:end;background:var(--danger);color:#fff;
   display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer}
 .swipe-body .trash{color:var(--danger);cursor:pointer;font-size:16px;padding:0 2px}
+/* exercise thumbnail in the picker (DB-2) */
+.ex-thumb{position:relative;width:46px;height:46px;border-radius:9px;overflow:hidden;background:var(--sec);
+  flex:none;display:flex;align-items:center;justify-content:center}
+.ex-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ex-ph{font-size:19px;opacity:.45}

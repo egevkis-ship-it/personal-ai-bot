@@ -21,6 +21,10 @@ function swipeRow(inner, delExpr, openExpr) {
   const o = openExpr ? ` onclick="${openExpr}"` : '';
   return `<div class="swipe"><div class="swipe-body"${o}>${inner}</div><div class="swipe-del" onclick="${delExpr}">Удалить</div></div>`;
 }
+// DB-2: exercise thumbnail (Free Exercise DB image) with a placeholder fallback.
+function _exThumb(image) {
+  return `<div class="ex-thumb"><span class="ex-ph">🏋️</span>${image ? `<img src="${esc(image)}" loading="lazy" onerror="this.remove()">` : ''}</div>`;
+}
 function mmss(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
 function plural(n, one, few, many) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many; }
 let STATE = { tab: 'home' };
@@ -473,7 +477,7 @@ async function pickTab(wid, t) {
   const body = document.getElementById('pickbody');
   if (t === 'rec') {
     const r = await api('/exercises/recent');
-    body.innerHTML = r.length ? r.map(x => pickRow(wid, x.name, x.key)).join('') : '<div class="muted small">Пока пусто — выбери по группам.</div>';
+    body.innerHTML = r.length ? r.map(x => pickRow(wid, x.name, x.key, x.image)).join('') : '<div class="muted small">Пока пусто — выбери по группам.</div>';
   } else {
     const g = await api('/exercises/groups');
     body.innerHTML = g.map(x => `<div class="list-item" onclick="pickGroup(${wid},'${x.group}','${x.label}')"><div style="flex:1">${x.label}</div><span class="muted small">${x.count} ›</span></div>`).join('');
@@ -481,16 +485,16 @@ async function pickTab(wid, t) {
 }
 async function pickGroup(wid, g, label) {
   const list = await api('/exercises/catalog?group=' + g);
-  document.getElementById('pickbody').innerHTML = `<div class="back" onclick="pickTab(${wid},'grp')">‹ ${label}</div>` + list.map(x => pickRow(wid, x.name, x.exercise_key)).join('');
+  document.getElementById('pickbody').innerHTML = `<div class="back" onclick="pickTab(${wid},'grp')">‹ ${label}</div>` + list.map(x => pickRow(wid, x.name, x.exercise_key, x.image)).join('');
 }
 async function pickSearch(wid) {
   const q = document.getElementById('exq').value.trim();
   if (q.length < 2) return;
   const r = await api('/exercises/search?q=' + encodeURIComponent(q));
-  document.getElementById('pickbody').innerHTML = r.map(x => pickRow(wid, x.name, x.exercise_key)).join('') || '<div class="muted small">Ничего не найдено</div>';
+  document.getElementById('pickbody').innerHTML = r.map(x => pickRow(wid, x.name, x.exercise_key, x.image)).join('') || '<div class="muted small">Ничего не найдено</div>';
 }
-function pickRow(wid, name, key) {
-  return `<div class="list-item" onclick='chooseEx(${wid},${esc(JSON.stringify(name))},${esc(JSON.stringify(key || ''))})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+function pickRow(wid, name, key, image) {
+  return `<div class="list-item" onclick='chooseEx(${wid},${esc(JSON.stringify(name))},${esc(JSON.stringify(key || ''))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
 }
 function chooseEx(wid, name, key) {
   const type = key && /план|велосипед|кардио/.test(name.toLowerCase()) ? 'time'
@@ -1286,7 +1290,7 @@ async function planPickTab(t) {
   const body = document.getElementById('ppickbody');
   if (t === 'rec') {
     const r = await api('/exercises/recent');
-    body.innerHTML = r.length ? r.map(x => planPickRow(x.name)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>';
+    body.innerHTML = r.length ? r.map(x => planPickRow(x.name, x.image)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>';
   } else {
     const g = await api('/exercises/groups');
     body.innerHTML = g.map(x => `<div class="list-item" onclick="planPickGroup('${x.group}','${esc(x.label)}')"><div style="flex:1">${esc(x.label)}</div><span class="muted small">${x.count} ›</span></div>`).join('');
@@ -1294,15 +1298,15 @@ async function planPickTab(t) {
 }
 async function planPickGroup(g, label) {
   const list = await api('/exercises/catalog?group=' + g);
-  document.getElementById('ppickbody').innerHTML = `<div class="back" onclick="planPickTab('grp')">‹ ${label}</div>` + list.map(x => planPickRow(x.name)).join('');
+  document.getElementById('ppickbody').innerHTML = `<div class="back" onclick="planPickTab('grp')">‹ ${label}</div>` + list.map(x => planPickRow(x.name, x.image)).join('');
 }
 async function planPickSearch() {
   const q = document.getElementById('pexq').value.trim(); if (q.length < 2) return;
   const r = await api('/exercises/search?q=' + encodeURIComponent(q));
-  document.getElementById('ppickbody').innerHTML = r.map(x => planPickRow(x.name)).join('') || '<div class="muted small">Ничего не найдено</div>';
+  document.getElementById('ppickbody').innerHTML = r.map(x => planPickRow(x.name, x.image)).join('') || '<div class="muted small">Ничего не найдено</div>';
 }
-function planPickRow(name) {
-  return `<div class="list-item" onclick='planChooseEx(${esc(JSON.stringify(name))})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+function planPickRow(name, image) {
+  return `<div class="list-item" onclick='planChooseEx(${esc(JSON.stringify(name))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
 }
 function planChooseEx(name) { openPlanTarget(name, -1); }
 
@@ -1564,12 +1568,12 @@ async function rPickTab(t) {
   document.getElementById('rtabRec').classList.toggle('on', t === 'rec');
   document.getElementById('rtabGrp').classList.toggle('on', t === 'grp');
   const body = document.getElementById('rpickbody');
-  if (t === 'rec') { const r = await api('/exercises/recent'); body.innerHTML = r.length ? r.map(x => rPickRow(x.name)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>'; }
+  if (t === 'rec') { const r = await api('/exercises/recent'); body.innerHTML = r.length ? r.map(x => rPickRow(x.name, x.image)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>'; }
   else { const g = await api('/exercises/groups'); body.innerHTML = g.map(x => `<div class="list-item" onclick="rPickGroup('${x.group}','${esc(x.label)}')"><div style="flex:1">${esc(x.label)}</div><span class="muted small">${x.count} ›</span></div>`).join(''); }
 }
-async function rPickGroup(g, label) { const list = await api('/exercises/catalog?group=' + g); document.getElementById('rpickbody').innerHTML = `<div class="back" onclick="rPickTab('grp')">‹ ${label}</div>` + list.map(x => rPickRow(x.name)).join(''); }
-async function rPickSearch() { const q = document.getElementById('rexq').value.trim(); if (q.length < 2) return; const r = await api('/exercises/search?q=' + encodeURIComponent(q)); document.getElementById('rpickbody').innerHTML = r.map(x => rPickRow(x.name)).join('') || '<div class="muted small">Ничего не найдено</div>'; }
-function rPickRow(name) { return `<div class="list-item" onclick='rChooseEx(${esc(JSON.stringify(name))})'><div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
+async function rPickGroup(g, label) { const list = await api('/exercises/catalog?group=' + g); document.getElementById('rpickbody').innerHTML = `<div class="back" onclick="rPickTab('grp')">‹ ${label}</div>` + list.map(x => rPickRow(x.name, x.image)).join(''); }
+async function rPickSearch() { const q = document.getElementById('rexq').value.trim(); if (q.length < 2) return; const r = await api('/exercises/search?q=' + encodeURIComponent(q)); document.getElementById('rpickbody').innerHTML = r.map(x => rPickRow(x.name, x.image)).join('') || '<div class="muted small">Ничего не найдено</div>'; }
+function rPickRow(name, image) { return `<div class="list-item" onclick='rChooseEx(${esc(JSON.stringify(name))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
 function rChooseEx(name) { rOpenTarget(name, -1); }
 function rEditEx(j) { rOpenTarget(window._ROUTINE.days[window._RDi].exercises[j].name, j); }
 function rOpenTarget(name, idx) {
