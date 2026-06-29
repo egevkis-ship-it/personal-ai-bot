@@ -9,8 +9,9 @@
 // day + Replace/Add-second dialog. v8: weekday everywhere + configurable
 // date format (one fmtDate helper). v9: charts with Y gridlines/ticks + X date
 // ticks (one axed lineChart), dead spark() removed. v10: «на этой неделе» label
-// (dashboard week counter is calendar-week, backend fix).
-const CACHE = 'fit-proto-v10';
+// (dashboard week counter is calendar-week, backend fix). v11: single-entry
+// Home (Планы/Расписание only via Тренировка hub) + confirm PlanEdit delete.
+const CACHE = 'fit-proto-v11';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

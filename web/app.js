@@ -155,9 +155,8 @@ async function Home() {
       <div class="tile" onclick="go('measure')">📏<div class="small" style="margin-top:6px">Записать замер</div></div>
       <div class="tile" onclick="repeatLast(${d.last_workout?d.last_workout.id:0})">🔁<div class="small" style="margin-top:6px">Повторить прошлую</div></div>
       <div class="tile" onclick="go('train')">🏋️<div class="small" style="margin-top:6px">Тренировка</div></div>
-      <div class="tile" onclick="go('schedule')">🗓<div class="small" style="margin-top:6px">Расписание</div></div>
-    </div>
-    <div class="card list-item" style="margin-top:12px" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Планы</b><div class="small muted">запланировать тренировки</div></div><span class="muted">›</span></div>`;
+      <div class="tile" onclick="go('history')">📖<div class="small" style="margin-top:6px">История</div></div>
+    </div>`;
 }
 async function startFromPlan(pid) { const r = await api('/workouts', 'POST', { from_plan_id: pid }); go('active', r.id); }
 async function repeatLast(id) { if (!id) return toast('Нет прошлых тренировок'); const r = await api('/workouts', 'POST', { repeat_from: id }); go('active', r.id); }
@@ -1106,7 +1105,7 @@ async function PlanEdit(param) {
     <div class="mfield" style="margin-top:16px"><label>Заметка к дню (необязательно)</label>
       <input id="pl_notes" value="${esc(P.notes)}" placeholder="напр. разминка 5 мин"></div>
     <button class="btn success" style="margin-top:16px" onclick="savePlan()">${P.id ? 'Сохранить изменения' : 'Сохранить план'}</button>
-    ${P.id ? `<button class="btn danger" style="margin-top:8px" onclick="deletePlan(${P.id})">Удалить план</button>` : ''}`;
+    ${P.id ? `<button class="btn danger" style="margin-top:8px" onclick="askDeletePlan(${P.id}, () => go('plans'))">Удалить план</button>` : ''}`;
 }
 
 function planSync() {
