@@ -542,26 +542,37 @@ async function WorkoutDetail(id) {
 
 // ── Exercise progress (charts + PR) ─────────────────────────────────────────
 function shortDate(iso) { return iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) : ''; }
-// Line chart with axes: ~4 labelled Y ticks + horizontal gridlines and several
-// X date ticks (UX-4). pts = [{label, value}]. Gridlines use var(--line),
-// labels var(--txt2) (both defined light+dark).
+// Nice round axis ticks (step 1/2/2.5/5/10 × 10^n, round bounds) for chart Y
+// axes (UX2-5) — avoids ugly fractions like 102.23 / 103.87.
+function niceTicks(dmn, dmx, count = 4) {
+  if (!isFinite(dmn) || !isFinite(dmx) || dmn === dmx) { dmn = (dmn || 0) - 1; dmx = (dmx || 0) + 1; }
+  const rawStep = (dmx - dmn) / Math.max(1, count - 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  const lo = Math.floor(dmn / step) * step, hi = Math.ceil(dmx / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= hi + step * 0.5; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return { ticks, lo, hi };
+}
+// Line chart with axes: round Y ticks + horizontal gridlines and several X date
+// ticks. pts = [{label, value}]. Gridlines use var(--line), labels var(--txt2).
 function lineChart(pts, color = 'var(--info)') {
   if (!pts.length) return '<div class="muted small">нет данных</div>';
   const W = 300, H = 130, padL = 36, padR = 10, padT = 10, padB = 22;
   const vals = pts.map(p => p.value);
-  let mn = Math.min(...vals), mx = Math.max(...vals);
-  if (mn === mx) { mn -= 1; mx += 1; }
-  const rng = mx - mn, plotW = W - padL - padR, plotH = H - padT - padB;
+  const nt = niceTicks(Math.min(...vals), Math.max(...vals), 4);
+  const mn = nt.lo, mx = nt.hi, rng = (mx - mn) || 1, plotW = W - padL - padR, plotH = H - padT - padB;
   const x = i => padL + (pts.length <= 1 ? plotW / 2 : (i / (pts.length - 1)) * plotW);
   const y = v => padT + (1 - (v - mn) / rng) * plotH;
   const ax = 'font-size:9px;fill:var(--txt2)';
-  // Y ticks + horizontal gridlines (endpoints coincide with mn & mx).
-  const yN = 4; let grid = '', yLabels = '';
-  for (let t = 0; t < yN; t++) {
-    const val = mn + (rng * t) / (yN - 1), yy = y(val).toFixed(1);
+  // Round Y ticks + horizontal gridlines.
+  let grid = '', yLabels = '';
+  nt.ticks.forEach(val => {
+    const yy = y(val).toFixed(1);
     grid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
     yLabels += `<text x="${padL - 3}" y="${(+yy + 3).toFixed(1)}" text-anchor="end" style="${ax}">${fmt(val)}</text>`;
-  }
+  });
   // X date ticks: evenly-spaced indices, always incl. first & last, deduped.
   const xN = Math.min(pts.length, 4), idxs = [];
   for (let t = 0; t < xN; t++) {

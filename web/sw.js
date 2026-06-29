@@ -14,7 +14,8 @@
 // v12: clearer planning UI (create vs view, named AI buttons, Шаблоны as link).
 // v13: visible «Отчёты (PDF)» at top of История. v14: duplicate-day warning for
 // mass plan creation (AI week / paste / template) — Отменить/Заменить/Добавить.
-const CACHE = 'fit-proto-v14';
+// v15: nice round Y-axis ticks on all charts (no ugly fractions).
+const CACHE = 'fit-proto-v15';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
