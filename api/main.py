@@ -742,12 +742,14 @@ class StartWorkout(BaseModel):
 async def start_workout(body: StartWorkout, uid: str = Depends(current_uid)):
     today = await today_for(uid)
     if body.from_plan_id:
+        await _own_plan(uid, body.from_plan_id)   # 404 unless this plan belongs to uid (no cross-user read)
         plan = await db.get_planned_workout(body.from_plan_id)
         if not plan:
             raise HTTPException(404, "plan not found")
         wid = await db.create_workout(uid, today, plan.get("focus_label"), plan["id"])
         return {"id": wid}
     if body.repeat_from:
+        await _own_workout(uid, body.repeat_from)  # 404 unless this workout belongs to uid
         src = await db.get_workout(body.repeat_from)
         if not src:
             raise HTTPException(404, "workout not found")

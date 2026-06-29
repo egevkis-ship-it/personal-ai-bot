@@ -222,3 +222,21 @@ def test_history_search_filter(client):
     client.post(f"/api/workouts/{wid}/finish")
     assert len(client.get("/api/workouts?days=365&q=уникальная-тяга").json()) == 1
     assert len(client.get("/api/workouts?days=365&q=несуществующее-zzz").json()) == 0
+
+
+def test_start_workout_idor_404(client):
+    # user A creates a plan + a workout; user B must NOT be able to seed from them
+    client.cookies.clear()
+    for u in ("4101", "4102"):   # add+approve both via the DEV owner
+        assert client.post("/api/admin/users", json={"uid": u}).status_code == 200
+    client.cookies.clear(); _login(client, 4101)
+    pid = client.post("/api/plans", json={"date": "2099-03-03", "focus_label": "A-plan",
+                                          "exercises": [{"name": "Жим штанги лёжа", "target_sets": 3}]}).json()["id"]
+    awid = client.post("/api/workouts", json={"focus_label": "A-wo"}).json()["id"]
+    client.post(f"/api/workouts/{awid}/sets", json={"exercise_name": "Присед", "weight_kg": 90, "reps": 5})
+    client.cookies.clear(); _login(client, 4102)
+    assert client.post("/api/workouts", json={"from_plan_id": pid}).status_code == 404
+    assert client.post("/api/workouts", json={"repeat_from": awid}).status_code == 404
+    # own resources still work
+    bwid = client.post("/api/workouts", json={"focus_label": "B-wo"}).json()["id"]
+    assert client.post("/api/workouts", json={"repeat_from": bwid}).status_code == 200
