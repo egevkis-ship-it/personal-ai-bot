@@ -1017,6 +1017,39 @@ function mondayISO(iso) { return addDaysISO(iso, -isoWeekday(iso)); }
 function fmtFullDate(iso) { return fmtDate(iso, { weekday: 'long' }); }
 function fmtDM(iso) { return fmtDate(iso); }  // no weekday — Schedule week rows already show WD_SHORT icon
 function _byDate(list) { const m = {}; list.forEach(p => { (m[p.planned_date] = m[p.planned_date] || []).push(p); }); return m; }
+// A plan day counts as «rest» when its focus is «Отдых» or it has no exercises (UX3-5).
+function _isRestPlan(p) { return !(p.exercises || []).length || /отдых/i.test(p.focus_label || ''); }
+// Shared month calendar grid (UX3-4 manual create, UX3-5 schedule month).
+// `marks` = {iso:'plan'|'rest'} → dot; `sel` = highlighted ISO; `pick` = fn name
+// called pick('<iso>'); `nav` = fn name called nav(±1) for prev/next month.
+function monthCalendar(anchorISO, marks, sel, pick, nav) {
+  const a = new Date(anchorISO + 'T00:00:00');
+  const y = a.getFullYear(), mo = a.getMonth();
+  const firstISO = isoOf(new Date(y, mo, 1));
+  const lastDay = new Date(y, mo + 1, 0);
+  const gridStart = mondayISO(firstISO);
+  const weeks = Math.ceil((isoWeekday(firstISO) + lastDay.getDate()) / 7);
+  const today = todayISO();
+  let cells = '';
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = addDaysISO(gridStart, i);
+    const dt = new Date(d + 'T00:00:00');
+    const inMonth = dt.getMonth() === mo;
+    const isToday = d === today, isSel = sel && d === sel, mk = marks && marks[d];
+    const bg = isSel ? 'background:var(--info);color:#fff'
+      : (isToday ? 'background:var(--info-bg);color:var(--info);font-weight:700' : (inMonth ? '' : 'opacity:.32'));
+    const dotc = isSel ? '#fff' : (mk === 'rest' ? 'var(--txt3)' : 'var(--info)');
+    const dot = mk ? `<div style="width:5px;height:5px;border-radius:50%;background:${dotc};margin:3px auto 0"></div>` : '<div style="height:8px"></div>';
+    cells += `<div onclick="${pick}('${d}')" style="text-align:center;padding:7px 0;border-radius:9px;cursor:pointer;${bg}">
+      <div style="font-size:14px">${dt.getDate()}</div>${dot}</div>`;
+  }
+  const head = WD_SHORT.map(w => `<div style="text-align:center;font-size:11px;color:var(--txt2);padding-bottom:5px">${w}</div>`).join('');
+  const title = a.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const navRow = nav
+    ? `<div class="row sp" style="margin-bottom:10px"><span class="back" style="margin:0;font-size:21px" onclick="${nav}(-1)">‹</span><b style="text-transform:capitalize">${esc(title)}</b><span class="back" style="margin:0;font-size:21px" onclick="${nav}(1)">›</span></div>`
+    : `<b style="text-transform:capitalize;display:block;margin-bottom:10px">${esc(title)}</b>`;
+  return `<div class="card">${navRow}<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${head}${cells}</div></div>`;
+}
 
 async function Schedule() {
   document.getElementById('tabbar').style.display = '';
@@ -1134,9 +1167,16 @@ async function PlanEdit(param) {
     window._PLAN = { id: null, date: todayISO(), focus: '', notes: '', exercises: [] };
   }
   const P = window._PLAN;
-  const curWd = isoWeekday(P.date);
-  const chips = WD_SHORT.map((w, i) =>
-    `<span class="pill ${i === curWd ? 'on' : ''}" onclick="planQuickDay(${i})">${w}</span>`).join('');
+  // UX3-4: calendar date picker that marks days already holding a plan.
+  const calAnchor = P._cal || (P.date.slice(0, 7) + '-01');
+  const marks = {};
+  try {
+    const ca = new Date(calAnchor + 'T00:00:00');
+    const f = isoOf(new Date(ca.getFullYear(), ca.getMonth(), 1));
+    const l = isoOf(new Date(ca.getFullYear(), ca.getMonth() + 1, 0));
+    (await api(`/plans?from=${f}&to=${l}`)).forEach(p => { marks[p.planned_date] = _isRestPlan(p) ? 'rest' : 'plan'; });
+  } catch {}
+  const cal = monthCalendar(calAnchor, marks, P.date, 'planPickDate', 'planCalNav');
   const exItems = P.exercises.length ? P.exercises.map((ex, i) => `<div class="card list-item">
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div></div>
       <span class="muted" onclick="planEditEx(${i})" style="cursor:pointer">✏️</span> &nbsp;
@@ -1144,11 +1184,11 @@ async function PlanEdit(param) {
     : '<div class="card muted small">Упражнения не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span>
     <h2>${P.id ? 'Редактировать план' : 'Новый план'}</h2>
-    <div class="mfield" style="margin-top:8px"><label>Дата</label>
-      <input id="pl_date" type="date" value="${P.date}" onchange="planDateInput()"></div>
-    <div class="tag-row" style="justify-content:flex-start;margin:8px 0 4px">${chips}</div>
-    <div class="muted small" style="margin-top:4px">${fmtPlanDate(P.date)}</div>
-    <div class="mfield" style="margin-top:12px"><label>Фокус (что тренируем)</label>
+    <div class="muted small" style="margin:6px 0 6px">Дата · <b style="color:var(--txt);text-transform:capitalize">${esc(fmtDate(P.date, { weekday: 'long' }))}</b></div>
+    ${cal}
+    <div class="mfield"><label>Точная дата</label><input id="pl_date" type="date" value="${P.date}" onchange="planDateInput()"></div>
+    <div class="muted small" style="margin-top:8px">Точки на календаре — дни, где уже есть план (серым — отдых).</div>
+    <div class="mfield" style="margin-top:14px"><label>Фокус (что тренируем)</label>
       <input id="pl_focus" value="${esc(P.focus)}" placeholder="напр. Грудь / Трицепс"></div>
     <div class="muted small" style="margin:16px 0 6px">Упражнения</div>
     ${exItems}
@@ -1165,8 +1205,17 @@ function planSync() {
   const f = document.getElementById('pl_focus'); if (f) P.focus = f.value;
   const n = document.getElementById('pl_notes'); if (n) P.notes = n.value;
 }
-function planDateInput() { planSync(); PlanEdit('new'); }
+function planDateInput() { planSync(); window._PLAN._cal = (window._PLAN.date || todayISO()).slice(0, 7) + '-01'; PlanEdit('new'); }
 function planQuickDay(wd) { planSync(); window._PLAN.date = nextOccurrenceISO(wd); PlanEdit('new'); }
+// UX3-4: pick a day from the calendar / page months.
+function planPickDate(iso) { planSync(); window._PLAN.date = iso; window._PLAN._cal = iso.slice(0, 7) + '-01'; PlanEdit('new'); }
+function planCalNav(dir) {
+  planSync();
+  const a = window._PLAN._cal || (window._PLAN.date.slice(0, 7) + '-01');
+  const d = new Date(a + 'T00:00:00'); d.setMonth(d.getMonth() + dir);
+  window._PLAN._cal = isoOf(new Date(d.getFullYear(), d.getMonth(), 1));
+  PlanEdit('new');
+}
 function planRemoveEx(i) { planSync(); window._PLAN.exercises.splice(i, 1); PlanEdit('new'); }
 
 // exercise picker (plan context) — reuses /exercises/* endpoints

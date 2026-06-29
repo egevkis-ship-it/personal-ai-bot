@@ -16,8 +16,9 @@
 // mass plan creation (AI week / paste / template) — Отменить/Заменить/Добавить.
 // v15: nice round Y-axis ticks on all charts (no ugly fractions). v16: iOS
 // design pass — blur bars, segmented control, switches, inset lists, sticky title.
-// v17: swipe-left-to-delete on plan/history/measurement lists. v18: Plans is create-only.
-const CACHE = 'fit-proto-v18';
+// v17: swipe-left-to-delete on plan/history/measurement lists. v18: Plans is
+// create-only. v19: manual plan create gets a calendar picker (occupied days marked).
+const CACHE = 'fit-proto-v19';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
