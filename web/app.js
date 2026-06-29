@@ -144,11 +144,11 @@ async function Home() {
   const prCard = prs.length ? `<div class="card"><div class="muted small" style="margin-bottom:4px">🏆 Свежие рекорды</div>
     ${prs.map(p => `<div class="row sp" style="padding:3px 0"><span>${esc(p.name)}</span><span class="small muted">${fmt(p.weight_kg)} кг · ${shortDate(p.date)}</span></div>`).join('')}</div>` : '';
   const np = d.next_plan;
-  const nextCard = (np && !d.active_workout && !d.today_plan) ? `<div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Ближайший план</b><div class="small muted">${esc(np.planned_date)} · ${esc(np.focus_label || 'тренировка')}</div></div><span class="muted">›</span></div>` : '';
+  const nextCard = (np && !d.active_workout && !d.today_plan) ? `<div class="card list-item" onclick="go('schedule')"><div class="ic">🗓</div><div style="flex:1"><b>Ближайший план</b><div class="small muted">${esc(fmtDate(np.planned_date, { weekday: 'short' }))} · ${esc(np.focus_label || 'тренировка')}</div></div><span class="muted">›</span></div>` : '';
   const isNew = !d.last_workout && (d.week_workouts || 0) === 0 && !d.active_workout;
   const onboardCard = isNew ? `<div class="card" style="border:1px dashed var(--line)"><b>Добро пожаловать! 👋</b>
     <div class="small muted" style="margin-top:4px">Начни первую тренировку или запланируй неделю в «Планы». Записывай подходы — здесь появятся графики, рекорды и прогресс.</div></div>` : '';
-  view.innerHTML = `<div class="row sp"><h1 style="font-size:22px;text-transform:capitalize">${new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div>
+  view.innerHTML = `<div class="row sp"><h1 style="font-size:22px;text-transform:capitalize">${fmtDate(todayISO(), { weekday: 'long' })}</h1><span style="font-size:24px;cursor:pointer;line-height:1" onclick="go('settings')" title="Настройки">⚙️</span></div>
     <div class="muted small" style="margin-bottom:14px">${streak > 0 ? `🔥 серия ${streak} ${plural(streak, 'неделя', 'недели', 'недель')} · ` : ''}${d.week_workouts} ${plural(d.week_workouts, 'тренировка', 'тренировки', 'тренировок')} за неделю</div>
     ${banner}
     ${onboardCard}
@@ -187,7 +187,7 @@ async function ChooseDay() {
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Назад</span><h2>Тренировки недели</h2>
     ${wk.length ? wk.map(p => `<div class="card list-item" onclick="openPlan(${p.id},'chooseDay')">
       <div class="ic">${ic(p.status)}</div><div style="flex:1"><b>${esc(p.focus_label || '')}</b>
-      <div class="small muted">${p.planned_date}${p.is_today ? ' · сегодня' : ''}${p.status === 'skipped' ? ' · пропущено' : ''}</div></div><span class="muted">›</span></div>`).join('')
+      <div class="small muted">${esc(fmtDate(p.planned_date, { weekday: 'short' }))}${p.is_today ? ' · сегодня' : ''}${p.status === 'skipped' ? ' · пропущено' : ''}</div></div><span class="muted">›</span></div>`).join('')
       : '<div class="card muted">На этой неделе нет планов.</div>'}`;
 }
 
@@ -526,7 +526,7 @@ async function History() {
   view.innerHTML = `<h1>История</h1>
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
     ${list.length ? list.map(w => `<div class="card list-item" onclick="go('workout',${w.id})">
-      <div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${w.workout_date} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`).join('')
+      <div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`).join('')
       : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}
     <button class="btn ghost" style="margin-top:12px" onclick="go('reports')">📄 Отчёты (PDF)</button>`;
   const inp = document.getElementById('histQ');
@@ -541,7 +541,7 @@ async function WorkoutDetail(id) {
     <div style="flex:1"><b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>
     <span class="muted" style="cursor:pointer;padding:4px 6px" title="Прогресс упражнения" onclick="exDetailWD(${idx})">📈</span></div>`).join('');
   view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span>
-    <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${w.workout_date}</div>
+    <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${esc(fmtDate(w.workout_date, { weekday: 'long' }))}</div>
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
     <button class="btn ghost" onclick="go('active',${w.id})">✏️ Редактировать подходы</button>
@@ -766,7 +766,7 @@ async function MeasureHistory() {
   view.innerHTML = `<span class="back" onclick="go('measure')">‹ Замеры</span><h2>История</h2>
     <div class="tag-row" style="justify-content:flex-start">${MFIELDS.map(([k, l]) => `<span class="pill ${k === metric ? 'on' : ''}" onclick="setMetric('${k}')">${l.split(',')[0]}</span>`).join('')}</div>
     <div class="card" style="text-align:center">${pts.length ? lineChart(pts, 'var(--success)') : '<span class="muted small">Нет данных</span>'}</div>
-    ${rows.filter(r => r[metric] != null).map(r => `<div class="row sp" style="padding:9px 0;border-bottom:1px solid var(--line)"><span class="muted small">${r.taken_on}</span><span>${fmt(r[metric])}</span></div>`).join('')}`;
+    ${rows.filter(r => r[metric] != null).map(r => `<div class="row sp" style="padding:9px 0;border-bottom:1px solid var(--line)"><span class="muted small">${esc(fmtDate(r.taken_on, { weekday: 'short' }))}</span><span>${fmt(r[metric])}</span></div>`).join('')}`;
 }
 function setMetric(m) { STATE._metric = m; MeasureHistory(); }
 
@@ -780,10 +780,21 @@ function nextOccurrenceISO(wd) { // wd: 0=Mon..6=Sun → next date (today counts
   const ahead = (wd - cur + 7) % 7; t.setDate(t.getDate() + ahead);
   return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
-function fmtPlanDate(iso) {
+// One configurable date formatter (UX-3) used app-wide. Reads the user's chosen
+// date_format from window._SETTINGS (DMY default | YMD | MDY); optional weekday
+// prefix. Display-only — storage stays ISO. weekday: false | 'short' | 'long'.
+function fmtDate(iso, opts) {
+  opts = opts || {};
+  if (!iso || typeof iso !== 'string' || iso.length < 10) return iso || '';
+  const Y = iso.slice(0, 4), M = iso.slice(5, 7), D = iso.slice(8, 10);
+  const f = (window._SETTINGS && window._SETTINGS.date_format) || 'DMY';
+  const base = f === 'YMD' ? `${Y}-${M}-${D}` : f === 'MDY' ? `${M}/${D}/${Y}` : `${D}-${M}-${Y}`;
+  if (!opts.weekday) return base;
   const d = new Date(iso + 'T00:00:00');
-  return d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+  if (isNaN(d)) return base;
+  return d.toLocaleDateString('ru-RU', { weekday: opts.weekday === 'long' ? 'long' : 'short' }) + ', ' + base;
 }
+function fmtPlanDate(iso) { return fmtDate(iso, { weekday: 'short' }); }
 function repsLabel(ex) {
   if (ex.reps_text) return ex.reps_text;
   const a = ex.target_reps_min, b = ex.target_reps_max;
@@ -937,8 +948,8 @@ async function PlanView(pid) {
 function isoOf(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
 function addDaysISO(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return isoOf(d); }
 function mondayISO(iso) { return addDaysISO(iso, -isoWeekday(iso)); }
-function fmtFullDate(iso) { return new Date(iso + 'T00:00:00').toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }); }
-function fmtDM(iso) { return new Date(iso + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
+function fmtFullDate(iso) { return fmtDate(iso, { weekday: 'long' }); }
+function fmtDM(iso) { return fmtDate(iso); }  // no weekday — Schedule week rows already show WD_SHORT icon
 function _byDate(list) { const m = {}; list.forEach(p => { (m[p.planned_date] = m[p.planned_date] || []).push(p); }); return m; }
 
 async function Schedule() {
@@ -1458,6 +1469,13 @@ async function Settings() {
       <button class="btn sm" style="margin-top:10px" onclick="saveRecoveryMode()">Сохранить режим</button>
       <button class="btn ghost sm" style="margin-top:8px" onclick="clearCoachContext()">Очистить ответы опроса</button>
     </div>
+    <div class="muted small" style="margin:14px 0 6px">📅 Формат даты</div>
+    <div class="card">
+      <div class="tag-row" style="justify-content:flex-start">
+        ${[['DMY', 'ДД-ММ-ГГГГ'], ['YMD', 'ГГГГ-ММ-ДД'], ['MDY', 'ММ/ДД/ГГГГ']].map(([k, l]) => `<span class="pill ${(cfg.date_format || 'DMY') === k ? 'on' : ''}" onclick="saveDateFormat('${k}')">${l}</span>`).join('')}
+      </div>
+      <div class="muted small" style="margin-top:8px">Применяется везде, где показывается дата. На хранение не влияет.</div>
+    </div>
     <div class="muted small" style="margin:14px 0 6px">📦 Экспорт данных</div>
     <div class="card">
       <button class="btn ghost sm" onclick="window.open('/api/export?format=json','_blank')">Скачать всё (JSON)</button>
@@ -1507,6 +1525,14 @@ async function saveRecoveryMode() {
 async function clearCoachContext() {
   try { await api('/coach/context', 'DELETE'); toast('Ответы опроса очищены'); }
   catch (e) { toast(e.message || 'не удалось'); }
+}
+async function saveDateFormat(f) {
+  try {
+    await api('/settings', 'PATCH', { date_format: f });
+    window._SETTINGS = { ...(window._SETTINGS || {}), date_format: f };
+    toast('Формат даты сохранён');
+    if (STATE.tab === 'settings') Settings();
+  } catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── PWA install (Add to Home Screen) ────────────────────────────────────────
@@ -1660,6 +1686,9 @@ function closeSheet() { const b = document.getElementById('sheetbg'); if (b) b.r
 
 // boot — check session first
 (async function boot() {
-  try { await api('/auth/me'); renderTabs(); go('home'); flushQueue(); }
-  catch { Login(); }
+  try {
+    await api('/auth/me');
+    try { window._SETTINGS = await api('/settings'); } catch {}  // date_format + rest-timer for first paint
+    renderTabs(); go('home'); flushQueue();
+  } catch { Login(); }
 })();

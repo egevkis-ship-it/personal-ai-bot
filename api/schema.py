@@ -81,6 +81,10 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS rest_timer_seconds INTEGER NO
 -- Per-user recovery context (flagship coach). 'natural' (default) | 'enhanced'.
 -- NEVER hard-code per a specific user — it is the user's own declared setting.
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS recovery_mode TEXT NOT NULL DEFAULT 'natural';
+-- Display date format (phase UX-3) DMY default, or YMD or MDY. Display-only,
+-- storage stays ISO, per-user, never hard-coded. Keep comments free of the
+-- statement separator char since CREATE_SQL is split naively on it.
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS date_format TEXT NOT NULL DEFAULT 'DMY';
 
 -- Last coach-survey answers (sleep / energy / stress / injuries / notes), owner-scoped.
 CREATE TABLE IF NOT EXISTS coach_context (

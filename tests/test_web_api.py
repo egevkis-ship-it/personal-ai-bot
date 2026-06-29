@@ -204,6 +204,18 @@ def test_settings_goals_and_dashboard(client):
     assert client.get("/api/settings").json()["target_weight"] is None
 
 
+def test_settings_date_format(client):
+    # default
+    assert client.get("/api/settings").json()["date_format"] == "DMY"
+    # valid values persist
+    for v in ("YMD", "MDY", "DMY"):
+        assert client.patch("/api/settings", json={"date_format": v}).status_code == 200
+        assert client.get("/api/settings").json()["date_format"] == v
+    # invalid falls back to DMY (never stored verbatim)
+    client.patch("/api/settings", json={"date_format": "ZZZ"})
+    assert client.get("/api/settings").json()["date_format"] == "DMY"
+
+
 def test_export_json_and_csv(client):
     wid = client.post("/api/workouts", json={}).json()["id"]
     client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Присед", "weight_kg": 100, "reps": 5})

@@ -771,20 +771,22 @@ class SettingsPatch(BaseModel):
     rest_timer_enabled: Optional[bool] = None
     rest_timer_seconds: Optional[int] = None
     recovery_mode: Optional[str] = None
+    date_format: Optional[str] = None
     clear_target: bool = False
 
 
 @app.get("/api/settings")
 async def get_settings(uid: str = Depends(current_uid)):
     rows = await _rows(
-        "SELECT tz_name, target_weight, weekly_goal, unit, rest_timer_enabled, rest_timer_seconds, recovery_mode "
+        "SELECT tz_name, target_weight, weekly_goal, unit, rest_timer_enabled, rest_timer_seconds, recovery_mode, date_format "
         "FROM user_settings WHERE user_id=:u", u=uid)
     r = rows[0] if rows else {}
     return {"tz_name": r.get("tz_name") or "UTC", "target_weight": _to_f(r.get("target_weight")),
             "weekly_goal": r.get("weekly_goal"), "unit": r.get("unit") or "kg",
             "rest_timer_enabled": r.get("rest_timer_enabled") if r.get("rest_timer_enabled") is not None else True,
             "rest_timer_seconds": r.get("rest_timer_seconds") if r.get("rest_timer_seconds") is not None else 90,
-            "recovery_mode": r.get("recovery_mode") or "natural"}
+            "recovery_mode": r.get("recovery_mode") or "natural",
+            "date_format": r.get("date_format") or "DMY"}
 
 
 @app.patch("/api/settings")
@@ -805,6 +807,8 @@ async def patch_settings(body: SettingsPatch, uid: str = Depends(current_uid)):
         sets.append("rest_timer_seconds = :rts"); params["rts"] = _opt_int(body.rest_timer_seconds, "rest_timer_seconds", 5, 600)
     if body.recovery_mode is not None:
         sets.append("recovery_mode = :rm"); params["rm"] = body.recovery_mode if body.recovery_mode in ("natural", "enhanced") else "natural"
+    if body.date_format is not None:
+        sets.append("date_format = :df"); params["df"] = body.date_format if body.date_format in ("DMY", "YMD", "MDY") else "DMY"
     if not sets:
         return {"ok": True}
     async with get_session() as s:

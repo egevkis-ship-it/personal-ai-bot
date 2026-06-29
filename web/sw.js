@@ -6,8 +6,9 @@
 // Telegram Login Widget loads for installed-PWA clients. v5: flagship AI coach
 // («Собери следующую неделю») — new coach UI in app.js. v6: UX brief — 4-tab nav
 // (no «Ещё»), Photos→Замеры, Reports→История. v7: plan delete + multi-plan
-// day + Replace/Add-second dialog.
-const CACHE = 'fit-proto-v7';
+// day + Replace/Add-second dialog. v8: weekday everywhere + configurable
+// date format (one fmtDate helper).
+const CACHE = 'fit-proto-v8';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
