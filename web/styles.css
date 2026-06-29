@@ -109,9 +109,12 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .toast{position:fixed;bottom:calc(100px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
   background:var(--txt);color:var(--bg);padding:11px 18px;border-radius:20px;font-size:14px;z-index:80;opacity:.97;
   box-shadow:0 6px 20px rgba(0,0,0,.25)}
-/* swipe-to-delete row (UX3-2) */
-.swipe{position:relative;overflow:hidden}
-.swipe-del{position:absolute;top:0;right:0;height:100%;width:84px;background:var(--danger);color:#fff;
+/* swipe-to-delete row (UX3-2) — native CSS scroll-snap: swipe left reveals
+   «Удалить»; a visible 🗑 inside the body stays as the desktop fallback. */
+.swipe{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
+  scrollbar-width:none;border-radius:var(--r);margin-bottom:12px;box-shadow:var(--shadow)}
+.swipe::-webkit-scrollbar{display:none}
+.swipe-body{min-width:100%;scroll-snap-align:start;flex:none;background:var(--card);padding:13px 14px;cursor:pointer}
+.swipe-del{min-width:82px;flex:none;scroll-snap-align:end;background:var(--danger);color:#fff;
   display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer}
-.swipe-body{position:relative;background:var(--card);transition:transform .25s cubic-bezier(.32,.72,0,1);will-change:transform}
-.swipe.dragging .swipe-body{transition:none}
+.swipe-body .trash{color:var(--danger);cursor:pointer;font-size:16px;padding:0 2px}

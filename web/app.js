@@ -14,6 +14,13 @@ async function api(path, method = 'GET', body) {
 const fmt = n => (n == null ? '' : (Math.round(n * 100) / 100).toString());
 const esc = s => (s || '').replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 1800); }
+// UX3-2: swipe-left-to-delete wrapper (CSS scroll-snap). `inner` = row content;
+// `delExpr` = delete onclick (same as the desktop 🗑 kept inside `inner`);
+// `openExpr` (optional) = the body's tap action. Use only single-quote exprs.
+function swipeRow(inner, delExpr, openExpr) {
+  const o = openExpr ? ` onclick="${openExpr}"` : '';
+  return `<div class="swipe"><div class="swipe-body"${o}>${inner}</div><div class="swipe-del" onclick="${delExpr}">Удалить</div></div>`;
+}
 function mmss(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
 function plural(n, one, few, many) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many; }
 let STATE = { tab: 'home' };
@@ -535,8 +542,10 @@ async function History() {
   const list = await api('/workouts?days=365' + (q ? '&q=' + encodeURIComponent(q) : ''));
   view.innerHTML = `<div class="row sp"><h1>История</h1><span class="back" style="margin:0" onclick="go('reports')">📄 Отчёты (PDF) ›</span></div>
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
-    ${list.length ? list.map(w => `<div class="card list-item" onclick="go('workout',${w.id})">
-      <div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`).join('')
+    ${list.length ? list.map(w => swipeRow(
+      `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div>
+        <span style="display:flex;gap:12px;align-items:center"><span class="trash" onclick="event.stopPropagation();askDelWorkout(${w.id})">🗑</span><span class="muted">›</span></span></div>`,
+      `askDelWorkout(${w.id})`, `go('workout',${w.id})`)).join('')
       : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}`;
   const inp = document.getElementById('histQ');
   if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
@@ -808,7 +817,10 @@ async function MeasureHistory() {
   view.innerHTML = `<span class="back" onclick="go('measure')">‹ Замеры</span><h2>История</h2>
     <div class="tag-row" style="justify-content:flex-start">${MFIELDS.map(([k, l]) => `<span class="pill ${k === metric ? 'on' : ''}" onclick="setMetric('${k}')">${l.split(',')[0]}</span>`).join('')}</div>
     <div class="card" style="text-align:center">${pts.length ? lineChart(pts, 'var(--success)') : '<span class="muted small">Нет данных</span>'}</div>
-    ${rows.filter(r => r[metric] != null).map(r => `<div class="row sp" style="padding:9px 0;border-bottom:1px solid var(--line)"><span class="muted small">${esc(fmtDate(r.taken_on, { weekday: 'short' }))}</span><span>${fmt(r[metric])}</span></div>`).join('')}`;
+    ${rows.filter(r => r[metric] != null).map(r => swipeRow(
+      `<div class="row sp"><span class="muted small">${esc(fmtDate(r.taken_on, { weekday: 'short' }))}</span>
+        <span style="display:flex;gap:14px;align-items:center"><span>${fmt(r[metric])}</span><span class="trash" onclick="event.stopPropagation();askDelMeasure(${r.id})">🗑</span></span></div>`,
+      `askDelMeasure(${r.id})`)).join('')}`;
 }
 function setMetric(m) { STATE._metric = m; MeasureHistory(); }
 
@@ -1055,13 +1067,13 @@ async function schedDay() {
     html += `<div class="card muted">На этот день ничего не запланировано</div>
       <button class="btn ghost" onclick="newPlan('${iso}')">➕ Запланировать</button>`;
   } else {
-    html += list.map(p => `<div class="card" style="cursor:pointer" onclick="openPlan(${p.id},'schedule')">
-      <div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b>
+    html += list.map(p => swipeRow(
+      `<div class="row sp"><b>${esc(p.focus_label || 'Тренировка')}</b>
         <span style="display:flex;gap:12px;align-items:center">
-          <span style="color:var(--danger);cursor:pointer;font-size:16px" onclick="event.stopPropagation();askDeletePlan(${p.id}, schedDay)">🗑</span>
+          <span class="trash" onclick="event.stopPropagation();askDeletePlan(${p.id}, schedDay)">🗑</span>
           <span class="muted">›</span></span></div>
-      ${(p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>'}
-    </div>`).join('');
+      ${(p.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">без упражнений</div>'}`,
+      `askDeletePlan(${p.id}, schedDay)`, `openPlan(${p.id},'schedule')`)).join('');
   }
   document.getElementById('schedBody').innerHTML = html;
 }
@@ -1279,6 +1291,17 @@ async function deletePlan(id, after) {
 // Confirm wrapper shared by PlanView, PlanEdit and the day-list quick delete.
 function askDeletePlan(id, after) {
   confirmSheet('Удалить план?', 'План будет убран из расписания.', 'Да, удалить', true, () => deletePlan(id, after));
+}
+// Swipe/🗑 delete for History and MeasureHistory (UX3-2), with confirmation.
+function askDelWorkout(id) {
+  confirmSheet('Удалить тренировку?', 'Тренировка и её подходы будут удалены.', 'Да, удалить', true, async () => {
+    try { await api('/workouts/' + id, 'DELETE'); toast('Удалено'); History(); } catch (e) { toast(e.message || 'не удалось'); }
+  });
+}
+function askDelMeasure(id) {
+  confirmSheet('Удалить замер?', 'Запись замера за эту дату будет удалена.', 'Да, удалить', true, async () => {
+    try { await api('/measurements/' + id, 'DELETE'); toast('Удалено'); MeasureHistory(); } catch (e) { toast(e.message || 'не удалось'); }
+  });
 }
 
 // AI free-text → preview → bulk save
