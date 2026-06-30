@@ -137,6 +137,10 @@ async function Home() {
       <div class="b-title" style="color:var(--warn)">${esc(d.active_workout.focus_label || 'Тренировка')}</div>
       <button class="btn" style="margin-top:9px;background:var(--warn)" onclick="go('active',${d.active_workout.id})">Продолжить</button>
       <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelActiveFromHome(${d.active_workout.id})">✖ Отменить</button></div>`;
+  } else if (d.today_plan && d.today_done) {   // W2-6: already trained today → don't offer to start it again
+    banner = `<div class="banner ok"><div class="small" style="color:var(--success)">✅ Сегодня по плану — выполнено</div>
+      <div class="b-title" style="color:var(--success)">${esc(d.today_plan.focus_label || '')} · ${(d.today_plan.exercises || []).length} упр.</div>
+      <div class="small muted" style="margin-top:6px">Тренировка за сегодня записана. <span style="color:var(--info);cursor:pointer" onclick="go('history')">История ›</span></div></div>`;
   } else if (d.today_plan) {
     banner = `<div class="banner info"><div class="small" style="color:var(--info)">📅 Сегодня по плану</div>
       <div class="b-title" style="color:var(--info)">${esc(d.today_plan.focus_label || '')} · ${(d.today_plan.exercises || []).length} упр.</div>

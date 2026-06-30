@@ -224,6 +224,17 @@ def test_archive_bulk_save_atomic(client):
     assert len(client.get("/api/workouts?days=4000").json()) == before  # nothing inserted
 
 
+def test_dashboard_today_done_flag(client):
+    """W2-6: the dashboard reports today_done=true once a workout is finished today,
+    so the UI stops offering to «start» the day's plan."""
+    client.cookies.clear()
+    assert client.get("/api/dashboard").json()["today_done"] is False
+    wid = client.post("/api/workouts", json={"focus_label": "Сегодня"}).json()["id"]
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Присед", "weight_kg": 100, "reps": 5})
+    client.post(f"/api/workouts/{wid}/finish")
+    assert client.get("/api/dashboard").json()["today_done"] is True
+
+
 def test_exercises_suggest_and_alias(client):
     """DB-7: suggest returns exact for known names + similar for unknown; a
     registered alias resolves afterward (so the dialog won't reappear)."""

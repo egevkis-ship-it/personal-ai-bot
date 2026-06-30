@@ -806,7 +806,7 @@ async def dashboard(uid: str = Depends(current_uid)):
     # in one parallel round-trip instead of ~11 serial awaits (each its own session;
     # the pool covers the concurrency).
     (plans, active, last_m, week_count, last_workout, week_tonnage,
-     wt_rows, pr_rows, upcoming, srow, streak) = await asyncio.gather(
+     wt_rows, pr_rows, upcoming, srow, streak, today_done) = await asyncio.gather(
         db.get_planned_workouts_range(uid, today, today),
         db.get_active_workout(uid),
         db.get_last_measurement(uid),
@@ -834,6 +834,9 @@ async def dashboard(uid: str = Depends(current_uid)):
         db.get_planned_workouts_range(uid, today + timedelta(days=1), today + timedelta(days=21)),
         _rows("SELECT target_weight, weekly_goal, unit FROM user_settings WHERE user_id=:u", u=uid),
         _week_streak(uid, today),
+        # W2-6: a finished workout today → the day is done; don't offer to "start" the plan
+        _scalar("SELECT EXISTS(SELECT 1 FROM workouts WHERE user_id=:u AND finished_at IS NOT NULL AND workout_date=:d)",
+                u=uid, d=today),
     )
     weight_trend = [{"date": r["taken_on"].isoformat(), "weight_kg": _to_f(r["weight_kg"])}
                     for r in reversed(wt_rows)]
@@ -841,7 +844,7 @@ async def dashboard(uid: str = Depends(current_uid)):
                   for r in pr_rows]
     next_plan = upcoming[0] if upcoming else None
     sg = srow[0] if srow else {}
-    return {"today_plan": plans[0] if plans else None, "active_workout": active,
+    return {"today_plan": plans[0] if plans else None, "today_done": bool(today_done), "active_workout": active,
             "last_measurement": last_m, "week_workouts": week_count or 0,
             "last_workout": last_workout, "week_tonnage": round(_to_f(week_tonnage) or 0, 1),
             "streak": streak, "weight_trend": weight_trend,
