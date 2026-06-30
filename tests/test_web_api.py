@@ -224,6 +224,29 @@ def test_archive_bulk_save_atomic(client):
     assert len(client.get("/api/workouts?days=4000").json()) == before  # nothing inserted
 
 
+def test_parse_logged_workouts_robust_to_malformed(monkeypatch):
+    """HIST-2 hardening: malformed AI shapes (non-list workouts/exercises/sets,
+    non-dict items, non-JSON) are skipped — never crash; is_failure is captured."""
+    import asyncio
+    from types import SimpleNamespace
+    import app.bot.services.ai_parser as ap
+
+    def run(raw):
+        class Msgs:
+            async def create(self, **kw):
+                return SimpleNamespace(content=[SimpleNamespace(text=raw)])
+        monkeypatch.setattr(ap._anthropic, "messages", Msgs())
+        return asyncio.run(ap.parse_logged_workouts_text("x"))
+
+    assert run('{"workouts": "nope"}') == []
+    assert run('{"workouts": [null, 5, {"exercises": "x"}]}') == []
+    assert run('{"workouts": [{"date":"2025-01-01","exercises":[{"name":"Ж","sets":5}]}]}') == []
+    assert run('{"workouts": [{"exercises":[{"name":"Ж","sets":{"weight_kg":80}}]}]}') == []
+    assert run('not json at all') == []
+    good = run('{"workouts":[{"date":"2025-01-01","focus_label":"Грудь","exercises":[{"name":"Жим","sets":[{"weight_kg":80,"reps":8,"is_failure":true}]}]}]}')
+    assert len(good) == 1 and good[0]["exercises"][0]["sets"][0]["is_failure"] is True
+
+
 def test_patch_workout_date_and_focus(client):
     """HIST-3: edit a workout's date/focus; future date rejected; owner-scoped."""
     client.cookies.clear()

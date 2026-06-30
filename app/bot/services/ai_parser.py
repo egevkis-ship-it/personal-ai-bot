@@ -238,8 +238,8 @@ _LOG_SYSTEM = """\
         {
           "name": "Жим штанги лёжа",
           "sets": [
-            {"weight_kg": 80.0, "reps": 10, "reps_text": null, "duration_seconds": null, "is_warmup": false},
-            {"weight_kg": 82.5, "reps": 8, "reps_text": null, "duration_seconds": null, "is_warmup": false}
+            {"weight_kg": 80.0, "reps": 10, "reps_text": null, "duration_seconds": null, "is_warmup": false, "is_failure": false},
+            {"weight_kg": 82.5, "reps": 8, "reps_text": null, "duration_seconds": null, "is_warmup": false, "is_failure": false}
           ]
         }
       ]
@@ -256,7 +256,7 @@ ISO "YYYY-MM-DD" в поле "date". Ты НЕ знаешь сегодняшню
 - ПОДХОДЫ — фактические: "80×10" → {"weight_kg":80,"reps":10}; "80 на 10", "80 10" → то же; \
 "80×10, 82×8, 80×8" → три подхода; "3×10×80" или "3 по 10 на 80" → три одинаковых подхода 80×10; \
 "планка 60 сек" → {"duration_seconds":60}; без веса ("подтягивания 12,10,8") → weight_kg:null, reps по числам.
-- "разминка"/"разм" у подхода → is_warmup:true. "до отказа"/"в отказ"/"AMRAP" → reps_text:"до отказа".
+- "разминка"/"разм" у подхода → is_warmup:true. "до отказа"/"в отказ"/"AMRAP" → is_failure:true И reps_text:"до отказа".
 - Имя упражнения — как в тексте (нормализуют позже). Незнакомые числа без упражнения игнорируй.
 - focus_label — если в блоке указан фокус/группа ("Грудь", "Ноги"), иначе null.
 - Если в тексте только подходы без явных тренировок — верни один workout с date:null.
@@ -287,13 +287,18 @@ async def parse_logged_workouts_text(text: str) -> list[dict[str, Any]]:
         log.warning("parse_logged_workouts_text: JSON broken (%s). Raw len=%d", je.msg, len(raw))
         return []
     out: list[dict[str, Any]] = []
-    for w in data.get("workouts", []):
+    workouts = data.get("workouts")
+    for w in workouts if isinstance(workouts, list) else []:
+        if not isinstance(w, dict):
+            continue
         exercises = []
-        for e in w.get("exercises", []):
-            if not e.get("name"):
+        ex_list = w.get("exercises")
+        for e in ex_list if isinstance(ex_list, list) else []:
+            if not isinstance(e, dict) or not e.get("name"):
                 continue
             sets = []
-            for st in e.get("sets", []) or []:
+            sets_raw = e.get("sets")
+            for st in sets_raw if isinstance(sets_raw, list) else []:
                 if not isinstance(st, dict):
                     continue
                 if st.get("weight_kg") is None and st.get("reps") is None \
@@ -302,7 +307,7 @@ async def parse_logged_workouts_text(text: str) -> list[dict[str, Any]]:
                 sets.append({
                     "weight_kg": st.get("weight_kg"), "reps": st.get("reps"),
                     "reps_text": st.get("reps_text"), "duration_seconds": st.get("duration_seconds"),
-                    "is_warmup": bool(st.get("is_warmup")),
+                    "is_warmup": bool(st.get("is_warmup")), "is_failure": bool(st.get("is_failure")),
                 })
             if sets:
                 exercises.append({"name": e["name"], "sets": sets})
