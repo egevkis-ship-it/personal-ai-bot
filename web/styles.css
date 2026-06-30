@@ -42,7 +42,7 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .list-item:last-child{border-bottom:none}
 .list-item:active{background:var(--sec)}
 .card>.list-item:first-child{margin-top:-2px}
-.ic{width:26px;text-align:center;font-size:21px;flex:none}
+.ic{width:30px;text-align:center;font-size:25px;flex:none}  /* W2-4: bigger menu icons, consistent with the enlarged exercise rows */
 /* WK-3: exercise/workout rows ~35% larger as a unit — only where .ex-row is set
    (active workout, plan view, day lists); hub menus & settings keep default size */
 .ex-row .ic{width:34px;font-size:28px}
