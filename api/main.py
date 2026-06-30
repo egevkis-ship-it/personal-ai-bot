@@ -98,6 +98,11 @@ _KEY_TO_RU = {_k: _it["canonical_ru"] for _k, _it in CATALOG.items()}
 def key_to_name(key): return None if not key else _KEY_TO_RU.get(key, key)
 def name_to_key(name): return None if not name else _NAME_TO_KEY.get(name.strip().lower())
 def _to_f(v): return float(v) if v is not None else None
+def _canon_static(name: str) -> str:
+    """Deterministic catalog snap (no AI): any known name/alias → canonical_ru,
+    else the input unchanged. The single name-canonicalization rule (DB-5)."""
+    k = name_to_key(name)
+    return key_to_name(k) if k else (name or "")
 
 
 def exercise_type(name: str, key: str | None = None) -> str:
@@ -1542,12 +1547,20 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
 
 
 async def _canonical_name(raw: str, uid: str) -> str:
-    """AI-normalize a free-text exercise name to its canonical form (self-learning
-    alias cache), under the per-user AI cap. Over the cap we skip AI and keep the
-    original name; any failure also falls back — never blocks the save."""
+    """Canonicalize a free-text exercise name. FIRST snap against the unified
+    catalog (catalog_v2 NAME_INDEX) deterministically — any known name/alias becomes
+    its canonical_ru with NO AI, so plan-save and set-logging agree and no duplicate
+    exercises are spawned (DB-5). Only genuinely unknown names fall back to the
+    self-learning AI normalizer, whose result is itself re-snapped to the catalog so
+    a near-alias collapses to the canon rather than a near-duplicate. Over the AI cap
+    or on any failure we keep the original name — never blocks the save."""
     raw = (raw or "").strip()
     if not raw:
         return raw
+    # 1) deterministic catalog hit — instant canon, no AI
+    key = name_to_key(raw)
+    if key:
+        return key_to_name(key)
     try:
         if await _ai_over_limit(uid):  # don't start new AI work past the daily cap
             return raw
@@ -1559,8 +1572,13 @@ async def _canonical_name(raw: str, uid: str) -> str:
             except HTTPException:
                 pass
         canon = ((res or {}).get("canonical") or "").strip()
-        if canon and canon.lower() != raw.lower():
-            return canon
+        if canon:
+            # 2) re-snap the AI result onto the catalog (alias → canon, not near-dupe)
+            k2 = name_to_key(canon)
+            if k2:
+                return key_to_name(k2)
+            if canon.lower() != raw.lower():
+                return canon
     except Exception:
         pass
     return raw
@@ -1757,7 +1775,7 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
             "focus_label": day.focus_label,
             "notes": day.notes,
             "exercises": [{
-                "name": ex.name, "target_sets": ex.target_sets,
+                "name": _canon_static(ex.name), "target_sets": ex.target_sets,
                 "target_reps_min": ex.target_reps_min, "target_reps_max": ex.target_reps_max,
                 "target_weight": ex.target_weight, "reps_text": ex.reps_text,
                 "notes": ex.notes, "superset_group": ex.superset_group,

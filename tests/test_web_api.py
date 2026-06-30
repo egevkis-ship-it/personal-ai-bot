@@ -173,6 +173,31 @@ def test_set_batch_structured_rows(client):
     assert bad.status_code == 422
 
 
+def test_canonical_name_snaps_every_catalog_entry():
+    """DB-5: the deterministic name canonicalizer snaps every catalog canonical and
+    every alias to a known key with NO AI — so plan-save and set-logging agree and
+    no duplicate exercises are spawned. Invariant holds for any catalog size."""
+    from api.main import _canon_static, name_to_key, key_to_name
+    from app.bot.services.catalog_v2 import CATALOG
+    canon_fail, alias_fail = [], []
+    for it in CATALOG.values():
+        cr = it["canonical_ru"]
+        if _canon_static(cr) != cr:               # canon must round-trip to itself
+            canon_fail.append((cr, _canon_static(cr)))
+        for a in it.get("aliases", []):
+            if name_to_key(a) is None:            # every alias must resolve
+                alias_fail.append((cr, a))
+    assert not canon_fail, f"{len(canon_fail)} canon names don't snap to themselves: {canon_fail[:5]}"
+    assert not alias_fail, f"{len(alias_fail)} aliases don't resolve: {alias_fail[:5]}"
+    # case-insensitive resolution: any catalog canonical uppercased still snaps back
+    first_canon = next(iter(CATALOG.values()))["canonical_ru"]
+    assert _canon_static(first_canon.upper()) == first_canon
+    # legacy alias collapses to the canonical name (present once the 186-catalog ships)
+    k = name_to_key("икры стоя")
+    if k:  # tolerate the 109-catalog where this legacy alias may be absent
+        assert _canon_static("икры стоя") == key_to_name(k) != "икры стоя"
+
+
 # ── admin / registration flow ───────────────────────────────────────────────
 
 def test_admin_flow_owner_and_last_admin_guards(client):
