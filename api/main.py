@@ -1156,7 +1156,9 @@ async def parse_logged_workouts(body: ParseTextIn, uid: str = Depends(current_ui
         raise HTTPException(422, "не удалось разобрать — проверь формат")
     for w in workouts:
         for e in w.get("exercises", []):
-            e["name"] = _canon_static(e.get("name", ""))
+            canon = await _resolve_name(e.get("name", ""))   # DB-7: exact only; flag unresolved
+            e["resolved"] = canon is not None
+            e["name"] = canon or e.get("name", "")
     return {"workouts": workouts}
 
 
@@ -1592,6 +1594,54 @@ async def exercises_search(q: str, limit: int = 8, uid: str = Depends(current_ui
     return _catalog_search(q, max(1, min(limit, 50)))
 
 
+@app.get("/api/exercises/suggest")
+async def exercises_suggest(q: str, ai: int = 0, uid: str = Depends(current_uid)):
+    """DB-7: for the name-matching dialog. `exact` = the canonical if the name is
+    already known (catalog or a confirmed alias) — then no dialog is needed.
+    `similar` = up to 6 closest catalog exercises (no AI). `ai` = an OPTIONAL AI
+    suggestion (only when ?ai=1, under the daily cap) — never written, the user
+    confirms it explicitly."""
+    q = (q or "").strip()
+    exact = await _resolve_name(q)
+    out = {"query": q, "exact": exact, "similar": _catalog_search(q, 6), "ai": None}
+    if ai and not exact and q:
+        try:
+            await check_and_bump_ai(uid)
+            from app.bot.services.exercise_catalog import ai_suggest_canonical
+            s = await ai_suggest_canonical(q)
+            cand = ((s or {}).get("canonical") or "").strip()
+            if cand:
+                k = name_to_key(cand)
+                out["ai"] = {"name": key_to_name(k) if k else cand, "in_catalog": bool(k)}
+        except Exception:
+            pass
+    return out
+
+
+class AliasIn(BaseModel):
+    alias: str
+    canonical: str
+
+
+@app.post("/api/exercises/alias")
+async def add_exercise_alias(body: AliasIn, uid: str = Depends(current_uid)):
+    """DB-7: remember a user-confirmed mapping (alias → canonical) so the same name
+    resolves without the dialog next time. The canonical is snapped to the catalog."""
+    alias = (body.alias or "").strip()
+    canon = (body.canonical or "").strip()
+    if not alias or not canon:
+        raise HTTPException(422, "нужны alias и canonical")
+    key = name_to_key(canon)
+    canon_name = key_to_name(key) if key else canon
+    mg = (CATALOG.get(key or "") or {}).get("muscle_group")
+    try:
+        from app.bot.services.exercise_catalog import register_alias
+        await register_alias(alias, canon_name, mg, source="user")
+    except Exception as e:
+        raise HTTPException(500, f"не удалось сохранить: {str(e)[:120]}")
+    return {"ok": True, "canonical": canon_name}
+
+
 @app.get("/api/exercises/{key}/history")
 async def exercise_history(key: str, limit: int = 10, uid: str = Depends(current_uid)):
     limit = max(1, min(limit, 500))
@@ -1999,18 +2049,23 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
                 assigned = date.fromisoformat((day.day_label or "").strip())
             except ValueError:
                 assigned = today + timedelta(days=i)
+        exs_out = []
+        for ex in day.exercises:
+            canon = await _resolve_name(ex.name)   # DB-7: exact only; flag unresolved for the dialog
+            exs_out.append({
+                "name": canon or ex.name, "resolved": canon is not None,
+                "target_sets": ex.target_sets,
+                "target_reps_min": ex.target_reps_min, "target_reps_max": ex.target_reps_max,
+                "target_weight": ex.target_weight, "reps_text": ex.reps_text,
+                "notes": ex.notes, "superset_group": ex.superset_group,
+            })
         out.append({
             "date": assigned.isoformat(),
             "weekday": assigned.weekday(),
             "day_label": day.day_label,
             "focus_label": day.focus_label,
             "notes": day.notes,
-            "exercises": [{
-                "name": _canon_static(ex.name), "target_sets": ex.target_sets,
-                "target_reps_min": ex.target_reps_min, "target_reps_max": ex.target_reps_max,
-                "target_weight": ex.target_weight, "reps_text": ex.reps_text,
-                "notes": ex.notes, "superset_group": ex.superset_group,
-            } for ex in day.exercises],
+            "exercises": exs_out,
         })
     return {"days": out}
 

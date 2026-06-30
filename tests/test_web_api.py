@@ -224,6 +224,20 @@ def test_archive_bulk_save_atomic(client):
     assert len(client.get("/api/workouts?days=4000").json()) == before  # nothing inserted
 
 
+def test_exercises_suggest_and_alias(client):
+    """DB-7: suggest returns exact for known names + similar for unknown; a
+    registered alias resolves afterward (so the dialog won't reappear)."""
+    client.cookies.clear()
+    r = client.get("/api/exercises/suggest", params={"q": "икры стоя"}).json()
+    assert r["exact"] == "Подъём на носки стоя"          # known alias → no dialog
+    r = client.get("/api/exercises/suggest", params={"q": "жим под углом бла-бла"}).json()
+    assert r["exact"] is None and len(r["similar"]) >= 1  # unknown → candidates for the dialog
+    a = client.post("/api/exercises/alias", json={"alias": "мой_тест_жим_x", "canonical": "Жим штанги лёжа"})
+    assert a.status_code == 200 and a.json()["canonical"] == "Жим штанги лёжа"
+    assert client.get("/api/exercises/suggest", params={"q": "мой_тест_жим_x"}).json()["exact"] == "Жим штанги лёжа"
+    assert client.post("/api/exercises/alias", json={"alias": "", "canonical": "X"}).status_code == 422
+
+
 def test_canonical_name_no_auto_rename(monkeypatch):
     """DB-5 (corrected): an unknown name is NOT auto-renamed (no AI / no fuzzy) —
     it's kept exactly as typed for the DB-7 dialog; exact catalog names/aliases

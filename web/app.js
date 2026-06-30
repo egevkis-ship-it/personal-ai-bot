@@ -792,7 +792,7 @@ function renderArchPreview() {
   const ws = window._archParsed || [];
   const cards = ws.map((w, i) => {
     const exHtml = w.exercises.map((e, j) => `<div class="row sp" style="padding:5px 0;border-bottom:1px solid var(--line)">
-      <div style="flex:1"><b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>
+      <div style="flex:1"><b>${esc(e.name)}</b>${e.resolved === false ? ' <span style="color:var(--warn);font-size:12px">не из каталога</span>' : ''}<div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>
       <span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="archPrevRmEx(${i},${j})">✕</span></div>`).join('');
     const warn = w.date ? '' : ' <span style="color:var(--warn)">— укажи дату</span>';
     return `<div class="card" style="margin-bottom:10px">
@@ -827,18 +827,79 @@ async function archBulkSave() {
   const ws = window._archParsed || [];
   if (!ws.length) return toast('Нет тренировок');
   if (ws.some(w => !w.date)) return toast('Укажи дату у всех тренировок');
-  try {
-    const r = await api('/workouts/archive-bulk', 'POST', {
-      workouts: ws.map(w => ({
-        workout_date: w.date, focus_label: w.focus_label, notes: w.notes,
-        exercises: w.exercises.map(e => ({ name: e.name, sets: e.sets })),
-      })),
-    });
-    window._archParsed = null;
-    closeSheet();
-    toast(`Добавлено тренировок: ${r.count}`);
-    go('history');
-  } catch (e) { toast(e.message || 'не удалось'); }
+  // DB-7: resolve every unknown name (one review pass) BEFORE saving
+  resolveUnknownNames(ws.flatMap(w => w.exercises || []), async () => {
+    try {
+      const r = await api('/workouts/archive-bulk', 'POST', {
+        workouts: ws.map(w => ({
+          workout_date: w.date, focus_label: w.focus_label, notes: w.notes,
+          exercises: w.exercises.map(e => ({ name: e.name, sets: e.sets })),
+        })),
+      });
+      window._archParsed = null;
+      closeSheet();
+      toast(`Добавлено тренировок: ${r.count}`);
+      go('history');
+    } catch (e) { toast(e.message || 'не удалось'); }
+  });
+}
+
+// ── DB-7: name-matching dialog. For an UNRESOLVED exercise name show similar
+// catalog matches + an optional AI hint and let the USER decide — map (remember as
+// an alias), keep once, or add as a new exercise. NEVER auto-renames.
+// resolveUnknownNames() runs it over every unresolved name in a bulk import in ONE
+// pass before saving; a chosen mapping applies to every copy of that name.
+function resolveUnknownNames(allExercises, next) {
+  const seen = new Set(), queue = [];
+  for (const e of allExercises) {
+    if (e && e.resolved === false && e.name && !seen.has(e.name)) { seen.add(e.name); queue.push(e.name); }
+  }
+  if (!queue.length) return next();
+  let i = 0;
+  const apply = (raw, finalName) => { for (const e of allExercises) { if (e.name === raw) { e.name = finalName; e.resolved = true; } } };
+  const step = () => {
+    if (i >= queue.length) { closeSheet(); return next(); }
+    const raw = queue[i];
+    nameMatchDialog(raw, { index: i, total: queue.length }, res => { apply(raw, res.name); i++; step(); });
+  };
+  step();
+}
+async function nameMatchDialog(rawName, opts, onResolve) {
+  let r;
+  try { r = await api('/exercises/suggest?q=' + encodeURIComponent(rawName)); }
+  catch { return onResolve({ action: 'keep', name: rawName }); }
+  if (r.exact) return onResolve({ action: 'map', name: r.exact });   // already known → no dialog
+  window._nmCtx = { raw: rawName, opts, onResolve, similar: r.similar || [], ai: r.ai };
+  renderNameMatch();
+}
+function renderNameMatch() {
+  const c = window._nmCtx; if (!c) return;
+  const prog = c.opts && c.opts.total > 1 ? ` · ${c.opts.index + 1}/${c.opts.total}` : '';
+  const sim = (c.similar || []).map(s => `<div class="list-item" onclick='nmPick(${esc(JSON.stringify(s.name))})'>${_exThumb(s.image)}<div style="flex:1">${esc(s.name)}</div><span style="color:var(--info)">сопоставить ›</span></div>`).join('');
+  const aiH = c.ai ? `<div style="background:var(--info-bg);color:var(--info);border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer" onclick='nmPick(${esc(JSON.stringify(c.ai.name))})'>🤖 Похоже на «${esc(c.ai.name)}» — нажми, чтобы сопоставить</div>` : '';
+  sheet(`<div class="muted small">Неизвестное упражнение${prog}</div><h2>«${esc(c.raw)}»</h2>
+    <div class="muted small" style="margin-bottom:10px">Точного совпадения с каталогом нет. Выбери похожее, оставь как есть или добавь как новое.</div>
+    ${aiH}
+    ${sim || '<div class="muted small" style="margin-bottom:6px">Похожих в каталоге не нашлось.</div>'}
+    ${!c.ai ? `<button class="btn ghost sm" style="margin-top:8px" onclick="nmAskAi()">🤖 Спросить ИИ-подсказку</button>` : ''}
+    <button class="btn ghost" style="margin-top:12px" onclick="nmKeep()">Оставить «${esc(c.raw)}» как есть</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="nmNew()">Добавить как новое упражнение</button>`);
+}
+async function nmAskAi() {
+  const c = window._nmCtx; if (!c) return;
+  try { const r = await api('/exercises/suggest?ai=1&q=' + encodeURIComponent(c.raw)); c.ai = r.ai; renderNameMatch(); if (!r.ai) toast('ИИ не дал подсказки'); }
+  catch (e) { toast(e.message || 'ИИ недоступен'); }
+}
+async function nmPick(canon) {
+  const c = window._nmCtx; if (!c) return;
+  try { await api('/exercises/alias', 'POST', { alias: c.raw, canonical: canon }); } catch {}  // remember → no dialog next time
+  c.onResolve({ action: 'map', name: canon });
+}
+function nmKeep() { const c = window._nmCtx; if (c) c.onResolve({ action: 'keep', name: c.raw }); }   // one-time, no alias
+async function nmNew() {  // remember as its own exercise so it won't re-prompt
+  const c = window._nmCtx; if (!c) return;
+  try { await api('/exercises/alias', 'POST', { alias: c.raw, canonical: c.raw }); } catch {}
+  c.onResolve({ action: 'new', name: c.raw });
 }
 
 // ── Exercise progress (charts + PR) ─────────────────────────────────────────
@@ -1690,7 +1751,7 @@ async function planParse() {
     window._PARSED = r.days;
     const preview = r.days.map(d => `<div class="card" style="margin-bottom:8px">
       <div class="row sp"><b>${esc(d.focus_label || 'Тренировка')}</b><span class="small muted">${fmtPlanDate(d.date)}</span></div>
-      ${(d.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">отдых / без упражнений</div>'}
+      ${(d.exercises || []).map(ex => `<div class="small muted" style="margin-top:3px">• ${esc(ex.name)}${ex.resolved === false ? ' <span style="color:var(--warn)">(не из каталога)</span>' : ''} — ${esc(exLine(ex))}</div>`).join('') || '<div class="small muted">отдых / без упражнений</div>'}
     </div>`).join('');
     sheet(`<h2>Разобрано: ${r.days.length} дн.</h2>
       <div style="max-height:50vh;overflow:auto">${preview}</div>
@@ -1702,10 +1763,13 @@ async function planParse() {
   }
 }
 function planConfirmBulk() {
-  const days = window._PARSED;
-  createGuard(
-    mode => api('/plans/bulk', 'POST', { days, mode }),
-    r => { window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans'); });
+  const days = window._PARSED || [];
+  // DB-7: resolve every unknown name (one review pass) BEFORE saving
+  resolveUnknownNames(days.flatMap(d => d.exercises || []), () => {
+    createGuard(
+      mode => api('/plans/bulk', 'POST', { days, mode }),
+      r => { window._PARSED = null; closeSheet(); toast('Сохранено: ' + r.saved + ' дн.'); go('plans'); });
+  });
 }
 
 // ── Routines (reusable weekly templates) ────────────────────────────────────
