@@ -1183,6 +1183,29 @@ async def create_archive_bulk(body: BulkArchiveIn, uid: str = Depends(current_ui
     return {"ids": ids, "count": len(ids)}
 
 
+class PatchWorkout(BaseModel):
+    workout_date: Optional[str] = None
+    focus_label: Optional[str] = None
+
+
+@app.patch("/api/workouts/{wid}")
+async def patch_workout(wid: int, body: PatchWorkout, uid: str = Depends(current_uid)):
+    """HIST-3: edit a workout's date and/or focus (archive AND normal workouts).
+    Owner-scoped; date can't be in the future."""
+    await _own_workout(uid, wid)
+    cols, params = [], {"id": wid}
+    if body.workout_date is not None:
+        params["d"] = _archive_date(body.workout_date, await today_for(uid))
+        cols.append("workout_date = :d")
+    if body.focus_label is not None:
+        params["f"] = (body.focus_label or "").strip() or "Тренировка"
+        cols.append("focus_label = :f")
+    if cols:
+        async with get_session() as s:
+            await s.execute(text(f"UPDATE workouts SET {', '.join(cols)} WHERE id = :id"), params)
+    return {"ok": True}
+
+
 @app.get("/api/workouts/active")
 async def active_workout(uid: str = Depends(current_uid)):
     w = await db.get_active_workout(uid)

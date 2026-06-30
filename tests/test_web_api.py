@@ -224,6 +224,24 @@ def test_archive_bulk_save_atomic(client):
     assert len(client.get("/api/workouts?days=4000").json()) == before  # nothing inserted
 
 
+def test_patch_workout_date_and_focus(client):
+    """HIST-3: edit a workout's date/focus; future date rejected; owner-scoped."""
+    client.cookies.clear()
+    wid = client.post("/api/workouts/archive", json={
+        "workout_date": "2025-05-01", "focus_label": "Old",
+        "exercises": [{"name": "Присед", "sets": [{"weight_kg": 100, "reps": 5}]}]}).json()["id"]
+    assert client.patch(f"/api/workouts/{wid}", json={"workout_date": "2025-05-03", "focus_label": "New focus"}).status_code == 200
+    w = client.get(f"/api/workouts/{wid}").json()
+    assert str(w["workout_date"]) == "2025-05-03" and w["focus_label"] == "New focus"
+    # focus-only edit leaves the date untouched
+    client.patch(f"/api/workouts/{wid}", json={"focus_label": "F2"})
+    w = client.get(f"/api/workouts/{wid}").json()
+    assert str(w["workout_date"]) == "2025-05-03" and w["focus_label"] == "F2"
+    # future date rejected; unknown workout → 404 (owner-scoped)
+    assert client.patch(f"/api/workouts/{wid}", json={"workout_date": "2099-01-01"}).status_code == 422
+    assert client.patch("/api/workouts/999999", json={"focus_label": "x"}).status_code == 404
+
+
 def test_canonical_name_snaps_every_catalog_entry():
     """DB-5: the deterministic name canonicalizer snaps every catalog canonical and
     every alias to a known key with NO AI — so plan-save and set-logging agree and

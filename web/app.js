@@ -670,7 +670,7 @@ let _histT = null;
 function histSearch(v) { STATE.histQ = v; clearTimeout(_histT); _histT = setTimeout(() => { if (STATE.tab === 'history') History(); }, 350); }
 async function WorkoutDetail(id) {
   const w = await api('/workouts/' + id);
-  window._WDid = id; window._WDex = w.exercises.filter(e => e.sets.length);
+  window._WDid = id; window._WDfull = w; window._WDex = w.exercises.filter(e => e.sets.length);
   const ex = window._WDex.map((e, idx) => `<div class="row sp" style="padding:8px 0;border-bottom:1px solid var(--line)">
     <div style="flex:1"><b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>
     <span class="muted" style="cursor:pointer;padding:4px 6px" title="Прогресс упражнения" onclick="exDetailWD(${idx})">📈</span></div>`).join('');
@@ -678,9 +678,28 @@ async function WorkoutDetail(id) {
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${esc(fmtDate(w.workout_date, { weekday: 'long' }))}</div>
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
-    <button class="btn ghost" onclick="go('active',${w.id})">✏️ Редактировать подходы</button>
+    <button class="btn ghost" onclick="editWorkoutMeta(${w.id})">✏️ Дата и фокус</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="go('active',${w.id})">✏️ Упражнения и подходы</button>
     <button class="btn ghost" style="margin-top:8px" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>
     <button class="btn ghost" style="margin-top:8px" onclick="workoutToTemplate(${w.id})">💾 В шаблон</button>`;
+}
+// HIST-3: edit a workout's date + focus (archive AND normal). Sets/exercises are
+// edited via the active view («✏️ Упражнения и подходы» → go('active')).
+function editWorkoutMeta(id) {
+  const w = window._WDfull || {};
+  sheet(`<h2>Дата и фокус</h2>
+    <div class="mfield"><label>Дата</label><input id="ew_date" type="date" max="${todayISO()}" value="${esc(w.workout_date || todayISO())}"></div>
+    <div class="mfield" style="margin-top:12px"><label>Фокус</label><input id="ew_focus" value="${esc(w.focus_label || '')}" placeholder="напр. Грудь / Трицепс"></div>
+    <button class="btn success" style="margin-top:14px" onclick="saveWorkoutMeta(${id})">Сохранить</button>`);
+}
+async function saveWorkoutMeta(id) {
+  const date = document.getElementById('ew_date').value;
+  const focus = document.getElementById('ew_focus').value;
+  if (!date) return toast('Укажи дату');
+  try {
+    await api('/workouts/' + id, 'PATCH', { workout_date: date, focus_label: focus });
+    closeSheet(); toast('Сохранено'); go('workout', id);
+  } catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── HIST-1: add a PAST (archive) workout — mirrors the plan editor (calendar +
