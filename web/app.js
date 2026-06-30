@@ -677,15 +677,47 @@ async function coachReview(wid) {
 async function History() {
   const q = STATE.histQ || '';
   const list = await api('/workouts?days=4000' + (q ? '&q=' + encodeURIComponent(q) : ''));
+  // HIST2-1: grouped sections by default; a search shows a flat filtered list.
+  const body = !list.length
+    ? `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`
+    : (q ? list.map(histCard).join('') : groupHistory(list));
   view.innerHTML = `<div class="row sp"><h1>История</h1><span class="back" style="margin:0" onclick="go('reports')">📄 Отчёты (PDF) ›</span></div>
     <button class="btn" style="margin-bottom:12px" onclick="archiveNew()">➕ Добавить тренировку</button>
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
-    ${list.length ? list.map(w => swipeRow(
-      `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`,
-      `askDelWorkout(${w.id})`, `go('workout',${w.id})`)).join('')
-      : `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`}`;
+    ${body}`;
   const inp = document.getElementById('histQ');
   if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
+}
+function histCard(w) {
+  return swipeRow(
+    `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${(w.tonnage || 0).toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`,
+    `askDelWorkout(${w.id})`, `go('workout',${w.id})`);
+}
+// HIST2-1: group date-desc workouts into sticky month sections + weekly sub-dividers
+const _MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const _MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+function _mondayOf(iso) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoOf(d); }
+function _weekLabel(mondayIso) {
+  const mon = new Date(mondayIso + 'T00:00:00'), sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+  return mon.getMonth() === sun.getMonth()
+    ? `${mon.getDate()}–${sun.getDate()} ${_MONTHS_GEN[mon.getMonth()]}`
+    : `${mon.getDate()} ${_MONTHS_GEN[mon.getMonth()]} – ${sun.getDate()} ${_MONTHS_GEN[sun.getMonth()]}`;
+}
+function groupHistory(list) {
+  const months = []; let cm = null, cw = null;
+  for (const w of list) {                                  // list is already workout_date DESC
+    const mk = (w.workout_date || '').slice(0, 7);
+    if (!cm || cm.key !== mk) {
+      const d = new Date(w.workout_date + 'T00:00:00');
+      cm = { key: mk, label: `${_MONTHS_NOM[d.getMonth()]} ${d.getFullYear()}`, count: 0, tonnage: 0, weeks: [] };
+      months.push(cm); cw = null;
+    }
+    const wk = _mondayOf(w.workout_date);
+    if (!cw || cw.key !== wk) { cw = { key: wk, label: _weekLabel(wk), count: 0, cards: '' }; cm.weeks.push(cw); }
+    cw.cards += histCard(w); cw.count++; cm.count++; cm.tonnage += (w.tonnage || 0);
+  }
+  return months.map(m => `<div class="hist-month-h"><span>${esc(m.label)}</span><span class="muted small">${m.count} трен · ${m.tonnage.toLocaleString('ru-RU')} кг</span></div>
+    ${m.weeks.map(wk => `<div class="hist-week-h">${esc(wk.label)} · ${wk.count}</div>${wk.cards}`).join('')}`).join('');
 }
 let _histT = null;
 function histSearch(v) { STATE.histQ = v; clearTimeout(_histT); _histT = setTimeout(() => { if (STATE.tab === 'history') History(); }, 350); }

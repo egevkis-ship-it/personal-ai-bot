@@ -57,6 +57,10 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .banner{border-radius:var(--r);padding:14px;margin-bottom:14px}
 .banner.info{background:var(--info-bg)} .banner.warn{background:var(--warn-bg)}
 .banner.ok{background:var(--success-bg)}  /* W2-6: «выполнено» state */
+/* HIST2-1: grouped History — sticky month header + weekly sub-divider */
+.hist-month-h{position:sticky;top:0;z-index:5;background:var(--bg);display:flex;justify-content:space-between;
+  align-items:baseline;gap:8px;padding:9px 2px 7px;margin-top:8px;font-size:18px;font-weight:700;letter-spacing:-.2px}
+.hist-week-h{color:var(--txt2);font-size:13px;margin:6px 4px 6px}
 .b-title{font-weight:600;font-size:16px}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 /* iOS segmented control */
