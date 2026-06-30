@@ -383,11 +383,11 @@ function setInputRow(c, i, r) {
   let fields;
   if (c.type === 'time') {
     const dur = r.dur ?? c.dur;
-    fields = `<input class="srin sr-min" inputmode="numeric" value="${_setAttr(Math.floor(dur / 60))}" placeholder="мин"><span class="x">:</span><input class="srin sr-sec" inputmode="numeric" value="${_setAttr(dur % 60)}" placeholder="сек">`;
+    fields = `<input onfocus="this.select()" class="srin sr-min" inputmode="numeric" value="${_setAttr(Math.floor(dur / 60))}" placeholder="мин"><span class="x">:</span><input onfocus="this.select()" class="srin sr-sec" inputmode="numeric" value="${_setAttr(dur % 60)}" placeholder="сек">`;
   } else if (c.type === 'bodyweight') {
-    fields = `<input class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт."><span class="x" style="flex:0 0 auto">повт.</span>`;
+    fields = `<input onfocus="this.select()" class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт."><span class="x" style="flex:0 0 auto">повт.</span>`;
   } else {
-    fields = `<input class="srin sr-w" inputmode="decimal" value="${_setAttr(r.weight ?? c.w)}" placeholder="кг"><span class="x">×</span><input class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт.">`;
+    fields = `<input onfocus="this.select()" class="srin sr-w" inputmode="decimal" value="${_setAttr(r.weight ?? c.w)}" placeholder="кг"><span class="x">×</span><input onfocus="this.select()" class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт.">`;
   }
   return `<div class="setrow row" data-i="${i}"><span class="srnum">${i + 1}</span>${fields}${wu}${del}</div>`;
 }
@@ -431,7 +431,7 @@ function toggleSetTimer() {
 function stepRow(fields) {
   const cells = fields.map(([id, val, unit, step]) =>
     `<div class="step"><div class="chev" onclick="bump('${id}',${step})">▲</div>
-      <input class="val" id="f_${id}" value="${val}" data-step="${step}" inputmode="decimal">
+      <input onfocus="this.select()" class="val" id="f_${id}" value="${val}" data-step="${step}" inputmode="decimal">
       <div class="chev" onclick="bump('${id}',${-step})">▼</div><div class="u">${unit}</div></div>`);
   return `<div class="stepwrap">${cells.join('<span class="x">×</span>')}</div>`;
 }
