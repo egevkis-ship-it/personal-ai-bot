@@ -206,7 +206,7 @@ async function ChooseDay() {
   const wk = await api('/workouts/week');
   const ic = s => s === 'completed' ? '✅' : s === 'skipped' ? '⚠️' : '⚪️';
   view.innerHTML = `<span class="back" onclick="go('train')">‹ Назад</span><h2>Тренировки недели</h2>
-    ${wk.length ? wk.map(p => `<div class="card list-item" onclick="openPlan(${p.id},'chooseDay')">
+    ${wk.length ? wk.map(p => `<div class="card list-item ex-row" onclick="openPlan(${p.id},'chooseDay')">
       <div class="ic">${ic(p.status)}</div><div style="flex:1"><b>${esc(p.focus_label || '')}</b>
       <div class="small muted">${esc(fmtDate(p.planned_date, { weekday: 'short' }))}${p.is_today ? ' · сегодня' : ''}${p.status === 'skipped' ? ' · пропущено' : ''}</div></div><span class="muted">›</span></div>`).join('')
       : '<div class="card muted">На этой неделе нет планов.</div>'}`;
@@ -233,7 +233,7 @@ function renderActive(w) {
     const next = !done && working.length >= 0 && i === w.exercises.findIndex(e => !e.done);
     const sub = working.length ? working.map(s => setLabel(s)).join(' · ')
       : (ex.target ? `цель ${ex.target_sets || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) : ''}` : 'нет подходов');
-    return `<div class="card list-item" style="${next ? 'border:2px solid var(--info)' : ''}" onclick="openExercise(${w.id},${i})">
+    return `<div class="card list-item ex-row" style="${next ? 'border:2px solid var(--info)' : ''}" onclick="openExercise(${w.id},${i})">
       <div class="ic">${done ? '✅' : next ? '▶️' : '⚪️'}</div>
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div>
       <span class="muted" style="padding:4px 8px;cursor:pointer" title="Прогресс упражнения" onclick="event.stopPropagation();exDetailIdx(${i})">📈</span></div>`;
@@ -1074,7 +1074,7 @@ async function PlanView(pid) {
   let p;
   try { p = await api('/plans/' + pid); }
   catch (e) { if (e.code === 401) throw e; view.innerHTML = `<span class="back" onclick="go(STATE.planFrom||'schedule')">‹ Назад</span><div class="card">План не найден.</div>`; return; }
-  const exItems = (p.exercises || []).length ? p.exercises.map(ex => `<div class="card">
+  const exItems = (p.exercises || []).length ? p.exercises.map(ex => `<div class="card ex-row">
       <b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div>${ex.notes ? `<div class="small muted" style="margin-top:3px">📝 ${esc(ex.notes)}</div>` : ''}</div>`).join('')
     : '<div class="card muted small">Упражнения не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="go(STATE.planFrom||'schedule')">‹ Назад</span>

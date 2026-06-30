@@ -43,6 +43,13 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .list-item:active{background:var(--sec)}
 .card>.list-item:first-child{margin-top:-2px}
 .ic{width:26px;text-align:center;font-size:21px;flex:none}
+/* WK-3: exercise/workout rows ~35% larger as a unit — only where .ex-row is set
+   (active workout, plan view, day lists); hub menus & settings keep default size */
+.ex-row .ic{width:34px;font-size:28px}
+.ex-row b{font-size:18px;letter-spacing:-.2px}
+.ex-row .small{font-size:15px}
+.list-item.ex-row{gap:14px;padding-top:17px;padding-bottom:17px}
+.card.ex-row{padding:17px 16px}
 .pill{display:inline-block;font-size:13px;padding:5px 12px;border-radius:20px;background:var(--sec);color:var(--txt2);cursor:pointer}
 .pill.on{background:var(--info);color:#fff}
 .pill.warn{background:var(--warn-bg);color:var(--warn)}
