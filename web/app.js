@@ -632,7 +632,16 @@ function chooseEx(wid, name, key) {
     });
     return;
   }
-  openAddSet(wid, null, { name, key, type, target: null, last: null });
+  // W2-7: active workout — add the exercise as a ROW and auto-expand its inline
+  // accordion (W2-1) for set entry; no «Подходы» sheet. The 0-set exercise lives in
+  // local state until the first set is saved (then the server returns it on re-fetch).
+  const W = window._WO;
+  if (W && W.id === wid) {
+    W.exercises.push({ name, key: key || null, type, sets: [], target: null, target_sets: null, last: null, in_plan: false, done: false });
+    STATE.activeExpanded = W.exercises.length - 1;
+    closeSheet();
+    renderActive(W);
+  }
 }
 
 // workout menu / finish
