@@ -215,7 +215,7 @@ async function ChooseDay() {
 // ── Active workout ────────────────────────────────────────────────────────
 async function Active(id) {
   let w;
-  if (!window._SETTINGS) { try { window._SETTINGS = await api('/settings'); } catch {} }  // rest-timer prefs
+  if (!window._SETTINGS) { try { window._SETTINGS = await api('/settings'); _cacheSettings(); } catch { window._SETTINGS = _cachedSettings() || window._SETTINGS; } }  // rest-timer prefs
   try { w = id ? await api('/workouts/' + id) : await api('/workouts/active'); }
   catch (e) {
     if (isNetworkErr(e)) { w = loadActiveCache(id); if (w) { await overlayQueue(w); return renderActive(w); } }
@@ -243,7 +243,7 @@ function renderActive(w) {
     <div class="muted small" style="margin-bottom:12px">${navigator.onLine ? 'идёт' : '⚠️ оффлайн — подходы сохранятся при сети'}</div>
     ${items || '<div class="card muted">Пусто</div>'}
     <button class="btn ghost" style="margin-top:6px" onclick="openPicker(${w.id})">➕ Добавить упражнение</button>
-    <button class="btn ghost" style="margin-top:8px" onclick="restTimer((window._SETTINGS&&window._SETTINGS.rest_timer_seconds)||90)">⏱ Таймер отдыха</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="restTimer(restSecs())">⏱ Таймер отдыха</button>
     <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>
     <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelWorkout(${w.id})">✖ Отменить тренировку</button>`;
 }
@@ -432,8 +432,7 @@ async function confirmSets() {
   if (!sets.length) return toast('Заполни хотя бы один подход');
   closeSheet(); stopTimer();
   await submitSets(c.wid, { exercise_name: c.ex.name, sets });
-  const st = window._SETTINGS || {};
-  if (st.rest_timer_enabled !== false) restTimer(st.rest_timer_seconds || 90);  // auto-start unless disabled
+  if (restEnabled()) restTimer(restSecs());  // auto-start unless persisted-disabled
 }
 // post several structured sets as ONE idempotent op; offline-aware like submitSet
 async function submitSets(wid, body) {
@@ -504,6 +503,15 @@ function stopTimer(write) {
   if (TMR) { clearInterval(TMR); TMR = null; }
   if (write && window.TMR_VAL) { document.getElementById('f_min').value = Math.floor(window.TMR_VAL / 60); document.getElementById('f_sec').value = window.TMR_VAL % 60; const b = document.getElementById('tbtn'); if (b) b.textContent = '▶ Запустить таймер'; }
 }
+
+// WK-4: the persisted rest-timer setting is the single source of truth. It lives
+// in window._SETTINGS (loaded from /settings at boot, refreshed on every Settings
+// visit) and is mirrored to localStorage so a freshly-disabled timer survives an
+// offline / next-session launch and is never silently reset to ON.
+function _cacheSettings() { try { localStorage.setItem('settings_v1', JSON.stringify(window._SETTINGS || {})); } catch {} }
+function _cachedSettings() { try { return JSON.parse(localStorage.getItem('settings_v1') || 'null'); } catch { return null; } }
+function restEnabled() { const s = window._SETTINGS || _cachedSettings() || {}; return s.rest_timer_enabled !== false; }
+function restSecs() { const s = window._SETTINGS || _cachedSettings() || {}; return s.rest_timer_seconds || 90; }
 
 // rest timer overlay
 function restTimer(seconds) {
@@ -1714,7 +1722,9 @@ async function Settings() {
   try {
     tzr = await api('/service/tz');
     s = await api('/service/stats');
-    try { cfg = await api('/settings'); } catch { cfg = {}; }
+    try { cfg = await api('/settings'); } catch { cfg = _cachedSettings() || {}; }
+    // refresh the single source of truth from the server on every Settings visit
+    window._SETTINGS = { ...(window._SETTINGS || {}), ...cfg }; _cacheSettings();
     try { admin = await api('/admin/users'); }            // 403 → not an admin (hide section)
     catch (e) { if (e.status === 401) throw e; admin = null; }
   } catch (e) {
@@ -1806,7 +1816,7 @@ async function saveRestTimer() {
   const secs = Math.max(5, Math.min(600, parseInt(document.getElementById('rtSeconds').value || '90', 10) || 90));
   try {
     await api('/settings', 'PATCH', { rest_timer_enabled: enabled, rest_timer_seconds: secs });
-    window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs };
+    window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs }; _cacheSettings();
     toast('Таймер сохранён');
   } catch (e) { toast(e.message || 'не удалось'); }
 }
@@ -1816,7 +1826,7 @@ async function toggleRestTimer(el) {
   el.classList.toggle('on');
   const enabled = el.classList.contains('on');
   const secs = Math.max(5, Math.min(600, parseInt((document.getElementById('rtSeconds') || {}).value || '90', 10) || 90));
-  window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs };
+  window._SETTINGS = { ...(window._SETTINGS || {}), rest_timer_enabled: enabled, rest_timer_seconds: secs }; _cacheSettings();
   if (!enabled) { stopTimer(); closeRest(); }   // disabling stops any countdown immediately
   try { await api('/settings', 'PATCH', { rest_timer_enabled: enabled, rest_timer_seconds: secs }); }
   catch (e) { toast(e.message || 'не сохранилось'); }
@@ -2012,7 +2022,8 @@ function closeSheet() { const b = document.getElementById('sheetbg'); if (b) b.r
 (async function boot() {
   try {
     await api('/auth/me');
-    try { window._SETTINGS = await api('/settings'); } catch {}  // date_format + rest-timer for first paint
+    try { window._SETTINGS = await api('/settings'); _cacheSettings(); }  // date_format + rest-timer for first paint
+    catch { window._SETTINGS = _cachedSettings() || window._SETTINGS; }   // offline: keep the last persisted value
     renderTabs(); go('home'); flushQueue();
   } catch { Login(); }
 })();
