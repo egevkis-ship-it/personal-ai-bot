@@ -3,7 +3,7 @@
     "source": "Free Exercise DB (yuhonas/free-exercise-db), public domain",
     "image_base": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises",
     "image_pattern": "<image_base>/<fedb_id>/0.jpg",
-    "count": 109,
+    "count": 186,
     "groups": {
       "chest": "Грудь",
       "back": "Спина",
@@ -88,7 +88,8 @@
       "muscle_group": "abs",
       "aliases": [
         "flat bench lying leg raise",
-        "подъём ног лёжа"
+        "подъём ног лёжа",
+        "пресс подъёмы ног"
       ],
       "fedb_id": "Flat_Bench_Lying_Leg_Raise",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Flat_Bench_Lying_Leg_Raise/0.jpg",
@@ -99,7 +100,8 @@
       "muscle_group": "abs",
       "aliases": [
         "crunches",
-        "скручивания"
+        "скручивания",
+        "пресс подъёмы корпуса, ноги согнуты"
       ],
       "fedb_id": "Crunches",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Crunches/0.jpg",
@@ -231,7 +233,8 @@
       "muscle_group": "back",
       "aliases": [
         "seated cable rows",
-        "тяга нижнего блока сидя"
+        "тяга нижнего блока сидя",
+        "горизонтальная тяга блока"
       ],
       "fedb_id": "Seated_Cable_Rows",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Cable_Rows/0.jpg",
@@ -242,7 +245,9 @@
       "muscle_group": "back",
       "aliases": [
         "t-bar row with handle",
-        "тяга т-грифа"
+        "тяга т-грифа",
+        "т-образная тяга с упором",
+        "тяга т-грифа с упором в грудь"
       ],
       "fedb_id": "T-Bar_Row_with_Handle",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/T-Bar_Row_with_Handle/0.jpg",
@@ -297,7 +302,8 @@
       "muscle_group": "biceps",
       "aliases": [
         "dumbbell bicep curl",
-        "подъём гантелей на бицепс"
+        "подъём гантелей на бицепс",
+        "бицепс с гантелями стоя"
       ],
       "fedb_id": "Dumbbell_Bicep_Curl",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dumbbell_Bicep_Curl/0.jpg",
@@ -319,7 +325,8 @@
       "muscle_group": "biceps",
       "aliases": [
         "high cable curls",
-        "сгибания на бицепс на блоке"
+        "сгибания на бицепс на блоке",
+        "сгибание верхнего блока на бицепс"
       ],
       "fedb_id": "High_Cable_Curls",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/High_Cable_Curls/0.jpg",
@@ -352,7 +359,9 @@
       "muscle_group": "calves",
       "aliases": [
         "calf press",
-        "подъём на носки в жиме ногами"
+        "подъём на носки в жиме ногами",
+        "икры в жиме ногами",
+        "икроножные в жиме ногами"
       ],
       "fedb_id": "Calf_Press",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Calf_Press/0.jpg",
@@ -374,7 +383,8 @@
       "muscle_group": "calves",
       "aliases": [
         "barbell seated calf raise",
-        "подъём на носки сидя"
+        "подъём на носки сидя",
+        "икры сидя"
       ],
       "fedb_id": "Barbell_Seated_Calf_Raise",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Seated_Calf_Raise/0.jpg",
@@ -385,7 +395,10 @@
       "muscle_group": "calves",
       "aliases": [
         "standing calf raises",
-        "подъём на носки стоя"
+        "подъём на носки стоя",
+        "икры стоя",
+        "подъём на носки в тренажёре",
+        "подъёмы на носки в тренажёре"
       ],
       "fedb_id": "Standing_Calf_Raises",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Calf_Raises/0.jpg",
@@ -396,7 +409,8 @@
       "muscle_group": "cardio",
       "aliases": [
         "running treadmill",
-        "бег на дорожке"
+        "бег на дорожке",
+        "беговая дорожка"
       ],
       "fedb_id": "Running_Treadmill",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Running_Treadmill/0.jpg",
@@ -407,7 +421,8 @@
       "muscle_group": "cardio",
       "aliases": [
         "bicycling stationary",
-        "велотренажёр"
+        "велотренажёр",
+        "велосипед"
       ],
       "fedb_id": "Bicycling_Stationary",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Bicycling_Stationary/0.jpg",
@@ -462,7 +477,8 @@
       "muscle_group": "cardio",
       "aliases": [
         "elliptical trainer",
-        "эллиптический тренажёр"
+        "эллиптический тренажёр",
+        "эллипс"
       ],
       "fedb_id": "Elliptical_Trainer",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Elliptical_Trainer/0.jpg",
@@ -473,7 +489,8 @@
       "muscle_group": "chest",
       "aliases": [
         "leverage chest press",
-        "жим в тренажёре на грудь"
+        "жим в тренажёре на грудь",
+        "жим на грудь в тренажёре"
       ],
       "fedb_id": "Leverage_Chest_Press",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Leverage_Chest_Press/0.jpg",
@@ -539,7 +556,8 @@
       "muscle_group": "chest",
       "aliases": [
         "dips chest version",
-        "отжимания на брусьях"
+        "отжимания на брусьях",
+        "брусья на грудь"
       ],
       "fedb_id": "Dips_-_Chest_Version",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dips_-_Chest_Version/0.jpg",
@@ -561,7 +579,8 @@
       "muscle_group": "chest",
       "aliases": [
         "cable crossover",
-        "сведение в кроссовере"
+        "сведение в кроссовере",
+        "сведение в кроссовере снизу вверх"
       ],
       "fedb_id": "Cable_Crossover",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Crossover/0.jpg",
@@ -572,7 +591,10 @@
       "muscle_group": "chest",
       "aliases": [
         "butterfly",
-        "сведение в тренажёре (бабочка)"
+        "сведение в тренажёре (бабочка)",
+        "бабочка / pec deck",
+        "сведение рук в тренажёре",
+        "сведение рук в тренажёре (pec dec)"
       ],
       "fedb_id": "Butterfly",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Butterfly/0.jpg",
@@ -792,7 +814,10 @@
       "muscle_group": "glutes",
       "aliases": [
         "thigh abductor",
-        "отведение бедра в тренажёре"
+        "отведение бедра в тренажёре",
+        "отведение ног в тренажёре",
+        "отведение бёдер",
+        "отведение бёдер в тренажёре"
       ],
       "fedb_id": "Thigh_Abductor",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Thigh_Abductor/0.jpg",
@@ -803,7 +828,8 @@
       "muscle_group": "glutes",
       "aliases": [
         "one-legged cable kickback",
-        "отведение ноги в кроссовере"
+        "отведение ноги в кроссовере",
+        "кикбэк в кроссовере"
       ],
       "fedb_id": "One-Legged_Cable_Kickback",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/One-Legged_Cable_Kickback/0.jpg",
@@ -825,7 +851,8 @@
       "muscle_group": "glutes",
       "aliases": [
         "butt lift bridge",
-        "ягодичный мост"
+        "ягодичный мост",
+        "ягодичный мостик с разведёнными ногами"
       ],
       "fedb_id": "Butt_Lift_Bridge",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Butt_Lift_Bridge/0.jpg",
@@ -880,7 +907,8 @@
       "muscle_group": "hamstrings",
       "aliases": [
         "lying leg curls",
-        "сгибания ног лёжа"
+        "сгибания ног лёжа",
+        "сгибание ног лёжа"
       ],
       "fedb_id": "Lying_Leg_Curls",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Lying_Leg_Curls/0.jpg",
@@ -946,7 +974,8 @@
       "muscle_group": "quads",
       "aliases": [
         "barbell hack squat",
-        "гакк-приседания"
+        "гакк-приседания",
+        "гакк-присед"
       ],
       "fedb_id": "Barbell_Hack_Squat",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Hack_Squat/0.jpg",
@@ -957,7 +986,9 @@
       "muscle_group": "quads",
       "aliases": [
         "leg press",
-        "жим ногами"
+        "жим ногами",
+        "жим ногами высокая постановка ног",
+        "жим ногами стандартная постановка ног"
       ],
       "fedb_id": "Leg_Press",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Leg_Press/0.jpg",
@@ -1023,7 +1054,8 @@
       "muscle_group": "quads",
       "aliases": [
         "leg extensions",
-        "разгибания ног в тренажёре"
+        "разгибания ног в тренажёре",
+        "разгибание ног сидя"
       ],
       "fedb_id": "Leg_Extensions",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Leg_Extensions/0.jpg",
@@ -1045,7 +1077,8 @@
       "muscle_group": "quads",
       "aliases": [
         "front barbell squat",
-        "фронтальные приседания"
+        "фронтальные приседания",
+        "фронтальный присед"
       ],
       "fedb_id": "Front_Barbell_Squat",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Front_Barbell_Squat/0.jpg",
@@ -1111,7 +1144,9 @@
       "muscle_group": "shoulders",
       "aliases": [
         "side lateral raise",
-        "махи гантелями в стороны"
+        "махи гантелями в стороны",
+        "махи на среднюю дельту стоя",
+        "махи одной рукой в кроссовере"
       ],
       "fedb_id": "Side_Lateral_Raise",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Side_Lateral_Raise/0.jpg",
@@ -1133,7 +1168,11 @@
       "muscle_group": "shoulders",
       "aliases": [
         "reverse machine flyes",
-        "разведение в тренажёре (задняя дельта)"
+        "разведение в тренажёре (задняя дельта)",
+        "махи в стороны в тренажёре (обратный pec dec)",
+        "махи в стороны на тренажёре (обратный пек-дек)",
+        "разведение рук в тренажёре (обратная бабочка)",
+        "разведение рук в тренажёре обратная бабочка"
       ],
       "fedb_id": "Reverse_Machine_Flyes",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Reverse_Machine_Flyes/0.jpg",
@@ -1166,7 +1205,8 @@
       "muscle_group": "triceps",
       "aliases": [
         "dips triceps version",
-        "отжимания от скамьи на трицепс"
+        "отжимания от скамьи на трицепс",
+        "брусья узко"
       ],
       "fedb_id": "Dips_-_Triceps_Version",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dips_-_Triceps_Version/0.jpg",
@@ -1199,7 +1239,8 @@
       "muscle_group": "triceps",
       "aliases": [
         "triceps pushdown rope attachment",
-        "разгибание на блоке канатом"
+        "разгибание на блоке канатом",
+        "разгибание рук с канатом"
       ],
       "fedb_id": "Triceps_Pushdown_-_Rope_Attachment",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Triceps_Pushdown_-_Rope_Attachment/0.jpg",
@@ -1210,7 +1251,8 @@
       "muscle_group": "triceps",
       "aliases": [
         "triceps pushdown",
-        "разгибания на блоке (трицепс)"
+        "разгибания на блоке (трицепс)",
+        "разгибания на трицепс на блоке"
       ],
       "fedb_id": "Triceps_Pushdown",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Triceps_Pushdown/0.jpg",
@@ -1237,6 +1279,860 @@
       "fedb_id": "Seated_Triceps_Press",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Triceps_Press/0.jpg",
       "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Triceps_Press/1.jpg"
+    },
+    "wide_grip_rear_pull_up": {
+      "canonical_ru": "Подтягивания широким хватом",
+      "muscle_group": "back",
+      "aliases": [
+        "wide-grip rear pull-up",
+        "подтягивания широким хватом"
+      ],
+      "fedb_id": "Wide-Grip_Rear_Pull-Up",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Wide-Grip_Rear_Pull-Up/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Wide-Grip_Rear_Pull-Up/1.jpg"
+    },
+    "scapular_pull_up": {
+      "canonical_ru": "Подтягивания в гравитроне",
+      "muscle_group": "back",
+      "aliases": [
+        "scapular pull-up",
+        "подтягивания в гравитроне"
+      ],
+      "fedb_id": "Scapular_Pull-Up",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Scapular_Pull-Up/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Scapular_Pull-Up/1.jpg"
+    },
+    "straight_arm_pulldown": {
+      "canonical_ru": "Пуловер в кроссовере",
+      "muscle_group": "back",
+      "aliases": [
+        "straight-arm pulldown",
+        "пуловер в кроссовере"
+      ],
+      "fedb_id": "Straight-Arm_Pulldown",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Straight-Arm_Pulldown/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Straight-Arm_Pulldown/1.jpg"
+    },
+    "machine_shoulder_military_press": {
+      "canonical_ru": "Жим на плечи в тренажёре",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "machine shoulder military press",
+        "жим на плечи в тренажёре"
+      ],
+      "fedb_id": "Machine_Shoulder_Military_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Machine_Shoulder_Military_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Machine_Shoulder_Military_Press/1.jpg"
+    },
+    "seated_side_lateral_raise": {
+      "canonical_ru": "Махи на среднюю дельту сидя",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "seated side lateral raise",
+        "махи на среднюю дельту сидя"
+      ],
+      "fedb_id": "Seated_Side_Lateral_Raise",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Side_Lateral_Raise/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Side_Lateral_Raise/1.jpg"
+    },
+    "seated_bent_over_rear_delt_raise": {
+      "canonical_ru": "Махи на заднюю дельту сидя",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "seated bent-over rear delt raise",
+        "махи на заднюю дельту сидя"
+      ],
+      "fedb_id": "Seated_Bent-Over_Rear_Delt_Raise",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Bent-Over_Rear_Delt_Raise/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Bent-Over_Rear_Delt_Raise/1.jpg"
+    },
+    "cable_rear_delt_fly": {
+      "canonical_ru": "Задняя дельта в кроссовере",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "cable rear delt fly",
+        "задняя дельта в кроссовере"
+      ],
+      "fedb_id": "Cable_Rear_Delt_Fly",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Rear_Delt_Fly/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Rear_Delt_Fly/1.jpg"
+    },
+    "face_pull": {
+      "canonical_ru": "Тяга к лицу",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "face pull",
+        "тяга к лицу"
+      ],
+      "fedb_id": "Face_Pull",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Face_Pull/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Face_Pull/1.jpg"
+    },
+    "dumbbell_rear_lunge": {
+      "canonical_ru": "Выпады назад с гантелями",
+      "muscle_group": "quads",
+      "aliases": [
+        "dumbbell rear lunge",
+        "выпады назад с гантелями"
+      ],
+      "fedb_id": "Dumbbell_Rear_Lunge",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dumbbell_Rear_Lunge/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dumbbell_Rear_Lunge/1.jpg"
+    },
+    "thigh_adductor": {
+      "canonical_ru": "Сведение ног в тренажёре",
+      "muscle_group": "quads",
+      "aliases": [
+        "thigh adductor",
+        "сведение ног в тренажёре"
+      ],
+      "fedb_id": "Thigh_Adductor",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Thigh_Adductor/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Thigh_Adductor/1.jpg"
+    },
+    "seated_dumbbell_curl": {
+      "canonical_ru": "Бицепс с гантелями сидя",
+      "muscle_group": "biceps",
+      "aliases": [
+        "seated dumbbell curl",
+        "бицепс с гантелями сидя"
+      ],
+      "fedb_id": "Seated_Dumbbell_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Dumbbell_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Dumbbell_Curl/1.jpg"
+    },
+    "standing_dumbbell_triceps_extension": {
+      "canonical_ru": "Разгибание рук с гантелью из-за головы",
+      "muscle_group": "triceps",
+      "aliases": [
+        "standing dumbbell triceps extension",
+        "разгибание рук с гантелью из-за головы",
+        "разгибание гантели из-за головы одной рукой",
+        "разгибание гантели сидя из-за головы"
+      ],
+      "fedb_id": "Standing_Dumbbell_Triceps_Extension",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Dumbbell_Triceps_Extension/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Dumbbell_Triceps_Extension/1.jpg"
+    },
+    "jackknife_sit_up": {
+      "canonical_ru": "Пресс V-складка",
+      "muscle_group": "abs",
+      "aliases": [
+        "jackknife sit-up",
+        "пресс v-складка"
+      ],
+      "fedb_id": "Jackknife_Sit-Up",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Jackknife_Sit-Up/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Jackknife_Sit-Up/1.jpg"
+    },
+    "barbell_hip_thrust": {
+      "canonical_ru": "Хип-траст",
+      "muscle_group": "glutes",
+      "aliases": [
+        "barbell hip thrust",
+        "хип-траст",
+        "хип-траст в тренажёре",
+        "ягодичный мост в тренажёре"
+      ],
+      "fedb_id": "Barbell_Hip_Thrust",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Hip_Thrust/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Hip_Thrust/1.jpg"
+    },
+    "leverage_iso_row": {
+      "canonical_ru": "Рычажная тяга с упором",
+      "muscle_group": "back",
+      "aliases": [
+        "leverage iso row",
+        "рычажная тяга с упором",
+        "тяга в тренажёре с упором двумя руками",
+        "тяга в упоре одной рукой в тренажёре"
+      ],
+      "fedb_id": "Leverage_Iso_Row",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Leverage_Iso_Row/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Leverage_Iso_Row/1.jpg"
+    },
+    "single_leg_glute_bridge": {
+      "canonical_ru": "Ягодичный мостик одной ногой",
+      "muscle_group": "glutes",
+      "aliases": [
+        "single leg glute bridge",
+        "ягодичный мостик одной ногой",
+        "ягодичный мостик одной ногой на скамье"
+      ],
+      "fedb_id": "Single_Leg_Glute_Bridge",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Single_Leg_Glute_Bridge/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Single_Leg_Glute_Bridge/1.jpg"
+    },
+    "decline_barbell_bench_press": {
+      "canonical_ru": "Жим штанги на наклонной вниз",
+      "muscle_group": "chest",
+      "aliases": [
+        "decline barbell bench press",
+        "жим штанги на наклонной вниз"
+      ],
+      "fedb_id": "Decline_Barbell_Bench_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Decline_Barbell_Bench_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Decline_Barbell_Bench_Press/1.jpg"
+    },
+    "decline_dumbbell_bench_press": {
+      "canonical_ru": "Жим гантелей на наклонной вниз",
+      "muscle_group": "chest",
+      "aliases": [
+        "decline dumbbell bench press",
+        "жим гантелей на наклонной вниз"
+      ],
+      "fedb_id": "Decline_Dumbbell_Bench_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Decline_Dumbbell_Bench_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Decline_Dumbbell_Bench_Press/1.jpg"
+    },
+    "incline_dumbbell_flyes": {
+      "canonical_ru": "Разведение гантелей на наклонной",
+      "muscle_group": "chest",
+      "aliases": [
+        "incline dumbbell flyes",
+        "разведение гантелей на наклонной"
+      ],
+      "fedb_id": "Incline_Dumbbell_Flyes",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Incline_Dumbbell_Flyes/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Incline_Dumbbell_Flyes/1.jpg"
+    },
+    "smith_machine_bench_press": {
+      "canonical_ru": "Жим в Смите лёжа",
+      "muscle_group": "chest",
+      "aliases": [
+        "smith machine bench press",
+        "жим в смите лёжа"
+      ],
+      "fedb_id": "Smith_Machine_Bench_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Bench_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Bench_Press/1.jpg"
+    },
+    "push_up_wide": {
+      "canonical_ru": "Отжимания широким хватом",
+      "muscle_group": "chest",
+      "aliases": [
+        "push-up wide",
+        "отжимания широким хватом"
+      ],
+      "fedb_id": "Push-Up_Wide",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Push-Up_Wide/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Push-Up_Wide/1.jpg"
+    },
+    "push_ups_close_triceps_position": {
+      "canonical_ru": "Отжимания узким хватом",
+      "muscle_group": "chest",
+      "aliases": [
+        "push-ups close triceps position",
+        "отжимания узким хватом"
+      ],
+      "fedb_id": "Push-Ups_-_Close_Triceps_Position",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Push-Ups_-_Close_Triceps_Position/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Push-Ups_-_Close_Triceps_Position/1.jpg"
+    },
+    "incline_cable_chest_press": {
+      "canonical_ru": "Жим на наклонной в кроссовере",
+      "muscle_group": "chest",
+      "aliases": [
+        "incline cable chest press",
+        "жим на наклонной в кроссовере"
+      ],
+      "fedb_id": "Incline_Cable_Chest_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Incline_Cable_Chest_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Incline_Cable_Chest_Press/1.jpg"
+    },
+    "floor_press": {
+      "canonical_ru": "Жим с пола со штангой",
+      "muscle_group": "chest",
+      "aliases": [
+        "floor press",
+        "жим с пола со штангой"
+      ],
+      "fedb_id": "Floor_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Floor_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Floor_Press/1.jpg"
+    },
+    "hammer_grip_incline_db_bench_press": {
+      "canonical_ru": "Жим гантелей на наклонной нейтральным",
+      "muscle_group": "chest",
+      "aliases": [
+        "hammer grip incline db bench press",
+        "жим гантелей на наклонной нейтральным"
+      ],
+      "fedb_id": "Hammer_Grip_Incline_DB_Bench_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Hammer_Grip_Incline_DB_Bench_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Hammer_Grip_Incline_DB_Bench_Press/1.jpg"
+    },
+    "low_cable_crossover": {
+      "canonical_ru": "Сведение в кроссовере снизу",
+      "muscle_group": "chest",
+      "aliases": [
+        "low cable crossover",
+        "сведение в кроссовере снизу"
+      ],
+      "fedb_id": "Low_Cable_Crossover",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Low_Cable_Crossover/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Low_Cable_Crossover/1.jpg"
+    },
+    "chin_up": {
+      "canonical_ru": "Подтягивания обратным хватом",
+      "muscle_group": "back",
+      "aliases": [
+        "chin-up",
+        "подтягивания обратным хватом"
+      ],
+      "fedb_id": "Chin-Up",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Chin-Up/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Chin-Up/1.jpg"
+    },
+    "inverted_row": {
+      "canonical_ru": "Австралийские подтягивания",
+      "muscle_group": "back",
+      "aliases": [
+        "inverted row",
+        "австралийские подтягивания"
+      ],
+      "fedb_id": "Inverted_Row",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Inverted_Row/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Inverted_Row/1.jpg"
+    },
+    "lying_t_bar_row": {
+      "canonical_ru": "Тяга Т-грифа лёжа",
+      "muscle_group": "back",
+      "aliases": [
+        "lying t-bar row",
+        "тяга т-грифа лёжа"
+      ],
+      "fedb_id": "Lying_T-Bar_Row",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Lying_T-Bar_Row/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Lying_T-Bar_Row/1.jpg"
+    },
+    "dumbbell_shrug": {
+      "canonical_ru": "Шраги с гантелями",
+      "muscle_group": "back",
+      "aliases": [
+        "dumbbell shrug",
+        "шраги с гантелями"
+      ],
+      "fedb_id": "Dumbbell_Shrug",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dumbbell_Shrug/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dumbbell_Shrug/1.jpg"
+    },
+    "sumo_deadlift": {
+      "canonical_ru": "Становая тяга сумо",
+      "muscle_group": "back",
+      "aliases": [
+        "sumo deadlift",
+        "становая тяга сумо"
+      ],
+      "fedb_id": "Sumo_Deadlift",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Sumo_Deadlift/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Sumo_Deadlift/1.jpg"
+    },
+    "underhand_cable_pulldowns": {
+      "canonical_ru": "Тяга верхнего блока обратным хватом",
+      "muscle_group": "back",
+      "aliases": [
+        "underhand cable pulldowns",
+        "тяга верхнего блока обратным хватом"
+      ],
+      "fedb_id": "Underhand_Cable_Pulldowns",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Underhand_Cable_Pulldowns/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Underhand_Cable_Pulldowns/1.jpg"
+    },
+    "smith_machine_upright_row": {
+      "canonical_ru": "Тяга к подбородку в Смите",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "smith machine upright row",
+        "тяга к подбородку в смите"
+      ],
+      "fedb_id": "Smith_Machine_Upright_Row",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Upright_Row/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Upright_Row/1.jpg"
+    },
+    "cable_seated_lateral_raise": {
+      "canonical_ru": "Махи в стороны на блоке сидя",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "cable seated lateral raise",
+        "махи в стороны на блоке сидя"
+      ],
+      "fedb_id": "Cable_Seated_Lateral_Raise",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Seated_Lateral_Raise/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Seated_Lateral_Raise/1.jpg"
+    },
+    "seated_barbell_military_press": {
+      "canonical_ru": "Жим штанги сидя",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "seated barbell military press",
+        "жим штанги сидя"
+      ],
+      "fedb_id": "Seated_Barbell_Military_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Barbell_Military_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Barbell_Military_Press/1.jpg"
+    },
+    "standing_dumbbell_upright_row": {
+      "canonical_ru": "Тяга к подбородку с гантелями",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "standing dumbbell upright row",
+        "тяга к подбородку с гантелями"
+      ],
+      "fedb_id": "Standing_Dumbbell_Upright_Row",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Dumbbell_Upright_Row/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Dumbbell_Upright_Row/1.jpg"
+    },
+    "standing_dumbbell_press": {
+      "canonical_ru": "Жим гантелей стоя",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "standing dumbbell press",
+        "жим гантелей стоя"
+      ],
+      "fedb_id": "Standing_Dumbbell_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Dumbbell_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Dumbbell_Press/1.jpg"
+    },
+    "barbell_rear_delt_row": {
+      "canonical_ru": "Тяга в наклоне на заднюю дельту",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "barbell rear delt row",
+        "тяга в наклоне на заднюю дельту"
+      ],
+      "fedb_id": "Barbell_Rear_Delt_Row",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Rear_Delt_Row/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Rear_Delt_Row/1.jpg"
+    },
+    "smith_machine_overhead_shoulder_press": {
+      "canonical_ru": "Жим на плечи в Смите",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "smith machine overhead shoulder press",
+        "жим на плечи в смите"
+      ],
+      "fedb_id": "Smith_Machine_Overhead_Shoulder_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Overhead_Shoulder_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Overhead_Shoulder_Press/1.jpg"
+    },
+    "bent_over_dumbbell_rear_delt_raise_with_head_on_bench": {
+      "canonical_ru": "Разведение в наклоне с упором в скамью",
+      "muscle_group": "shoulders",
+      "aliases": [
+        "bent over dumbbell rear delt raise with head on bench",
+        "разведение в наклоне с упором в скамью"
+      ],
+      "fedb_id": "Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench/1.jpg"
+    },
+    "ez_bar_curl": {
+      "canonical_ru": "Сгибания EZ-штангой",
+      "muscle_group": "biceps",
+      "aliases": [
+        "ez-bar curl",
+        "сгибания ez-штангой"
+      ],
+      "fedb_id": "EZ-Bar_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/EZ-Bar_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/EZ-Bar_Curl/1.jpg"
+    },
+    "spider_curl": {
+      "canonical_ru": "Паучьи сгибания",
+      "muscle_group": "biceps",
+      "aliases": [
+        "spider curl",
+        "паучьи сгибания"
+      ],
+      "fedb_id": "Spider_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Spider_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Spider_Curl/1.jpg"
+    },
+    "zottman_curl": {
+      "canonical_ru": "Сгибания Зоттмана",
+      "muscle_group": "biceps",
+      "aliases": [
+        "zottman curl",
+        "сгибания зоттмана"
+      ],
+      "fedb_id": "Zottman_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Zottman_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Zottman_Curl/1.jpg"
+    },
+    "alternate_incline_dumbbell_curl": {
+      "canonical_ru": "Сгибания с гантелями попеременно",
+      "muscle_group": "biceps",
+      "aliases": [
+        "alternate incline dumbbell curl",
+        "сгибания с гантелями попеременно"
+      ],
+      "fedb_id": "Alternate_Incline_Dumbbell_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Alternate_Incline_Dumbbell_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Alternate_Incline_Dumbbell_Curl/1.jpg"
+    },
+    "cable_hammer_curls_rope_attachment": {
+      "canonical_ru": "Молот на блоке с канатом",
+      "muscle_group": "biceps",
+      "aliases": [
+        "cable hammer curls rope attachment",
+        "молот на блоке с канатом"
+      ],
+      "fedb_id": "Cable_Hammer_Curls_-_Rope_Attachment",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Hammer_Curls_-_Rope_Attachment/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Hammer_Curls_-_Rope_Attachment/1.jpg"
+    },
+    "machine_bicep_curl": {
+      "canonical_ru": "Сгибания на бицепс в тренажёре",
+      "muscle_group": "biceps",
+      "aliases": [
+        "machine bicep curl",
+        "сгибания на бицепс в тренажёре"
+      ],
+      "fedb_id": "Machine_Bicep_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Machine_Bicep_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Machine_Bicep_Curl/1.jpg"
+    },
+    "reverse_grip_triceps_pushdown": {
+      "canonical_ru": "Разгибание на блоке обратным хватом",
+      "muscle_group": "triceps",
+      "aliases": [
+        "reverse grip triceps pushdown",
+        "разгибание на блоке обратным хватом"
+      ],
+      "fedb_id": "Reverse_Grip_Triceps_Pushdown",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Reverse_Grip_Triceps_Pushdown/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Reverse_Grip_Triceps_Pushdown/1.jpg"
+    },
+    "lying_dumbbell_tricep_extension": {
+      "canonical_ru": "Французский жим гантелями лёжа",
+      "muscle_group": "triceps",
+      "aliases": [
+        "lying dumbbell tricep extension",
+        "французский жим гантелями лёжа"
+      ],
+      "fedb_id": "Lying_Dumbbell_Tricep_Extension",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Lying_Dumbbell_Tricep_Extension/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Lying_Dumbbell_Tricep_Extension/1.jpg"
+    },
+    "close_grip_push_up_off_of_a_dumbbell": {
+      "canonical_ru": "Алмазные отжимания",
+      "muscle_group": "triceps",
+      "aliases": [
+        "close-grip push-up off of a dumbbell",
+        "алмазные отжимания"
+      ],
+      "fedb_id": "Close-Grip_Push-Up_off_of_a_Dumbbell",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Close-Grip_Push-Up_off_of_a_Dumbbell/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Close-Grip_Push-Up_off_of_a_Dumbbell/1.jpg"
+    },
+    "tate_press": {
+      "canonical_ru": "Жим Тейта",
+      "muscle_group": "triceps",
+      "aliases": [
+        "tate press",
+        "жим тейта"
+      ],
+      "fedb_id": "Tate_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Tate_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Tate_Press/1.jpg"
+    },
+    "standing_overhead_barbell_triceps_extension": {
+      "canonical_ru": "Разгибание из-за головы со штангой стоя",
+      "muscle_group": "triceps",
+      "aliases": [
+        "standing overhead barbell triceps extension",
+        "разгибание из-за головы со штангой стоя"
+      ],
+      "fedb_id": "Standing_Overhead_Barbell_Triceps_Extension",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Overhead_Barbell_Triceps_Extension/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Overhead_Barbell_Triceps_Extension/1.jpg"
+    },
+    "triceps_pushdown_v_bar_attachment": {
+      "canonical_ru": "Разгибание на блоке с V-рукоятью",
+      "muscle_group": "triceps",
+      "aliases": [
+        "triceps pushdown v-bar attachment",
+        "разгибание на блоке с v-рукоятью"
+      ],
+      "fedb_id": "Triceps_Pushdown_-_V-Bar_Attachment",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Triceps_Pushdown_-_V-Bar_Attachment/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Triceps_Pushdown_-_V-Bar_Attachment/1.jpg"
+    },
+    "seated_dumbbell_palms_up_wrist_curl": {
+      "canonical_ru": "Сгибания запястий с гантелями сидя",
+      "muscle_group": "forearms",
+      "aliases": [
+        "seated dumbbell palms-up wrist curl",
+        "сгибания запястий с гантелями сидя"
+      ],
+      "fedb_id": "Seated_Dumbbell_Palms-Up_Wrist_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Dumbbell_Palms-Up_Wrist_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Dumbbell_Palms-Up_Wrist_Curl/1.jpg"
+    },
+    "standing_palms_up_barbell_behind_the_back_wrist_curl": {
+      "canonical_ru": "Сгибания запястий за спиной",
+      "muscle_group": "forearms",
+      "aliases": [
+        "standing palms-up barbell behind the back wrist curl",
+        "сгибания запястий за спиной"
+      ],
+      "fedb_id": "Standing_Palms-Up_Barbell_Behind_The_Back_Wrist_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Palms-Up_Barbell_Behind_The_Back_Wrist_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Standing_Palms-Up_Barbell_Behind_The_Back_Wrist_Curl/1.jpg"
+    },
+    "wrist_roller": {
+      "canonical_ru": "Кистевой ролик",
+      "muscle_group": "forearms",
+      "aliases": [
+        "wrist roller",
+        "кистевой ролик"
+      ],
+      "fedb_id": "Wrist_Roller",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Wrist_Roller/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Wrist_Roller/1.jpg"
+    },
+    "cable_wrist_curl": {
+      "canonical_ru": "Сгибания запястий на блоке",
+      "muscle_group": "forearms",
+      "aliases": [
+        "cable wrist curl",
+        "сгибания запястий на блоке"
+      ],
+      "fedb_id": "Cable_Wrist_Curl",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Wrist_Curl/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Wrist_Curl/1.jpg"
+    },
+    "weighted_crunches": {
+      "canonical_ru": "Скручивания с весом",
+      "muscle_group": "abs",
+      "aliases": [
+        "weighted crunches",
+        "скручивания с весом"
+      ],
+      "fedb_id": "Weighted_Crunches",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Weighted_Crunches/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Weighted_Crunches/1.jpg"
+    },
+    "toe_touchers": {
+      "canonical_ru": "Касания носков лёжа",
+      "muscle_group": "abs",
+      "aliases": [
+        "toe touchers",
+        "касания носков лёжа"
+      ],
+      "fedb_id": "Toe_Touchers",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Toe_Touchers/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Toe_Touchers/1.jpg"
+    },
+    "side_jackknife": {
+      "canonical_ru": "Боковая складка",
+      "muscle_group": "abs",
+      "aliases": [
+        "side jackknife",
+        "боковая складка"
+      ],
+      "fedb_id": "Side_Jackknife",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Side_Jackknife/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Side_Jackknife/1.jpg"
+    },
+    "ab_crunch_machine": {
+      "canonical_ru": "Скручивания в тренажёре",
+      "muscle_group": "abs",
+      "aliases": [
+        "ab crunch machine",
+        "скручивания в тренажёре"
+      ],
+      "fedb_id": "Ab_Crunch_Machine",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Ab_Crunch_Machine/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Ab_Crunch_Machine/1.jpg"
+    },
+    "oblique_crunches": {
+      "canonical_ru": "Косые скручивания",
+      "muscle_group": "abs",
+      "aliases": [
+        "oblique crunches",
+        "косые скручивания"
+      ],
+      "fedb_id": "Oblique_Crunches",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Oblique_Crunches/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Oblique_Crunches/1.jpg"
+    },
+    "pallof_press": {
+      "canonical_ru": "Жим Паллова",
+      "muscle_group": "core",
+      "aliases": [
+        "pallof press",
+        "жим паллова"
+      ],
+      "fedb_id": "Pallof_Press",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Pallof_Press/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Pallof_Press/1.jpg"
+    },
+    "russian_twist": {
+      "canonical_ru": "Русские скручивания (с поворотом)",
+      "muscle_group": "core",
+      "aliases": [
+        "russian twist",
+        "русские скручивания (с поворотом)"
+      ],
+      "fedb_id": "Russian_Twist",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Russian_Twist/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Russian_Twist/1.jpg"
+    },
+    "dead_bug": {
+      "canonical_ru": "«Мёртвый жук»",
+      "muscle_group": "core",
+      "aliases": [
+        "dead bug",
+        "«мёртвый жук»"
+      ],
+      "fedb_id": "Dead_Bug",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dead_Bug/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dead_Bug/1.jpg"
+    },
+    "reverse_hyperextension": {
+      "canonical_ru": "Обратная гиперэкстензия",
+      "muscle_group": "core",
+      "aliases": [
+        "reverse hyperextension",
+        "обратная гиперэкстензия"
+      ],
+      "fedb_id": "Reverse_Hyperextension",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Reverse_Hyperextension/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Reverse_Hyperextension/1.jpg"
+    },
+    "barbell_walking_lunge": {
+      "canonical_ru": "Выпады при ходьбе со штангой",
+      "muscle_group": "quads",
+      "aliases": [
+        "barbell walking lunge",
+        "выпады при ходьбе со штангой"
+      ],
+      "fedb_id": "Barbell_Walking_Lunge",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Walking_Lunge/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Walking_Lunge/1.jpg"
+    },
+    "smith_machine_pistol_squat": {
+      "canonical_ru": "Присед-пистолет в Смите",
+      "muscle_group": "quads",
+      "aliases": [
+        "smith machine pistol squat",
+        "присед-пистолет в смите"
+      ],
+      "fedb_id": "Smith_Machine_Pistol_Squat",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Pistol_Squat/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Pistol_Squat/1.jpg"
+    },
+    "hack_squat": {
+      "canonical_ru": "Гакк-присед в тренажёре",
+      "muscle_group": "quads",
+      "aliases": [
+        "hack squat",
+        "гакк-присед в тренажёре"
+      ],
+      "fedb_id": "Hack_Squat",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Hack_Squat/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Hack_Squat/1.jpg"
+    },
+    "split_squat_with_dumbbells": {
+      "canonical_ru": "Болгарские выпады с гантелями",
+      "muscle_group": "quads",
+      "aliases": [
+        "split squat with dumbbells",
+        "болгарские выпады с гантелями"
+      ],
+      "fedb_id": "Split_Squat_with_Dumbbells",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Split_Squat_with_Dumbbells/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Split_Squat_with_Dumbbells/1.jpg"
+    },
+    "step_up_with_knee_raise": {
+      "canonical_ru": "Зашагивания с подъёмом колена",
+      "muscle_group": "quads",
+      "aliases": [
+        "step-up with knee raise",
+        "зашагивания с подъёмом колена"
+      ],
+      "fedb_id": "Step-up_with_Knee_Raise",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Step-up_with_Knee_Raise/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Step-up_with_Knee_Raise/1.jpg"
+    },
+    "barbell_side_split_squat": {
+      "canonical_ru": "Боковой сплит-присед со штангой",
+      "muscle_group": "quads",
+      "aliases": [
+        "barbell side split squat",
+        "боковой сплит-присед со штангой"
+      ],
+      "fedb_id": "Barbell_Side_Split_Squat",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Side_Split_Squat/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Side_Split_Squat/1.jpg"
+    },
+    "glute_ham_raise": {
+      "canonical_ru": "Нордические сгибания (glute-ham)",
+      "muscle_group": "hamstrings",
+      "aliases": [
+        "glute ham raise",
+        "нордические сгибания (glute-ham)"
+      ],
+      "fedb_id": "Glute_Ham_Raise",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Glute_Ham_Raise/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Glute_Ham_Raise/1.jpg"
+    },
+    "seated_good_mornings": {
+      "canonical_ru": "Гудморнинг сидя",
+      "muscle_group": "hamstrings",
+      "aliases": [
+        "seated good mornings",
+        "гудморнинг сидя"
+      ],
+      "fedb_id": "Seated_Good_Mornings",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Good_Mornings/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Seated_Good_Mornings/1.jpg"
+    },
+    "good_morning": {
+      "canonical_ru": "Гудморнинг со штангой",
+      "muscle_group": "hamstrings",
+      "aliases": [
+        "good morning",
+        "гудморнинг со штангой"
+      ],
+      "fedb_id": "Good_Morning",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Good_Morning/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Good_Morning/1.jpg"
+    },
+    "donkey_calf_raises": {
+      "canonical_ru": "Подъём на носки «ослик»",
+      "muscle_group": "calves",
+      "aliases": [
+        "donkey calf raises",
+        "подъём на носки «ослик»"
+      ],
+      "fedb_id": "Donkey_Calf_Raises",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Donkey_Calf_Raises/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Donkey_Calf_Raises/1.jpg"
+    },
+    "smith_machine_calf_raise": {
+      "canonical_ru": "Подъём на носки в Смите",
+      "muscle_group": "calves",
+      "aliases": [
+        "smith machine calf raise",
+        "подъём на носки в смите"
+      ],
+      "fedb_id": "Smith_Machine_Calf_Raise",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Calf_Raise/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Smith_Machine_Calf_Raise/1.jpg"
+    },
+    "front_box_jump": {
+      "canonical_ru": "Запрыгивания на тумбу фронтально",
+      "muscle_group": "functional",
+      "aliases": [
+        "front box jump",
+        "запрыгивания на тумбу фронтально"
+      ],
+      "fedb_id": "Front_Box_Jump",
+      "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Front_Box_Jump/0.jpg",
+      "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Front_Box_Jump/1.jpg"
     }
   }
 }

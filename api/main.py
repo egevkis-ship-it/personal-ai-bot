@@ -364,6 +364,82 @@ def _access_public(row: dict, viewer_uid: str) -> dict:
     }
 
 
+def _load_rename_map() -> dict:
+    """DB-4/6: legacy exercise name → canonical v2 name (data/legacy_rename_map.json)."""
+    p = os.path.join(os.path.dirname(__file__), "..", "data", "legacy_rename_map.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            m = json.load(f)
+        return {str(k): str(v) for k, v in (m or {}).items() if k and v and str(k) != str(v)}
+    except Exception:
+        return {}
+
+
+async def _migrate_legacy_names() -> None:
+    """DB-4/6: rename legacy exercise names to their canonical v2 form across ALL
+    stored data — exercise_sets.exercise_name, exercise_aliases.canonical, and the
+    JSONB name fields inside planned_workouts.exercises[] and routines.days[].exercises[].
+    Canonical names are shared (not per-user), so this is global. Idempotent: every
+    UPDATE is keyed on the old name, so a re-run finds nothing. Guarded by a marker
+    keyed on the map's content hash, so it runs once per map version (and re-runs
+    automatically if the map grows). Logs before/after affected counts. The whole
+    thing is one transaction; on failure it rolls back (marker not kept) and retries
+    next boot. A failure never crashes startup."""
+    import hashlib
+    rename = _load_rename_map()
+    if not rename:
+        return
+    digest = hashlib.sha256(json.dumps(rename, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+    marker = f"legacy_rename:{digest}"
+    async with get_session() as s:
+        await s.execute(text(
+            "CREATE TABLE IF NOT EXISTS data_migrations ("
+            "key TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"))
+        if (await s.execute(text("SELECT 1 FROM data_migrations WHERE key = :k"), {"k": marker})).scalar():
+            return  # already applied for this exact map
+        counts = {"exercise_sets": 0, "exercise_aliases": 0, "planned_workouts": 0, "routines": 0}
+        for old, new in rename.items():
+            r = await s.execute(text("UPDATE exercise_sets SET exercise_name = :new WHERE exercise_name = :old"),
+                                {"new": new, "old": old})
+            counts["exercise_sets"] += r.rowcount or 0
+            r = await s.execute(text("UPDATE exercise_aliases SET canonical = :new WHERE canonical = :old"),
+                                {"new": new, "old": old})
+            counts["exercise_aliases"] += r.rowcount or 0
+        # planned_workouts.exercises JSONB: [{name, ...}]
+        for row in (await s.execute(text("SELECT id, exercises FROM planned_workouts"))).mappings().all():
+            exs = row["exercises"]
+            if isinstance(exs, str):
+                exs = json.loads(exs or "[]")
+            if not isinstance(exs, list):
+                continue
+            changed = False
+            for e in exs:
+                if isinstance(e, dict) and e.get("name") in rename:
+                    e["name"] = rename[e["name"]]; changed = True
+            if changed:
+                await s.execute(text("UPDATE planned_workouts SET exercises = CAST(:exs AS jsonb) WHERE id = :id"),
+                                {"exs": json.dumps(exs, ensure_ascii=False), "id": row["id"]})
+                counts["planned_workouts"] += 1
+        # routines.days JSONB: [{exercises:[{name, ...}]}]
+        for row in (await s.execute(text("SELECT id, days FROM routines"))).mappings().all():
+            days = row["days"]
+            if isinstance(days, str):
+                days = json.loads(days or "[]")
+            if not isinstance(days, list):
+                continue
+            changed = False
+            for d in days:
+                for e in (d.get("exercises") or []) if isinstance(d, dict) else []:
+                    if isinstance(e, dict) and e.get("name") in rename:
+                        e["name"] = rename[e["name"]]; changed = True
+            if changed:
+                await s.execute(text("UPDATE routines SET days = CAST(:days AS jsonb) WHERE id = :id"),
+                                {"days": json.dumps(days, ensure_ascii=False), "id": row["id"]})
+                counts["routines"] += 1
+        await s.execute(text("INSERT INTO data_migrations (key) VALUES (:k) ON CONFLICT DO NOTHING"), {"k": marker})
+        log.info("legacy_rename migration applied marker=%s map_size=%d affected=%s", marker, len(rename), counts)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     log.info("API startup: env=%s release=%s sentry=%s", APP_ENV, GIT_SHA or "unknown", bool(SENTRY_DSN))
@@ -380,6 +456,10 @@ async def _startup() -> None:
                 """),
                 {"u": OWNER_UID},
             )
+    try:
+        await _migrate_legacy_names()  # DB-4/6: canonicalize legacy names in existing data
+    except Exception:
+        log.exception("legacy_rename migration failed (non-fatal, will retry next boot)")
     if not IS_PROD:  # local dev convenience: seed demo data for the dev user
         dev = os.getenv("DEV_UID", "local")
         have = await _scalar("SELECT COUNT(*) FROM workouts WHERE user_id=:u", u=dev) or 0

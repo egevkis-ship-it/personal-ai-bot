@@ -198,6 +198,25 @@ def test_canonical_name_snaps_every_catalog_entry():
         assert _canon_static("икры стоя") == key_to_name(k) != "икры стоя"
 
 
+def test_legacy_rename_map_targets_are_canonical():
+    """DB-4/6: every legacy_rename_map value is a catalog canonical (so the data
+    migration writes canonical names), and every legacy key resolves to that same
+    canonical via the catalog (so DB-5 snaps the same string on save going forward).
+    Guards against map/catalog drift."""
+    from api.main import _load_rename_map, name_to_key, key_to_name, _canon_static
+    rename = _load_rename_map()
+    assert rename, "legacy_rename_map should be present"
+    bad_target, bad_key = [], []
+    for old, new in rename.items():
+        if _canon_static(new) != new:                  # target must be a canonical
+            bad_target.append((old, new, _canon_static(new)))
+        k = name_to_key(old)                           # legacy name must alias the target
+        if not k or key_to_name(k) != new:
+            bad_key.append((old, new, key_to_name(k) if k else None))
+    assert not bad_target, f"{len(bad_target)} rename targets aren't catalog canonicals: {bad_target[:5]}"
+    assert not bad_key, f"{len(bad_key)} legacy keys don't resolve to their mapped canonical: {bad_key[:5]}"
+
+
 # ── admin / registration flow ───────────────────────────────────────────────
 
 def test_admin_flow_owner_and_last_admin_guards(client):
