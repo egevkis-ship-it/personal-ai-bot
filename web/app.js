@@ -235,7 +235,7 @@ function renderActive(w) {
     const done = ex.done;
     const next = !done && working.length >= 0 && i === w.exercises.findIndex(e => !e.done);
     const sub = working.length ? working.map(s => setLabel(s)).join(' · ')
-      : (ex.target ? `цель ${ex.target_sets || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) : ''}` : 'нет подходов');
+      : (ex.target ? `цель ${ex.target_sets || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) + ' кг' : ''}` : 'нет подходов');
     const open = exp === i;
     const row = `<div class="card list-item ex-row" style="${next ? 'border:2px solid var(--info);' : ''}${open ? 'margin-bottom:0' : ''}" onclick="toggleExercise(${w.id},${i})">
       <div class="ic">${done ? '✅' : next ? '▶️' : '⚪️'}</div>
