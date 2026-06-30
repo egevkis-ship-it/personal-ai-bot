@@ -1782,42 +1782,37 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
     return out
 
 
-async def _canonical_name(raw: str, uid: str) -> str:
-    """Canonicalize a free-text exercise name. FIRST snap against the unified
-    catalog (catalog_v2 NAME_INDEX) deterministically — any known name/alias becomes
-    its canonical_ru with NO AI, so plan-save and set-logging agree and no duplicate
-    exercises are spawned (DB-5). Only genuinely unknown names fall back to the
-    self-learning AI normalizer, whose result is itself re-snapped to the catalog so
-    a near-alias collapses to the canon rather than a near-duplicate. Over the AI cap
-    or on any failure we keep the original name — never blocks the save."""
+async def _resolve_name(raw: str) -> Optional[str]:
+    """DB-5/DB-7: resolve an exercise name to its canonical form ONLY by an EXACT
+    match — the static catalog (name_to_key) or a previously user-confirmed alias in
+    the DB cache (resolve_known). NO AI, NO fuzzy. Returns None when the name is
+    unknown, so the client runs the DB-7 matching dialog and the USER decides — we
+    never auto-rename a near-match."""
     raw = (raw or "").strip()
     if not raw:
-        return raw
-    # 1) deterministic catalog hit — instant canon, no AI
+        return None
     key = name_to_key(raw)
     if key:
         return key_to_name(key)
     try:
-        if await _ai_over_limit(uid):  # don't start new AI work past the daily cap
-            return raw
-        from app.bot.services.exercise_catalog import resolve_or_register
-        res = await resolve_or_register(raw)
-        if (res or {}).get("source") == "ai":
-            try:
-                await check_and_bump_ai(uid)  # count the actual AI call
-            except HTTPException:
-                pass
-        canon = ((res or {}).get("canonical") or "").strip()
+        from app.bot.services.exercise_catalog import resolve_known
+        r = await resolve_known(raw)          # static lib + DB alias cache only (no AI write)
+        canon = ((r or {}).get("canonical") or "").strip()
         if canon:
-            # 2) re-snap the AI result onto the catalog (alias → canon, not near-dupe)
-            k2 = name_to_key(canon)
-            if k2:
-                return key_to_name(k2)
-            if canon.lower() != raw.lower():
-                return canon
+            k2 = name_to_key(canon)           # re-snap a cached canonical onto the current catalog
+            return key_to_name(k2) if k2 else canon
     except Exception:
         pass
-    return raw
+    return None
+
+
+async def _canonical_name(raw: str, uid: str) -> str:
+    """DB-5 (corrected 2026-06-30): canonicalize ONLY on an exact match (catalog or a
+    user-confirmed alias). NEVER auto-rename an unknown name via AI/fuzzy — it is
+    kept exactly as typed; the client surfaces the DB-7 matching dialog so the user
+    decides. uid is kept for call-site compatibility."""
+    raw = (raw or "").strip()
+    return (await _resolve_name(raw)) or raw
 
 
 async def _normalize_plan_exercises(exs: list[dict], uid: str) -> list[dict]:

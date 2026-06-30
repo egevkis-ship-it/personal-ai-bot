@@ -224,6 +224,25 @@ def test_archive_bulk_save_atomic(client):
     assert len(client.get("/api/workouts?days=4000").json()) == before  # nothing inserted
 
 
+def test_canonical_name_no_auto_rename(monkeypatch):
+    """DB-5 (corrected): an unknown name is NOT auto-renamed (no AI / no fuzzy) —
+    it's kept exactly as typed for the DB-7 dialog; exact catalog names/aliases
+    still resolve deterministically."""
+    import asyncio
+    import app.bot.services.exercise_catalog as ec
+
+    async def fake_resolve_known(name):  # simulate "not in the alias cache"
+        return None
+    monkeypatch.setattr(ec, "resolve_known", fake_resolve_known)
+    from api.main import _canonical_name, _resolve_name, name_to_key, key_to_name
+    # exact catalog alias still resolves
+    assert asyncio.run(_resolve_name("икры стоя")) == key_to_name(name_to_key("икры стоя"))
+    # a clearly-unknown name → unresolved (None) and kept verbatim
+    unknown = "Жим зюзюблик три-четыре банана"
+    assert asyncio.run(_resolve_name(unknown)) is None
+    assert asyncio.run(_canonical_name(unknown, "local")) == unknown
+
+
 def test_parse_logged_workouts_robust_to_malformed(monkeypatch):
     """HIST-2 hardening: malformed AI shapes (non-list workouts/exercises/sets,
     non-dict items, non-JSON) are skipped — never crash; is_failure is captured."""
