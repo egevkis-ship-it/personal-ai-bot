@@ -283,7 +283,7 @@ function toggleDone(name) {
 function accordionBody(wid, ex) {
   const sets = ex.sets.map(s => `<div class="row sp" style="padding:7px 2px;border-bottom:1px solid var(--line)">
     <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
-    <span><span class="muted" onclick="event.stopPropagation();editSet(${s.id},${wid})" style="cursor:pointer;padding:2px 8px">✏️</span><span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="event.stopPropagation();rmSet(${s.id},${wid})">🗑</span></span></div>`).join('');
+    <span><span class="muted" onclick="event.stopPropagation();editSet(${s.id},${wid})" style="cursor:pointer;padding:2px 8px">✏️</span><span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="event.stopPropagation();rmSet(${s.id},${wid})">✕</span></span></div>`).join('');
   const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}</div>` : '';
   const isDone = (STATE.doneSet || new Set()).has(ex.name);   // W2-9: manual done
   const doneBtn = `<button class="btn ${isDone ? 'sec' : 'success'} sm" style="margin-top:10px" onclick='event.stopPropagation();toggleDone(${esc(JSON.stringify(ex.name))})'>${isDone ? '↺ Снять «выполнено»' : '✓ Готово'}</button>`;
@@ -671,7 +671,7 @@ function workoutMenu(wid) {
   sheet(`<h2>Тренировка</h2>
     <div class="list-item" onclick="noteSheet(${wid})"><div class="ic">📝</div>Заметка к тренировке</div>
     <div class="list-item" onclick="closeSheet();go('home')"><div class="ic">⏸</div>Свернуть (продолжу позже)</div>
-    <div class="list-item" style="color:var(--danger)" onclick="delWorkout(${wid})"><div class="ic">🗑</div>Удалить тренировку</div>`);
+    <div class="list-item" style="color:var(--danger)" onclick="delWorkout(${wid})"><div class="ic">✕</div>Удалить тренировку</div>`);
 }
 function noteSheet(wid) {
   sheet(`<h2>Заметка</h2><textarea id="note" style="width:100%;min-height:90px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--card);color:var(--txt);font-size:15px"></textarea>
@@ -843,7 +843,7 @@ function renderArchive() {
   const cal = monthCalendar(A.cal || (A.date.slice(0, 7) + '-01'), {}, A.date, 'archPickDate', 'archCalNav');
   const exItems = A.exercises.length ? A.exercises.map((ex, i) => `<div class="card list-item ex-row">
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(ex.sets.map(setLabel).join(' · ')) || 'нет подходов'}</div></div>
-      <span style="color:var(--danger);cursor:pointer;padding:4px 6px" onclick="archRemoveEx(${i})">🗑</span></div>`).join('')
+      <span style="color:var(--danger);cursor:pointer;padding:4px 6px" onclick="archRemoveEx(${i})">✕</span></div>`).join('')
     : '<div class="card muted small">Упражнения не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span>
     <h2 style="margin-bottom:2px">Прошлая тренировка</h2>
@@ -908,7 +908,7 @@ function renderArchPreview() {
       <span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="archPrevRmEx(${i},${j})">✕</span></div>`).join('');
     const warn = w.date ? '' : ' <span style="color:var(--warn)">— укажи дату</span>';
     return `<div class="card" style="margin-bottom:10px">
-      <div class="row sp"><b>Тренировка ${i + 1}</b><span style="color:var(--danger);cursor:pointer" onclick="archPrevRmWk(${i})">🗑</span></div>
+      <div class="row sp"><b>Тренировка ${i + 1}</b><span style="color:var(--danger);cursor:pointer" onclick="archPrevRmWk(${i})">✕</span></div>
       <div class="mfield" style="margin-top:6px"><label>Дата${w.date_text ? ` (из текста: «${esc(w.date_text)}»)` : ''}${warn}</label>
         <input type="date" max="${todayISO()}" value="${esc(w.date)}" onchange="archPrevSet(${i},'date',this.value)"></div>
       <div class="mfield" style="margin-top:8px"><label>Фокус</label>
@@ -1455,7 +1455,7 @@ async function PlanView(pid) {
     <button class="btn success" style="margin-top:14px" onclick="startFromPlan(${p.id})">▶ Начать тренировку</button>
     <button class="btn ghost" style="margin-top:8px" onclick="go('planEdit',${p.id})">✏️ Редактировать</button>
     <button class="btn ghost" style="margin-top:8px" onclick="planToTemplate(${p.id})">💾 Сохранить как шаблон</button>
-    <button class="btn danger" style="margin-top:8px" onclick="askDeletePlan(${p.id}, () => go(STATE.planFrom||'schedule'))">🗑 Удалить</button>`;
+    <button class="btn danger" style="margin-top:8px" onclick="askDeletePlan(${p.id}, () => go(STATE.planFrom||'schedule'))">Удалить</button>`;
 }
 
 // ── Schedule (view-only: day / week / month) ────────────────────────────────
@@ -1680,7 +1680,7 @@ async function PlanEdit(param) {
   const exItems = P.exercises.length ? P.exercises.map((ex, i) => `<div class="card list-item">
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div></div>
       <span class="muted" onclick="planEditEx(${i})" style="cursor:pointer">✏️</span> &nbsp;
-      <span style="color:var(--danger);cursor:pointer" onclick="planRemoveEx(${i})">🗑</span></div>`).join('')
+      <span style="color:var(--danger);cursor:pointer" onclick="planRemoveEx(${i})">✕</span></div>`).join('')
     : '<div class="card muted small">Упражнения не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span>
     <h2>${P.id ? 'Редактировать план' : 'Новый план'}</h2>
@@ -1949,7 +1949,7 @@ async function RoutineEdit(param) {
   const dayItems = R.days.length ? R.days.map((d, i) => `<div class="card list-item" onclick="go('routineDay',${i})">
     <div class="ic">${WD_SHORT[d.weekday]}</div>
     <div style="flex:1"><b>${WD_FULL[d.weekday]}</b><div class="small muted">${esc(d.focus_label || 'без фокуса')} · ${(d.exercises || []).length} упр.</div></div>
-    <span style="color:var(--danger);cursor:pointer" onclick="event.stopPropagation();routineRemoveDay(${i})">🗑</span></div>`).join('') : '<div class="card muted small">Дни не добавлены</div>';
+    <span style="color:var(--danger);cursor:pointer" onclick="event.stopPropagation();routineRemoveDay(${i})">✕</span></div>`).join('') : '<div class="card muted small">Дни не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="go('routines')">‹ Шаблоны</span>
     <h2>${R.id ? 'Редактировать шаблон' : 'Новый шаблон'}</h2>
     <div class="mfield" style="margin-top:8px"><label>Название</label><input id="r_name" value="${esc(R.name)}" placeholder="напр. Сплит 3 дня"></div>
@@ -1991,7 +1991,7 @@ function RoutineDay(i) {
   const exItems = d.exercises.length ? d.exercises.map((ex, j) => `<div class="card list-item">
     <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(exLine(ex))}</div></div>
     <span class="muted" style="cursor:pointer" onclick="rEditEx(${j})">✏️</span> &nbsp;
-    <span style="color:var(--danger);cursor:pointer" onclick="rRemoveEx(${j})">🗑</span></div>`).join('') : '<div class="card muted small">Упражнения не добавлены</div>';
+    <span style="color:var(--danger);cursor:pointer" onclick="rRemoveEx(${j})">✕</span></div>`).join('') : '<div class="card muted small">Упражнения не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="rDayBack()">‹ Шаблон</span><h2>${WD_FULL[d.weekday]}</h2>
     <div class="mfield" style="margin-top:8px"><label>Фокус</label><input id="rd_focus" value="${esc(d.focus_label || '')}" placeholder="напр. Грудь / Трицепс"></div>
     <div class="muted small" style="margin:16px 0 6px">Упражнения</div>

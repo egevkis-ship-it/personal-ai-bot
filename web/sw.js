@@ -20,7 +20,7 @@
 // create-only. v19: manual plan create gets a calendar picker (occupied days
 // v21: feed remembers the selected day on return + «сегодня» marker in month grid.
 // marked). v20: «💤 Отдых» days + Apple-style month → centered scrolling day feed.
-const CACHE = 'fit-proto-v47';
+const CACHE = 'fit-proto-v48';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
