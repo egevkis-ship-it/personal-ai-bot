@@ -346,15 +346,18 @@ function setLabel(s) {
 function initSetEntry(wid, ex, onSave) {
   const type = ex.type || 'strength';
   const tgt = ex.target || {}, last = ex.last || {};
+  // W2-8: prefill = a copy of the LAST recorded set today (so repeating a set is one
+  // tap); for the first set fall back to the program target (planned) or the previous
+  // workout / a default (free).
+  const todayWorking = (ex.sets || []).filter(s => !s.is_warmup);
+  const prev = todayWorking.length ? todayWorking[todayWorking.length - 1] : null;
   window._setCtx = {
     wid, ex, type, onSave,
-    w: tgt.weight_kg ?? last.weight_kg ?? 20,
-    reps: tgt.reps ?? last.reps ?? 10,
-    dur: tgt.duration_seconds ?? last.duration_seconds ?? 60,
+    w: (prev && prev.weight_kg != null ? prev.weight_kg : null) ?? tgt.weight_kg ?? last.weight_kg ?? 20,
+    reps: (prev && prev.reps != null ? prev.reps : null) ?? tgt.reps ?? last.reps ?? 10,
+    dur: (prev && prev.duration_seconds != null ? prev.duration_seconds : null) ?? tgt.duration_seconds ?? last.duration_seconds ?? 60,
   };
-  const planned = ex.target_sets ?? tgt.target_sets ?? null;   // no plan → 1 (time) / 3 (else)
-  const n = Math.max(1, Math.min(12, planned || (type === 'time' ? 1 : 3)));
-  window._setRows = Array.from({ length: n }, () => ({}));
+  window._setRows = [{}];   // W2-8: start with ONE row
 }
 function setEntryHtml(wid, withFreetext) {
   const type = (window._setCtx || {}).type || 'strength';
@@ -366,8 +369,8 @@ function setEntryHtml(wid, withFreetext) {
     <div class="field"><input id="freetext" placeholder="80x10, 82x8, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`;
   return `${timer}
     <div id="setrows"></div>
-    <button class="btn ghost sm" style="margin-top:2px" onclick="addSetRow()">➕ Добавить ещё подход</button>
-    <button class="btn" id="savesets" style="margin-top:12px" onclick="confirmSets()">✓ Сохранить</button>
+    <button class="btn ghost sm" style="margin-top:2px" onclick="addSetRow()">➕ Добавить подход</button>
+    <button class="btn" id="savesets" style="margin-top:12px" onclick="confirmSets()">✓ Записать</button>
     ${freetext}`;
 }
 // add-set sheet (archive composer draft). onSave: confirmSets hands the sets to it
@@ -398,7 +401,7 @@ function setInputRow(c, i, r) {
 function renderSetRows() {
   const box = document.getElementById('setrows'); if (!box) return;
   box.innerHTML = window._setRows.map((r, i) => setInputRow(window._setCtx, i, r)).join('');
-  const b = document.getElementById('savesets'); if (b) b.textContent = `✓ Сохранить (${window._setRows.length})`;
+  const b = document.getElementById('savesets'); if (b) b.textContent = window._setRows.length > 1 ? `✓ Записать (${window._setRows.length})` : '✓ Записать';
 }
 function _readSetRows() {
   const c = window._setCtx;
@@ -416,7 +419,7 @@ function _readSetRows() {
     }
   });
 }
-function addSetRow() { _readSetRows(); window._setRows.push({}); renderSetRows(); }
+function addSetRow() { _readSetRows(); const last = window._setRows[window._setRows.length - 1] || {}; window._setRows.push({ ...last }); renderSetRows(); }  // W2-8: copy previous
 function rmSetRow(i) { _readSetRows(); window._setRows.splice(i, 1); if (!window._setRows.length) window._setRows.push({}); renderSetRows(); }
 // live count-up timer for time-based exercises: stop appends a row with the elapsed time
 function toggleSetTimer() {
