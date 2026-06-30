@@ -1342,7 +1342,7 @@ async def assemble_workout(uid: str, wid: int) -> dict:
         return {"name": name, "key": key, "type": exercise_type(name, key), "sets": logged,
                 "target": suggestion_from_plan(target) if target else None, "target_sets": tgt_sets,
                 "last": await last_result(uid, name),
-                "done": bool(tgt_sets) and len(working) >= tgt_sets, "in_plan": target is not None}
+                "done": False, "in_plan": target is not None}   # W2-9: no auto-done; «Готово» is a manual front-end state
 
     for pe in plan_exs:
         if pe.get("name"):
