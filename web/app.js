@@ -513,17 +513,35 @@ function _cachedSettings() { try { return JSON.parse(localStorage.getItem('setti
 function restEnabled() { const s = window._SETTINGS || _cachedSettings() || {}; return s.rest_timer_enabled !== false; }
 function restSecs() { const s = window._SETTINGS || _cachedSettings() || {}; return s.rest_timer_seconds || 90; }
 
-// rest timer overlay
+// rest timer overlay — WK-5: build the sheet ONCE; the interval updates only the
+// number (textContent) and the ring offset (CSS-animated), never re-rendering the
+// DOM, so the countdown is smooth and the sheet never flickers.
+const _RING_C = 2 * Math.PI * 54;  // circumference of the r=54 progress circle
 function restTimer(seconds) {
-  let s = seconds || 90;
+  closeRest();  // never stack two overlays
+  let s = seconds || 90, total = s;
   const bg = document.createElement('div'); bg.className = 'sheet-bg'; bg.id = 'restbg';
-  const draw = () => bg.innerHTML = `<div class="sheet" style="text-align:center"><div class="grip"></div>
-    <div class="muted small">Отдых</div><div class="timer">${mmss(s)}</div>
+  bg.innerHTML = `<div class="sheet" style="text-align:center"><div class="grip"></div>
+    <div class="muted small">Отдых</div>
+    <div class="rest-ring">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="rr-track" cx="60" cy="60" r="54"></circle>
+        <circle class="rr-prog" cx="60" cy="60" r="54" style="stroke-dasharray:${_RING_C.toFixed(2)}"></circle>
+      </svg>
+      <div class="timer" id="restNum">${mmss(s)}</div>
+    </div>
     <div class="grid2"><button class="btn sec sm" onclick="restAdd(30)">+30 сек</button>
     <button class="btn sm" onclick="closeRest()">Пропустить</button></div></div>`;
-  draw(); document.body.appendChild(bg);
-  window._restAdd = n => { s += n; };
-  bg._iv = setInterval(() => { s--; if (s <= 0) { closeRest(); toast('Отдых окончен'); } else draw(); }, 1000);
+  document.body.appendChild(bg);
+  const numEl = bg.querySelector('#restNum'), progEl = bg.querySelector('.rr-prog');
+  const paint = () => {
+    numEl.textContent = mmss(Math.max(0, s));
+    const frac = total > 0 ? Math.max(0, Math.min(1, s / total)) : 0;
+    progEl.style.strokeDashoffset = (_RING_C * (1 - frac)).toFixed(2);  // ring empties as time runs out
+  };
+  paint();
+  window._restAdd = n => { s += n; total += n; paint(); };
+  bg._iv = setInterval(() => { s--; if (s <= 0) { closeRest(); toast('Отдых окончен'); } else paint(); }, 1000);
 }
 function restAdd(n) { window._restAdd(n); }
 function closeRest() { const b = document.getElementById('restbg'); if (b) { clearInterval(b._iv); b.remove(); } }
