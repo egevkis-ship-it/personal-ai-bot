@@ -127,6 +127,9 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.2px;margin:0 0 10px}
 .setrow .x{flex:0 0 auto;font-size:15px;opacity:.6}
 .setrow .srwu{flex:0 0 auto;padding:5px 9px;font-size:12px}
 .setrow .srdel{flex:0 0 auto;color:var(--danger);cursor:pointer;padding:4px 6px;font-size:15px}
+/* W2-1: inline set-entry accordion under an exercise row — visually joined */
+.acc-body{margin-top:0;border-top-left-radius:0;border-top-right-radius:0;
+  border-top:1px solid var(--line);box-shadow:var(--shadow)}
 .spark{width:100%;height:44px}
 .mfield{background:var(--sec);border-radius:var(--r-sm);padding:8px 10px}
 .mfield label{font-size:11px;color:var(--txt2);display:block}

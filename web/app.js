@@ -226,17 +226,23 @@ async function Active(id) {
   renderActive(w);
 }
 function renderActive(w) {
+  if (STATE.activeId !== w.id) STATE.activeExpanded = null;   // collapse when switching workouts
   STATE.activeId = w.id; window._WO = w; saveActiveCache(w);
+  const exp = STATE.activeExpanded;
+  if (exp != null && w.exercises[exp]) initSetEntry(w.id, w.exercises[exp], null);  // _setCtx before the body
   const items = w.exercises.map((ex, i) => {
     const working = ex.sets.filter(s => !s.is_warmup);
     const done = ex.done;
     const next = !done && working.length >= 0 && i === w.exercises.findIndex(e => !e.done);
     const sub = working.length ? working.map(s => setLabel(s)).join(' · ')
       : (ex.target ? `цель ${ex.target_sets || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) : ''}` : 'нет подходов');
-    return `<div class="card list-item ex-row" style="${next ? 'border:2px solid var(--info)' : ''}" onclick="openExercise(${w.id},${i})">
+    const open = exp === i;
+    const row = `<div class="card list-item ex-row" style="${next ? 'border:2px solid var(--info);' : ''}${open ? 'margin-bottom:0' : ''}" onclick="toggleExercise(${w.id},${i})">
       <div class="ic">${done ? '✅' : next ? '▶️' : '⚪️'}</div>
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div>
-      <span class="muted" style="padding:4px 8px;cursor:pointer" title="Прогресс упражнения" onclick="event.stopPropagation();exDetailIdx(${i})">📈</span></div>`;
+      <span class="muted" style="padding:4px 8px;cursor:pointer" title="Прогресс упражнения" onclick="event.stopPropagation();exDetailIdx(${i})">📈</span>
+      <span class="muted" style="padding:0 2px 0 4px">${open ? '▾' : '▸'}</span></div>`;
+    return row + (open ? accordionBody(w.id, ex) : '');
   }).join('');
   view.innerHTML = `<div class="row sp"><span class="back" onclick="go('home')">‹ Главная</span><span class="muted small" onclick="workoutMenu(${w.id})" style="cursor:pointer">···</span></div>
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2>
@@ -246,6 +252,24 @@ function renderActive(w) {
     <button class="btn ghost" style="margin-top:8px" onclick="restTimer(restSecs())">⏱ Таймер отдыха</button>
     <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>
     <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelWorkout(${w.id})">✖ Отменить тренировку</button>`;
+  if (exp != null && w.exercises[exp]) renderSetRows();   // fill #setrows in the open accordion
+}
+// W2-1: tap an exercise to expand its sets + WK-2 entry inline (accordion); tap
+// again or another exercise to collapse. State persists across set-save re-renders.
+function toggleExercise(wid, idx) {
+  STATE.activeExpanded = (STATE.activeExpanded === idx) ? null : idx;
+  if (window._WO && window._WO.id === wid) renderActive(window._WO);
+}
+function accordionBody(wid, ex) {
+  const sets = ex.sets.map(s => `<div class="row sp" style="padding:7px 2px;border-bottom:1px solid var(--line)">
+    <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
+    <span><span class="muted" onclick="event.stopPropagation();editSet(${s.id},${wid})" style="cursor:pointer;padding:2px 8px">✏️</span><span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="event.stopPropagation();rmSet(${s.id},${wid})">🗑</span></span></div>`).join('');
+  const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}</div>` : '';
+  return `<div class="card acc-body" onclick="event.stopPropagation()">
+    ${last}
+    ${sets ? `<div class="muted small" style="margin-bottom:2px">Подходы сегодня</div>${sets}` : ''}
+    <div style="margin-top:${sets ? '12' : '2'}px">${setEntryHtml(wid, true)}</div>
+  </div>`;
 }
 // Phase 1Б: explicit cancel. Empty workout (accidental start) → delete in one tap;
 // with sets → confirm. delWorkout clears cache + returns Home.
@@ -312,49 +336,42 @@ function setLabel(s) {
   return v || '—';
 }
 
-// exercise card sheet
-function openExercise(wid, idx) {
-  const ex = window._WO.exercises[idx];
-  const sets = ex.sets.map(s => `<div class="row sp" style="padding:8px 0;border-bottom:1px solid var(--line)">
-    <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
-    <span><span class="muted" onclick="editSet(${s.id},${wid})" style="cursor:pointer">✏️</span> &nbsp; <span style="color:var(--danger);cursor:pointer" onclick="rmSet(${s.id},${wid})">🗑</span></span></div>`).join('');
-  const last = ex.last ? `Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}` : '';
-  sheet(`<div class="muted small">Из текущей тренировки</div><h2>${esc(ex.name)}</h2>
-    ${last ? `<div class="banner info small" style="color:var(--info)">📈 ${last}</div>` : ''}
-    <div class="muted small" style="margin:6px 0">Подходы сегодня</div>
-    ${sets || '<div class="muted small" style="padding:10px 0">Пока пусто</div>'}
-    <button class="btn" style="margin-top:12px" onclick="openAddSet(${wid},${idx})">➕ Добавить подход</button>`);
-}
-
-// add-set sheet — WK-2: several structured rows at once + voice/text fallback.
-// onSave (HIST-1): when provided, confirmSets hands the sets to it instead of
-// POSTing — used by the archive composer to collect sets into a client-side draft.
-function openAddSet(wid, idx, exObj, onSave) {
-  const ex = exObj || window._WO.exercises[idx];
+// WK-2 set entry, shared by the active-workout inline accordion (W2-1) and the
+// archive-composer sheet. initSetEntry sets the context + prefilled rows;
+// setEntryHtml returns the markup (timer + rows + add/save + optional voice/text).
+function initSetEntry(wid, ex, onSave) {
   const type = ex.type || 'strength';
   const tgt = ex.target || {}, last = ex.last || {};
   window._setCtx = {
-    wid, idx, ex, type, onSave,
+    wid, ex, type, onSave,
     w: tgt.weight_kg ?? last.weight_kg ?? 20,
     reps: tgt.reps ?? last.reps ?? 10,
     dur: tgt.duration_seconds ?? last.duration_seconds ?? 60,
   };
-  // default row count = planned sets (1..12); no plan → 1 (time) / 3 (else)
-  const planned = ex.target_sets ?? tgt.target_sets ?? null;
+  const planned = ex.target_sets ?? tgt.target_sets ?? null;   // no plan → 1 (time) / 3 (else)
   const n = Math.max(1, Math.min(12, planned || (type === 'time' ? 1 : 3)));
   window._setRows = Array.from({ length: n }, () => ({}));
+}
+function setEntryHtml(wid, withFreetext) {
+  const type = (window._setCtx || {}).type || 'strength';
   const timer = type === 'time'
     ? `<button class="btn ghost sm" id="tbtn" style="margin-bottom:8px" onclick="toggleSetTimer()">▶ Таймер (запишет подход)</button><div id="timerbox"></div>`
     : '';
-  const freetext = onSave ? '' :   // draft mode → structured rows only (text import is HIST-2)
+  const freetext = !withFreetext ? '' :
     `<div class="muted small" style="text-align:center;margin:14px 0 4px">или голосом / текстом — «80×10, 82×8, 80×8»</div>
     <div class="field"><input id="freetext" placeholder="80x10, 82x8, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`;
-  sheet(`<div class="muted small">${esc(ex.name)}</div><h2>Подходы</h2>
-    ${timer}
+  return `${timer}
     <div id="setrows"></div>
     <button class="btn ghost sm" style="margin-top:2px" onclick="addSetRow()">➕ Добавить ещё подход</button>
     <button class="btn" id="savesets" style="margin-top:12px" onclick="confirmSets()">✓ Сохранить</button>
-    ${freetext}`);
+    ${freetext}`;
+}
+// add-set sheet (archive composer draft). onSave: confirmSets hands the sets to it
+// instead of POSTing. The active workout uses the inline accordion instead (W2-1).
+function openAddSet(wid, idx, exObj, onSave) {
+  const ex = exObj || window._WO.exercises[idx];
+  initSetEntry(wid, ex, onSave);
+  sheet(`<div class="muted small">${esc(ex.name)}</div><h2>Подходы</h2>${setEntryHtml(wid, !onSave)}`);
   renderSetRows();
 }
 function _setAttr(v) { return esc(String(v ?? '')); }
