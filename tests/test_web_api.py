@@ -173,6 +173,33 @@ def test_set_batch_structured_rows(client):
     assert bad.status_code == 422
 
 
+def test_archive_workout_backdated_finished(client):
+    """HIST-1: a manually-added archive workout lands on its backdated date as a
+    finished workout, with canonicalized names (DB-5); empty/future/empty-set
+    requests are rejected."""
+    client.cookies.clear()
+    past = "2024-03-15"
+    r = client.post("/api/workouts/archive", json={
+        "workout_date": past, "focus_label": "Ноги",
+        "exercises": [
+            {"name": "икры стоя", "sets": [{"weight_kg": 100, "reps": 15}, {"weight_kg": 100, "reps": 12}]},
+            {"name": "пустое упражнение", "sets": [{}]},   # all-empty → skipped
+        ],
+    })
+    assert r.status_code == 200, r.text
+    wid = r.json()["id"]
+    assert r.json()["set_count"] == 2
+    w = client.get(f"/api/workouts/{wid}").json()
+    assert str(w["workout_date"]) == past
+    names = [e["name"] for e in w["exercises"]]
+    assert "Подъём на носки стоя" in names and "икры стоя" not in names  # canonicalized
+    hist = client.get("/api/workouts?days=3650").json()
+    assert any(x["id"] == wid and str(x["workout_date"]) == past for x in hist)  # finished, on its date
+    # future date + empty workout rejected
+    assert client.post("/api/workouts/archive", json={"workout_date": "2099-01-01", "exercises": [{"name": "Присед", "sets": [{"reps": 5}]}]}).status_code == 422
+    assert client.post("/api/workouts/archive", json={"workout_date": past, "exercises": [{"name": "Присед", "sets": [{}]}]}).status_code == 422
+
+
 def test_canonical_name_snaps_every_catalog_entry():
     """DB-5: the deterministic name canonicalizer snaps every catalog canonical and
     every alias to a known key with NO AI — so plan-save and set-logging agree and

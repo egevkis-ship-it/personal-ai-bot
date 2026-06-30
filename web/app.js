@@ -326,13 +326,15 @@ function openExercise(wid, idx) {
     <button class="btn" style="margin-top:12px" onclick="openAddSet(${wid},${idx})">➕ Добавить подход</button>`);
 }
 
-// add-set sheet — WK-2: several structured rows at once + voice/text fallback
-function openAddSet(wid, idx, exObj) {
+// add-set sheet — WK-2: several structured rows at once + voice/text fallback.
+// onSave (HIST-1): when provided, confirmSets hands the sets to it instead of
+// POSTing — used by the archive composer to collect sets into a client-side draft.
+function openAddSet(wid, idx, exObj, onSave) {
   const ex = exObj || window._WO.exercises[idx];
   const type = ex.type || 'strength';
   const tgt = ex.target || {}, last = ex.last || {};
   window._setCtx = {
-    wid, idx, ex, type,
+    wid, idx, ex, type, onSave,
     w: tgt.weight_kg ?? last.weight_kg ?? 20,
     reps: tgt.reps ?? last.reps ?? 10,
     dur: tgt.duration_seconds ?? last.duration_seconds ?? 60,
@@ -344,13 +346,15 @@ function openAddSet(wid, idx, exObj) {
   const timer = type === 'time'
     ? `<button class="btn ghost sm" id="tbtn" style="margin-bottom:8px" onclick="toggleSetTimer()">▶ Таймер (запишет подход)</button><div id="timerbox"></div>`
     : '';
+  const freetext = onSave ? '' :   // draft mode → structured rows only (text import is HIST-2)
+    `<div class="muted small" style="text-align:center;margin:14px 0 4px">или голосом / текстом — «80×10, 82×8, 80×8»</div>
+    <div class="field"><input id="freetext" placeholder="80x10, 82x8, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`;
   sheet(`<div class="muted small">${esc(ex.name)}</div><h2>Подходы</h2>
     ${timer}
     <div id="setrows"></div>
     <button class="btn ghost sm" style="margin-top:2px" onclick="addSetRow()">➕ Добавить ещё подход</button>
     <button class="btn" id="savesets" style="margin-top:12px" onclick="confirmSets()">✓ Сохранить</button>
-    <div class="muted small" style="text-align:center;margin:14px 0 4px">или голосом / текстом — «80×10, 82×8, 80×8»</div>
-    <div class="field"><input id="freetext" placeholder="80x10, 82x8, до отказа…"><span onclick="recToField('freetext',this)" style="cursor:pointer">🎤</span><span onclick="confirmText(${wid})" style="color:var(--info);cursor:pointer">↑</span></div>`);
+    ${freetext}`);
   renderSetRows();
 }
 function _setAttr(v) { return esc(String(v ?? '')); }
@@ -431,6 +435,7 @@ async function confirmSets() {
   }).filter(o => o.weight_kg != null || o.reps != null || o.duration_seconds != null);
   if (!sets.length) return toast('Заполни хотя бы один подход');
   closeSheet(); stopTimer();
+  if (c.onSave) { c.onSave(sets); return; }  // HIST-1: collect into a draft, no POST / no rest timer
   await submitSets(c.wid, { exercise_name: c.ex.name, sets });
   if (restEnabled()) restTimer(restSecs());  // auto-start unless persisted-disabled
 }
@@ -599,6 +604,13 @@ function pickRow(wid, name, key, image) {
 function chooseEx(wid, name, key) {
   const type = key && /план|велосипед|кардио/.test(name.toLowerCase()) ? 'time'
     : /подтяг|отжим|брус/.test(name.toLowerCase()) ? 'bodyweight' : 'strength';
+  if (wid === 0 && window._arch) {   // HIST-1 archive draft: collect sets, don't POST
+    openAddSet(0, null, { name, key, type, target: null, last: null }, sets => {
+      window._arch.exercises.push({ name, key, type, sets });
+      renderArchive();
+    });
+    return;
+  }
   openAddSet(wid, null, { name, key, type, target: null, last: null });
 }
 
@@ -643,8 +655,9 @@ async function coachReview(wid) {
 // ── History ───────────────────────────────────────────────────────────────
 async function History() {
   const q = STATE.histQ || '';
-  const list = await api('/workouts?days=365' + (q ? '&q=' + encodeURIComponent(q) : ''));
+  const list = await api('/workouts?days=4000' + (q ? '&q=' + encodeURIComponent(q) : ''));
   view.innerHTML = `<div class="row sp"><h1>История</h1><span class="back" style="margin:0" onclick="go('reports')">📄 Отчёты (PDF) ›</span></div>
+    <button class="btn" style="margin-bottom:12px" onclick="archiveNew()">➕ Добавить тренировку</button>
     <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
     ${list.length ? list.map(w => swipeRow(
       `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${w.tonnage.toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`,
@@ -668,6 +681,66 @@ async function WorkoutDetail(id) {
     <button class="btn ghost" onclick="go('active',${w.id})">✏️ Редактировать подходы</button>
     <button class="btn ghost" style="margin-top:8px" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>
     <button class="btn ghost" style="margin-top:8px" onclick="workoutToTemplate(${w.id})">💾 В шаблон</button>`;
+}
+
+// ── HIST-1: add a PAST (archive) workout — mirrors the plan editor (calendar +
+// client-side draft), but each exercise carries actual WK-2 sets; saving creates a
+// backdated FINISHED workout (POST /workouts/archive), names canonicalized (DB-5).
+function archiveNew() {
+  window._arch = { date: todayISO(), focus: '', notes: '', exercises: [], cal: null };
+  renderArchive();
+}
+function archSync() {
+  const A = window._arch; if (!A) return;
+  const d = document.getElementById('ar_date'); if (d && d.value) A.date = d.value;
+  const f = document.getElementById('ar_focus'); if (f) A.focus = f.value;
+  const n = document.getElementById('ar_notes'); if (n) A.notes = n.value;
+}
+function archPickDate(iso) { archSync(); window._arch.date = iso; window._arch.cal = iso.slice(0, 7) + '-01'; renderArchive(); }
+function archCalNav(dir) {
+  archSync();
+  const a = window._arch.cal || (window._arch.date.slice(0, 7) + '-01');
+  const d = new Date(a + 'T00:00:00'); d.setMonth(d.getMonth() + dir);
+  window._arch.cal = isoOf(new Date(d.getFullYear(), d.getMonth(), 1));
+  renderArchive();
+}
+function archDateInput() { archSync(); window._arch.cal = (window._arch.date || todayISO()).slice(0, 7) + '-01'; renderArchive(); }
+function archRemoveEx(i) { archSync(); window._arch.exercises.splice(i, 1); renderArchive(); }
+function archAddExercise() { archSync(); openPicker(0); }   // wid=0 + window._arch → draft mode (chooseEx)
+function renderArchive() {
+  const A = window._arch; if (!A) return go('history');
+  const cal = monthCalendar(A.cal || (A.date.slice(0, 7) + '-01'), {}, A.date, 'archPickDate', 'archCalNav');
+  const exItems = A.exercises.length ? A.exercises.map((ex, i) => `<div class="card list-item ex-row">
+      <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(ex.sets.map(setLabel).join(' · ')) || 'нет подходов'}</div></div>
+      <span style="color:var(--danger);cursor:pointer;padding:4px 6px" onclick="archRemoveEx(${i})">🗑</span></div>`).join('')
+    : '<div class="card muted small">Упражнения не добавлены</div>';
+  view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span>
+    <h2 style="margin-bottom:2px">Прошлая тренировка</h2>
+    <div class="muted small" style="margin:6px 0">Дата · <b style="color:var(--txt);text-transform:capitalize">${esc(fmtDate(A.date, { weekday: 'long' }))}</b></div>
+    ${cal}
+    <div class="mfield"><label>Точная дата</label><input id="ar_date" type="date" max="${todayISO()}" value="${A.date}" onchange="archDateInput()"></div>
+    <div class="mfield" style="margin-top:14px"><label>Фокус (что тренировал)</label>
+      <input id="ar_focus" value="${esc(A.focus)}" placeholder="напр. Грудь / Трицепс"></div>
+    <div class="muted small" style="margin:16px 0 6px">Упражнения и подходы</div>
+    ${exItems}
+    <button class="btn ghost" style="margin-top:8px" onclick="archAddExercise()">➕ Добавить упражнение</button>
+    <div class="mfield" style="margin-top:16px"><label>Заметка (необязательно)</label>
+      <input id="ar_notes" value="${esc(A.notes)}" placeholder=""></div>
+    <button class="btn success" style="margin-top:16px" onclick="archSave()">💾 Сохранить тренировку</button>`;
+}
+async function archSave() {
+  archSync();
+  const A = window._arch;
+  if (!A.exercises.length) return toast('Добавь хотя бы одно упражнение');
+  try {
+    const r = await api('/workouts/archive', 'POST', {
+      workout_date: A.date, focus_label: A.focus, notes: A.notes,
+      exercises: A.exercises.map(e => ({ name: e.name, sets: e.sets })),
+    });
+    window._arch = null;
+    toast('Тренировка добавлена');
+    go('workout', r.id);
+  } catch (e) { toast(e.message || 'не удалось'); }
 }
 
 // ── Exercise progress (charts + PR) ─────────────────────────────────────────

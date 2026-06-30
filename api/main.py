@@ -1058,6 +1058,65 @@ async def start_workout(body: StartWorkout, uid: str = Depends(current_uid)):
     return {"id": wid}
 
 
+class ArchiveSetIn(BaseModel):
+    weight_kg: Optional[float] = None
+    reps: Optional[int] = None
+    reps_text: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    is_warmup: bool = False
+    is_failure: bool = False
+
+
+class ArchiveExerciseIn(BaseModel):
+    name: str
+    sets: list[ArchiveSetIn] = []
+
+
+class ArchiveWorkoutIn(BaseModel):
+    workout_date: str
+    focus_label: Optional[str] = None
+    notes: Optional[str] = None
+    exercises: list[ArchiveExerciseIn] = []
+
+
+@app.post("/api/workouts/archive")
+async def create_archive_workout(body: ArchiveWorkoutIn, uid: str = Depends(current_uid)):
+    """HIST-1: create a backdated FINISHED workout + its sets in ONE transaction.
+    Exercise names are canonicalized through the unified catalog (DB-5) so the
+    archive doesn't spawn duplicates. started_at/finished_at are set to the chosen
+    date so the entry behaves exactly like a normally-finished workout on that day.
+    Rejects future dates and empty workouts."""
+    try:
+        d = date.fromisoformat((body.workout_date or "").strip())
+    except ValueError:
+        raise HTTPException(422, "неверная дата")
+    if d > await today_for(uid):
+        raise HTTPException(422, "дата в будущем")
+    # canonicalize names OUTSIDE the write tx (may call AI); keep the save fast/atomic
+    names = [await _canonical_name(e.name, uid) for e in body.exercises]
+    focus = (body.focus_label or "").strip() or "Тренировка"
+    async with get_session() as s:
+        wid = (await s.execute(
+            text("INSERT INTO workouts (user_id, workout_date, focus_label) VALUES (:u, :d, :f) RETURNING id"),
+            {"u": uid, "d": d, "f": focus})).scalar_one()
+        n = 0
+        for ex, nm in zip(body.exercises, names):
+            if not nm:
+                continue
+            for st in ex.sets:
+                if st.weight_kg is None and st.reps is None and st.duration_seconds is None and not st.reps_text:
+                    continue
+                await db.add_set_tx(s, wid, nm, weight_kg=st.weight_kg, reps=st.reps,
+                                    reps_text=st.reps_text, duration_seconds=st.duration_seconds,
+                                    is_warmup=st.is_warmup, is_failure=st.is_failure)
+                n += 1
+        if n == 0:
+            raise HTTPException(422, "добавь хотя бы один подход")  # rolls back the workout insert
+        await s.execute(text("UPDATE workouts SET started_at = :d, finished_at = :d, notes = :nt WHERE id = :id"),
+                        {"d": d, "nt": (body.notes or "").strip() or None, "id": wid})
+    return {"id": wid, "set_count": n}
+
+
 @app.get("/api/workouts/active")
 async def active_workout(uid: str = Depends(current_uid)):
     w = await db.get_active_workout(uid)
@@ -1093,7 +1152,7 @@ async def workouts_history(days: int = 30, q: Optional[str] = None, uid: str = D
     """Finished workouts in the last `days` with set_count + tonnage, in ONE
     aggregate query (was N+1: a sets fetch per workout). Optional `q` filters by a
     substring of the focus label or any exercise name (case-insensitive, in SQL)."""
-    days = max(1, min(days, 366))
+    days = max(1, min(days, 4000))   # HIST-1: archive workouts of any age must show (single-owner aggregate query is cheap)
     today = await today_for(uid)
     ql = (q or "").strip().lower()
     rows = await _rows(
