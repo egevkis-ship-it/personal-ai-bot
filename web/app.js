@@ -676,18 +676,46 @@ async function coachReview(wid) {
 // ── History ───────────────────────────────────────────────────────────────
 async function History() {
   const q = STATE.histQ || '';
+  const cal = !q && STATE.histView === 'cal';   // HIST2-2: calendar mode (never while searching)
   const list = await api('/workouts?days=4000' + (q ? '&q=' + encodeURIComponent(q) : ''));
   // HIST2-1: grouped sections by default; a search shows a flat filtered list.
-  const body = !list.length
-    ? `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`
+  const body = cal ? histCalendar(list)
+    : !list.length ? `<div class="card muted">${q ? 'Ничего не найдено по запросу.' : 'Пока нет завершённых тренировок.'}</div>`
     : (q ? list.map(histCard).join('') : groupHistory(list));
+  const seg = q ? '' : `<div class="seg" style="margin-bottom:12px">
+    <button class="${cal ? '' : 'on'}" onclick="histSetView('list')">Список</button>
+    <button class="${cal ? 'on' : ''}" onclick="histSetView('cal')">Календарь</button></div>`;
+  const search = cal ? '' : `<div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>`;
   view.innerHTML = `<div class="row sp"><h1>История</h1><span class="back" style="margin:0" onclick="go('reports')">📄 Отчёты (PDF) ›</span></div>
     <button class="btn" style="margin-bottom:12px" onclick="archiveNew()">➕ Добавить тренировку</button>
-    <div class="field" style="margin-bottom:12px"><input id="histQ" placeholder="поиск: фокус или упражнение…" value="${esc(q)}" oninput="histSearch(this.value)"><span>🔎</span></div>
-    ${body}`;
+    ${seg}${search}${body}`;
   const inp = document.getElementById('histQ');
   if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
 }
+function histSetView(v) { STATE.histView = v; History(); }
+// HIST2-2: month grid (shared monthCalendar) with dots on workout days; tap a day → its workouts
+function histCalendar(list) {
+  const anchor = STATE.histCal || (todayISO().slice(0, 7) + '-01');
+  const a = new Date(anchor + 'T00:00:00');
+  const firstISO = isoOf(new Date(a.getFullYear(), a.getMonth(), 1));
+  const lastISO = isoOf(new Date(a.getFullYear(), a.getMonth() + 1, 0));
+  const marks = {};
+  for (const w of list) { if (w.workout_date >= firstISO && w.workout_date <= lastISO) marks[w.workout_date] = 'plan'; }
+  const sel = STATE.histSel;
+  let day = '<div class="muted small" style="text-align:center;margin-top:8px">Тап по дню — тренировки этого дня</div>';
+  if (sel) {
+    const dayW = list.filter(w => w.workout_date === sel);
+    day = `<div class="muted small" style="margin:10px 4px 6px;text-transform:capitalize">${esc(fmtDate(sel, { weekday: 'long' }))}</div>` +
+      (dayW.length ? dayW.map(histCard).join('') : '<div class="card muted small">В этот день тренировок нет.</div>');
+  }
+  return monthCalendar(firstISO, marks, sel, 'histCalPick', 'histCalNav') + day;
+}
+function histCalNav(dir) {
+  const a = new Date((STATE.histCal || todayISO().slice(0, 7) + '-01') + 'T00:00:00');
+  a.setDate(1); a.setMonth(a.getMonth() + dir);
+  STATE.histCal = isoOf(a); History();
+}
+function histCalPick(iso) { STATE.histSel = iso; STATE.histCal = iso.slice(0, 7) + '-01'; History(); }
 function histCard(w) {
   return swipeRow(
     `<div class="row sp"><div style="flex:1"><b>${esc(w.focus_label || 'Тренировка')}</b><div class="small muted">${esc(fmtDate(w.workout_date, { weekday: 'short' }))} · ${w.set_count} подх · ${(w.tonnage || 0).toLocaleString('ru-RU')} кг</div></div><span class="muted">›</span></div>`,
