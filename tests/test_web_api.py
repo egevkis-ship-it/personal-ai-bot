@@ -200,6 +200,30 @@ def test_archive_workout_backdated_finished(client):
     assert client.post("/api/workouts/archive", json={"workout_date": past, "exercises": [{"name": "Присед", "sets": [{}]}]}).status_code == 422
 
 
+def test_archive_bulk_save_atomic(client):
+    """HIST-2: confirmed multi-workout import saves all on their dates with
+    canonicalized names; a single bad date rejects the WHOLE batch (atomic)."""
+    client.cookies.clear()
+    r = client.post("/api/workouts/archive-bulk", json={"workouts": [
+        {"workout_date": "2025-01-10", "focus_label": "Ноги", "exercises": [{"name": "икры стоя", "sets": [{"weight_kg": 90, "reps": 12}]}]},
+        {"workout_date": "2025-01-12", "focus_label": "Грудь", "exercises": [{"name": "жим лёжа", "sets": [{"weight_kg": 80, "reps": 8}, {"weight_kg": 80, "reps": 6}]}]},
+    ]})
+    assert r.status_code == 200 and r.json()["count"] == 2, r.text
+    ids = r.json()["ids"]
+    hist = client.get("/api/workouts?days=4000").json()
+    assert sorted(str(w["workout_date"]) for w in hist if w["id"] in ids) == ["2025-01-10", "2025-01-12"]
+    w0 = client.get(f"/api/workouts/{ids[0]}").json()
+    assert "Подъём на носки стоя" in [e["name"] for e in w0["exercises"]]   # canonicalized
+    # atomicity: a future date in the batch → reject everything, insert nothing
+    before = len(client.get("/api/workouts?days=4000").json())
+    bad = client.post("/api/workouts/archive-bulk", json={"workouts": [
+        {"workout_date": "2025-02-01", "exercises": [{"name": "Присед", "sets": [{"reps": 5}]}]},
+        {"workout_date": "2099-01-01", "exercises": [{"name": "Присед", "sets": [{"reps": 5}]}]},
+    ]})
+    assert bad.status_code == 422
+    assert len(client.get("/api/workouts?days=4000").json()) == before  # nothing inserted
+
+
 def test_canonical_name_snaps_every_catalog_entry():
     """DB-5: the deterministic name canonicalizer snaps every catalog canonical and
     every alias to a known key with NO AI — so plan-save and set-logging agree and

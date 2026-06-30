@@ -218,6 +218,103 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
     return days
 
 
+# ──────────────────────── logged (past) workouts parser ───────────────────────
+# HIST-2: parse one or several PAST workouts pasted as free text → structured
+# workouts with a date and ACTUAL logged sets (weight×reps), not future targets.
+
+_LOG_SYSTEM = """\
+Ты парсер УЖЕ ВЫПОЛНЕННЫХ (прошлых) тренировок. Получаешь произвольный текст с одной \
+или НЕСКОЛЬКИМИ тренировками из прошлого и возвращаешь JSON с ФАКТИЧЕСКИ сделанными подходами.
+
+Формат ответа — ТОЛЬКО JSON, без другого текста:
+{
+  "workouts": [
+    {
+      "date": "2026-06-15",
+      "date_text": "15 июня",
+      "focus_label": "Грудь / Трицепс",
+      "notes": null,
+      "exercises": [
+        {
+          "name": "Жим штанги лёжа",
+          "sets": [
+            {"weight_kg": 80.0, "reps": 10, "reps_text": null, "duration_seconds": null, "is_warmup": false},
+            {"weight_kg": 82.5, "reps": 8, "reps_text": null, "duration_seconds": null, "is_warmup": false}
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+Правила:
+- ДАТЫ: если в блоке есть КАЛЕНДАРНАЯ дата (2026-06-15, 15.06.2026, 15.06.26) — переведи её в \
+ISO "YYYY-MM-DD" в поле "date". Ты НЕ знаешь сегодняшнюю дату, поэтому относительные/неполные \
+даты ("вчера", "понедельник", "15 июня" без года) НЕ вычисляй: оставь "date": null, а исходную \
+запись положи в "date_text". Всегда заполняй "date_text" тем, как дата написана (или null если её нет).
+- Каждый смысловой блок (своя дата ИЛИ явный разделитель тренировки) = отдельный элемент "workouts".
+- ПОДХОДЫ — фактические: "80×10" → {"weight_kg":80,"reps":10}; "80 на 10", "80 10" → то же; \
+"80×10, 82×8, 80×8" → три подхода; "3×10×80" или "3 по 10 на 80" → три одинаковых подхода 80×10; \
+"планка 60 сек" → {"duration_seconds":60}; без веса ("подтягивания 12,10,8") → weight_kg:null, reps по числам.
+- "разминка"/"разм" у подхода → is_warmup:true. "до отказа"/"в отказ"/"AMRAP" → reps_text:"до отказа".
+- Имя упражнения — как в тексте (нормализуют позже). Незнакомые числа без упражнения игнорируй.
+- focus_label — если в блоке указан фокус/группа ("Грудь", "Ноги"), иначе null.
+- Если в тексте только подходы без явных тренировок — верни один workout с date:null.
+- Никаких пояснений, только JSON.
+"""
+
+
+async def parse_logged_workouts_text(text: str) -> list[dict[str, Any]]:
+    """Parse free-text PAST workouts → list of dicts:
+    {date(ISO|None), date_text, focus_label, notes, exercises:[{name, sets:[{...}]}]}.
+    Raises PlanParseError on a model/network/auth failure (→ 502); returns [] when
+    the model replied but the output couldn't be parsed (→ 422)."""
+    try:
+        resp = await _anthropic.messages.create(
+            model=PARSER_MODEL,
+            max_tokens=8192,
+            system=_LOG_SYSTEM,
+            messages=[{"role": "user", "content": text}],
+        )
+    except Exception as exc:
+        log.error("parse_logged_workouts_text: Anthropic call failed: %s", exc, exc_info=True)
+        raise PlanParseError(str(exc)) from exc
+    raw = resp.content[0].text
+    candidate = _extract_json(raw)
+    try:
+        data: dict[str, Any] = json.loads(candidate)
+    except json.JSONDecodeError as je:
+        log.warning("parse_logged_workouts_text: JSON broken (%s). Raw len=%d", je.msg, len(raw))
+        return []
+    out: list[dict[str, Any]] = []
+    for w in data.get("workouts", []):
+        exercises = []
+        for e in w.get("exercises", []):
+            if not e.get("name"):
+                continue
+            sets = []
+            for st in e.get("sets", []) or []:
+                if not isinstance(st, dict):
+                    continue
+                if st.get("weight_kg") is None and st.get("reps") is None \
+                        and st.get("duration_seconds") is None and not st.get("reps_text"):
+                    continue
+                sets.append({
+                    "weight_kg": st.get("weight_kg"), "reps": st.get("reps"),
+                    "reps_text": st.get("reps_text"), "duration_seconds": st.get("duration_seconds"),
+                    "is_warmup": bool(st.get("is_warmup")),
+                })
+            if sets:
+                exercises.append({"name": e["name"], "sets": sets})
+        if exercises:
+            out.append({
+                "date": w.get("date"), "date_text": w.get("date_text"),
+                "focus_label": w.get("focus_label"), "notes": w.get("notes"),
+                "exercises": exercises,
+            })
+    return out
+
+
 # ──────────────────────────── set fallback parser ─────────────────────────────
 
 _SET_SYSTEM = """\

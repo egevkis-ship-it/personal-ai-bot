@@ -716,6 +716,7 @@ function renderArchive() {
     : '<div class="card muted small">Упражнения не добавлены</div>';
   view.innerHTML = `<span class="back" onclick="go('history')">‹ История</span>
     <h2 style="margin-bottom:2px">Прошлая тренировка</h2>
+    <button class="btn ghost" style="margin:8px 0 4px" onclick="archPasteSheet()">📝 Вставить текстом (несколько сразу)</button>
     <div class="muted small" style="margin:6px 0">Дата · <b style="color:var(--txt);text-transform:capitalize">${esc(fmtDate(A.date, { weekday: 'long' }))}</b></div>
     ${cal}
     <div class="mfield"><label>Точная дата</label><input id="ar_date" type="date" max="${todayISO()}" value="${A.date}" onchange="archDateInput()"></div>
@@ -740,6 +741,84 @@ async function archSave() {
     window._arch = null;
     toast('Тренировка добавлена');
     go('workout', r.id);
+  } catch (e) { toast(e.message || 'не удалось'); }
+}
+
+// ── HIST-2: paste one/several PAST workouts as text → AI preview → bulk save ───
+function archPasteSheet() {
+  sheet(`<h2>Вставить текстом</h2>
+    <div class="muted small" style="margin-bottom:8px">Вставь одну или несколько прошлых тренировок — с датами и подходами (вес×повторы). ИИ разберёт, покажу превью для проверки.</div>
+    <textarea id="archText" style="width:100%;min-height:130px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--card);color:var(--txt);font-size:15px" placeholder="15.06.2026 Грудь&#10;Жим лёжа 80×10, 82×8, 80×8&#10;Разводка 20×12&#10;&#10;17.06.2026 Ноги&#10;Присед 100×5, 100×5, 100×5"></textarea>
+    <button class="btn" id="archParseBtn" style="margin-top:10px" onclick="archParse()">⏳ Разобрать</button>`);
+}
+async function archParse() {
+  const t = document.getElementById('archText').value.trim();
+  if (!t) return toast('Пустой текст');
+  const btn = document.getElementById('archParseBtn') || {};
+  btn.textContent = '⏳ Разбираю…'; btn.disabled = true;
+  try {
+    const r = await api('/workouts/parse', 'POST', { text: t });
+    window._archParsed = (r.workouts || []).map(w => ({
+      date: w.date || '', date_text: w.date_text || '', focus_label: w.focus_label || '',
+      notes: w.notes || null, exercises: w.exercises || [],
+    }));
+    if (!window._archParsed.length) { toast('Не распознано'); btn.textContent = '⏳ Разобрать'; btn.disabled = false; return; }
+    renderArchPreview();
+  } catch (e) {
+    toast(e.message || 'не удалось разобрать');
+    btn.textContent = '⏳ Разобрать'; btn.disabled = false;
+  }
+}
+function renderArchPreview() {
+  const ws = window._archParsed || [];
+  const cards = ws.map((w, i) => {
+    const exHtml = w.exercises.map((e, j) => `<div class="row sp" style="padding:5px 0;border-bottom:1px solid var(--line)">
+      <div style="flex:1"><b>${esc(e.name)}</b><div class="small muted">${esc(e.sets.map(setLabel).join(' · '))}</div></div>
+      <span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="archPrevRmEx(${i},${j})">✕</span></div>`).join('');
+    const warn = w.date ? '' : ' <span style="color:var(--warn)">— укажи дату</span>';
+    return `<div class="card" style="margin-bottom:10px">
+      <div class="row sp"><b>Тренировка ${i + 1}</b><span style="color:var(--danger);cursor:pointer" onclick="archPrevRmWk(${i})">🗑</span></div>
+      <div class="mfield" style="margin-top:6px"><label>Дата${w.date_text ? ` (из текста: «${esc(w.date_text)}»)` : ''}${warn}</label>
+        <input type="date" max="${todayISO()}" value="${esc(w.date)}" onchange="archPrevSet(${i},'date',this.value)"></div>
+      <div class="mfield" style="margin-top:8px"><label>Фокус</label>
+        <input value="${esc(w.focus_label)}" placeholder="напр. Грудь" onchange="archPrevSet(${i},'focus_label',this.value)"></div>
+      <div class="muted small" style="margin:10px 0 2px">Упражнения и подходы</div>
+      ${exHtml || '<div class="muted small">нет</div>'}
+    </div>`;
+  }).join('');
+  sheet(`<h2>Превью · ${ws.length}</h2>
+    <div style="max-height:55vh;overflow:auto">${cards}</div>
+    <button class="btn success" style="margin-top:12px" onclick="archBulkSave()">💾 Сохранить всё</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="archPasteSheet()">‹ Назад к тексту</button>`);
+}
+function archPrevSet(i, k, v) { if (window._archParsed[i]) window._archParsed[i][k] = v; }
+function archPrevRmEx(i, j) {
+  const w = window._archParsed[i]; if (!w) return;
+  w.exercises.splice(j, 1);
+  if (!w.exercises.length) window._archParsed.splice(i, 1);
+  if (!window._archParsed.length) { closeSheet(); return toast('Пусто'); }
+  renderArchPreview();
+}
+function archPrevRmWk(i) {
+  window._archParsed.splice(i, 1);
+  if (!window._archParsed.length) { closeSheet(); return toast('Пусто'); }
+  renderArchPreview();
+}
+async function archBulkSave() {
+  const ws = window._archParsed || [];
+  if (!ws.length) return toast('Нет тренировок');
+  if (ws.some(w => !w.date)) return toast('Укажи дату у всех тренировок');
+  try {
+    const r = await api('/workouts/archive-bulk', 'POST', {
+      workouts: ws.map(w => ({
+        workout_date: w.date, focus_label: w.focus_label, notes: w.notes,
+        exercises: w.exercises.map(e => ({ name: e.name, sets: e.sets })),
+      })),
+    });
+    window._archParsed = null;
+    closeSheet();
+    toast(`Добавлено тренировок: ${r.count}`);
+    go('history');
   } catch (e) { toast(e.message || 'не удалось'); }
 }
 

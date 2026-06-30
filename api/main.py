@@ -1079,42 +1079,108 @@ class ArchiveWorkoutIn(BaseModel):
     exercises: list[ArchiveExerciseIn] = []
 
 
-@app.post("/api/workouts/archive")
-async def create_archive_workout(body: ArchiveWorkoutIn, uid: str = Depends(current_uid)):
-    """HIST-1: create a backdated FINISHED workout + its sets in ONE transaction.
-    Exercise names are canonicalized through the unified catalog (DB-5) so the
-    archive doesn't spawn duplicates. started_at/finished_at are set to the chosen
-    date so the entry behaves exactly like a normally-finished workout on that day.
-    Rejects future dates and empty workouts."""
+async def _insert_archive(s, uid: str, d: date, focus: str, notes: Optional[str], exercises: list[dict]) -> tuple[int, int]:
+    """Insert ONE backdated FINISHED workout + its sets on caller session `s` (does
+    NOT commit). `exercises` = [{"name": <canonical>, "sets": [{weight_kg, reps,
+    reps_text, duration_seconds, is_warmup, is_failure}]}]. started_at/finished_at
+    are set to the date so it behaves like a normally-finished workout. Raises
+    HTTPException(422) (→ rollback) if no non-empty set lands. Returns (wid, count)."""
+    wid = (await s.execute(
+        text("INSERT INTO workouts (user_id, workout_date, focus_label) VALUES (:u, :d, :f) RETURNING id"),
+        {"u": uid, "d": d, "f": focus})).scalar_one()
+    n = 0
+    for ex in exercises:
+        nm = (ex.get("name") or "").strip()
+        if not nm:
+            continue
+        for st in ex.get("sets", []):
+            if st.get("weight_kg") is None and st.get("reps") is None \
+                    and st.get("duration_seconds") is None and not st.get("reps_text"):
+                continue
+            await db.add_set_tx(s, wid, nm, weight_kg=st.get("weight_kg"), reps=st.get("reps"),
+                                reps_text=st.get("reps_text"), duration_seconds=st.get("duration_seconds"),
+                                is_warmup=bool(st.get("is_warmup")), is_failure=bool(st.get("is_failure")))
+            n += 1
+    if n == 0:
+        raise HTTPException(422, "добавь хотя бы один подход")
+    await s.execute(text("UPDATE workouts SET started_at = :d, finished_at = :d, notes = :nt WHERE id = :id"),
+                    {"d": d, "nt": (notes or "").strip() or None, "id": wid})
+    return wid, n
+
+
+def _archive_date(raw: str, today: date) -> date:
     try:
-        d = date.fromisoformat((body.workout_date or "").strip())
+        d = date.fromisoformat((raw or "").strip())
     except ValueError:
         raise HTTPException(422, "неверная дата")
-    if d > await today_for(uid):
+    if d > today:
         raise HTTPException(422, "дата в будущем")
-    # canonicalize names OUTSIDE the write tx (may call AI); keep the save fast/atomic
-    names = [await _canonical_name(e.name, uid) for e in body.exercises]
-    focus = (body.focus_label or "").strip() or "Тренировка"
+    return d
+
+
+@app.post("/api/workouts/archive")
+async def create_archive_workout(body: ArchiveWorkoutIn, uid: str = Depends(current_uid)):
+    """HIST-1: create one backdated FINISHED workout + its sets in ONE transaction.
+    Names canonicalized (DB-5); future/empty rejected."""
+    d = _archive_date(body.workout_date, await today_for(uid))
+    names = [await _canonical_name(e.name, uid) for e in body.exercises]  # may AI-normalize one unknown
+    exs = [{"name": nm, "sets": [st.model_dump() for st in e.sets]} for e, nm in zip(body.exercises, names)]
     async with get_session() as s:
-        wid = (await s.execute(
-            text("INSERT INTO workouts (user_id, workout_date, focus_label) VALUES (:u, :d, :f) RETURNING id"),
-            {"u": uid, "d": d, "f": focus})).scalar_one()
-        n = 0
-        for ex, nm in zip(body.exercises, names):
-            if not nm:
-                continue
-            for st in ex.sets:
-                if st.weight_kg is None and st.reps is None and st.duration_seconds is None and not st.reps_text:
-                    continue
-                await db.add_set_tx(s, wid, nm, weight_kg=st.weight_kg, reps=st.reps,
-                                    reps_text=st.reps_text, duration_seconds=st.duration_seconds,
-                                    is_warmup=st.is_warmup, is_failure=st.is_failure)
-                n += 1
-        if n == 0:
-            raise HTTPException(422, "добавь хотя бы один подход")  # rolls back the workout insert
-        await s.execute(text("UPDATE workouts SET started_at = :d, finished_at = :d, notes = :nt WHERE id = :id"),
-                        {"d": d, "nt": (body.notes or "").strip() or None, "id": wid})
+        wid, n = await _insert_archive(s, uid, d, (body.focus_label or "").strip() or "Тренировка", body.notes, exs)
     return {"id": wid, "set_count": n}
+
+
+class ParseTextIn(BaseModel):
+    text: str
+
+
+@app.post("/api/workouts/parse")
+async def parse_logged_workouts(body: ParseTextIn, uid: str = Depends(current_uid)):
+    """HIST-2: free text with one/several PAST workouts → structured preview (AI).
+    Does NOT save — the client confirms via POST /api/workouts/archive-bulk. Names
+    are snapped to the catalog deterministically (DB-5) so the preview shows the
+    exact names that will be saved. Dates the model couldn't resolve come back as
+    date=null with date_text so the user picks them before saving."""
+    if not (body.text or "").strip():
+        raise HTTPException(422, "пустой текст")
+    await check_and_bump_ai(uid)
+    try:
+        from app.bot.services.ai_parser import PlanParseError, parse_logged_workouts_text
+    except Exception:
+        raise HTTPException(503, "ИИ-парсер недоступен")
+    try:
+        workouts = await parse_logged_workouts_text(body.text)
+    except PlanParseError as e:
+        raise HTTPException(502, f"ИИ-сервис недоступен: {str(e)[:200]}")
+    if not workouts:
+        raise HTTPException(422, "не удалось разобрать — проверь формат")
+    for w in workouts:
+        for e in w.get("exercises", []):
+            e["name"] = _canon_static(e.get("name", ""))
+    return {"workouts": workouts}
+
+
+class BulkArchiveIn(BaseModel):
+    workouts: list[ArchiveWorkoutIn]
+
+
+@app.post("/api/workouts/archive-bulk")
+async def create_archive_bulk(body: BulkArchiveIn, uid: str = Depends(current_uid)):
+    """HIST-2: save several confirmed archive workouts at once, in ONE transaction
+    (all-or-nothing). Each gets canonicalized names (deterministic catalog snap) and
+    backdated finished timestamps. Future/empty dates rejected."""
+    today = await today_for(uid)
+    prepared = []
+    for w in body.workouts:
+        d = _archive_date(w.workout_date, today)
+        exs = [{"name": _canon_static(e.name), "sets": [st.model_dump() for st in e.sets]} for e in w.exercises]
+        prepared.append((d, (w.focus_label or "").strip() or "Тренировка", w.notes, exs))
+    ids = []
+    async with get_session() as s:
+        for d, focus, notes, exs in prepared:
+            wid, _ = await _insert_archive(s, uid, d, focus, notes, exs)
+            ids.append(wid)
+    return {"ids": ids, "count": len(ids)}
 
 
 @app.get("/api/workouts/active")
