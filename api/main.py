@@ -388,14 +388,19 @@ async def _migrate_legacy_names() -> None:
     import hashlib
     rename = _load_rename_map()
     if not rename:
+        print("[migration] legacy_rename: no map present, skipped", flush=True)
         return
     digest = hashlib.sha256(json.dumps(rename, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
     marker = f"legacy_rename:{digest}"
+    olds = list(rename.keys())
     async with get_session() as s:
         await s.execute(text(
             "CREATE TABLE IF NOT EXISTS data_migrations ("
             "key TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"))
+        # cheap verification, logged every boot: how many sets still carry a legacy name
+        rem = (await s.execute(text("SELECT count(*) FROM exercise_sets WHERE exercise_name = ANY(:o)"), {"o": olds})).scalar() or 0
         if (await s.execute(text("SELECT 1 FROM data_migrations WHERE key = :k"), {"k": marker})).scalar():
+            print(f"[migration] legacy_rename {marker} already applied; remaining legacy sets={rem}", flush=True)
             return  # already applied for this exact map
         counts = {"exercise_sets": 0, "exercise_aliases": 0, "planned_workouts": 0, "routines": 0}
         for old, new in rename.items():
@@ -437,7 +442,10 @@ async def _migrate_legacy_names() -> None:
                                 {"days": json.dumps(days, ensure_ascii=False), "id": row["id"]})
                 counts["routines"] += 1
         await s.execute(text("INSERT INTO data_migrations (key) VALUES (:k) ON CONFLICT DO NOTHING"), {"k": marker})
-        log.info("legacy_rename migration applied marker=%s map_size=%d affected=%s", marker, len(rename), counts)
+        rem_after = (await s.execute(text("SELECT count(*) FROM exercise_sets WHERE exercise_name = ANY(:o)"), {"o": olds})).scalar() or 0
+        msg = f"[migration] legacy_rename {marker} APPLIED map_size={len(rename)} affected={counts} legacy_sets_before={rem} after={rem_after}"
+        print(msg, flush=True)
+        log.info(msg)
 
 
 @app.on_event("startup")
