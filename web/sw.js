@@ -20,7 +20,9 @@
 // create-only. v19: manual plan create gets a calendar picker (occupied days
 // v21: feed remembers the selected day on return + «сегодня» marker in month grid.
 // marked). v20: «💤 Отдых» days + Apple-style month → centered scrolling day feed.
-const CACHE = 'fit-proto-v48';
+// v49: W2-9 — removed the exercise «выполнено» state entirely (no ✅ / «✓ Готово»),
+// only neutral progress «N / цель подх».
+const CACHE = 'fit-proto-v49';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

@@ -230,22 +230,21 @@ async function Active(id) {
   renderActive(w);
 }
 function renderActive(w) {
-  if (STATE.activeId !== w.id) { STATE.activeExpanded = null; STATE.doneSet = new Set(); }  // reset on switch
+  if (STATE.activeId !== w.id) { STATE.activeExpanded = null; }  // reset on switch
   STATE.activeId = w.id; window._WO = w; saveActiveCache(w);
   const exp = STATE.activeExpanded;
-  const doneSet = STATE.doneSet || (STATE.doneSet = new Set());   // W2-9: manual «Готово», session-only
   if (exp != null && w.exercises[exp]) initSetEntry(w.id, w.exercises[exp], null);  // _setCtx before the body
   const items = w.exercises.map((ex, i) => {
     const working = ex.sets.filter(s => !s.is_warmup);
-    const isDone = doneSet.has(ex.name);
     const tgt = ex.target_sets;
-    // W2-9: ⚪️ no sets · 🔵 «в работе» (≥1 set, shows N/цель) · ✅ only when marked done
+    // W2-9: neutral progress only — ⚪️ no sets · 🔵 «в работе» (≥1 set, «N / цель подх»).
+    // No ✅ / «выполнено», no auto-advance: the workout ends with «Завершить тренировку».
     const sub = working.length
-      ? `${tgt ? working.length + '/' + tgt + ' подх · ' : ''}${working.map(s => setLabel(s)).join(' · ')}`
+      ? `${tgt ? working.length + '/' + tgt + ' подх' : working.length + ' подх'} · ${working.map(s => setLabel(s)).join(' · ')}`
       : (ex.target ? `цель ${tgt || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) + ' кг' : ''}` : 'нет подходов');
     const open = exp === i;
     const row = `<div class="card list-item ex-row" style="${open ? 'border:2px solid var(--info);margin-bottom:0' : ''}" onclick="toggleExercise(${w.id},${i})">
-      <div class="ic">${isDone ? '✅' : working.length ? '🔵' : '⚪️'}</div>
+      <div class="ic">${working.length ? '🔵' : '⚪️'}</div>
       <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div>
       <span class="muted" style="padding:4px 8px;cursor:pointer" title="Прогресс упражнения" onclick="event.stopPropagation();exDetailIdx(${i})">📈</span>
       <span class="muted" style="padding:0 2px 0 4px">${open ? '▾' : '▸'}</span></div>`;
@@ -267,31 +266,17 @@ function toggleExercise(wid, idx) {
   STATE.activeExpanded = (STATE.activeExpanded === idx) ? null : idx;
   if (window._WO && window._WO.id === wid) renderActive(window._WO);
 }
-// W2-9: manually mark an exercise done (✅). Marking collapses it and auto-expands
-// the next not-done exercise; a second tap clears it. Session-only (front-end state).
-function toggleDone(name) {
-  const ds = STATE.doneSet || (STATE.doneSet = new Set());
-  if (ds.has(name)) { ds.delete(name); }
-  else {
-    ds.add(name);
-    const W = window._WO;
-    const nextIdx = W ? W.exercises.findIndex(e => !ds.has(e.name)) : -1;
-    STATE.activeExpanded = nextIdx >= 0 ? nextIdx : null;   // next undone, or collapse if all done
-  }
-  if (window._WO) renderActive(window._WO);
-}
 function accordionBody(wid, ex) {
   const sets = ex.sets.map(s => `<div class="row sp" style="padding:7px 2px;border-bottom:1px solid var(--line)">
     <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
     <span><span class="muted" onclick="event.stopPropagation();editSet(${s.id},${wid})" style="cursor:pointer;padding:2px 8px">✏️</span><span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="event.stopPropagation();rmSet(${s.id},${wid})">✕</span></span></div>`).join('');
   const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}</div>` : '';
-  const isDone = (STATE.doneSet || new Set()).has(ex.name);   // W2-9: manual done
-  const doneBtn = `<button class="btn ${isDone ? 'sec' : 'success'} sm" style="margin-top:10px" onclick='event.stopPropagation();toggleDone(${esc(JSON.stringify(ex.name))})'>${isDone ? '↺ Снять «выполнено»' : '✓ Готово'}</button>`;
+  // W2-9: no «✓ Готово» button — the exercise has no «выполнено» state; the whole
+  // workout is finished via «Завершить тренировку». Only neutral progress is shown.
   return `<div class="card acc-body" onclick="event.stopPropagation()">
     ${last}
     ${sets ? `<div class="muted small" style="margin-bottom:2px">Подходы сегодня</div>${sets}` : ''}
     <div style="margin-top:${sets ? '12' : '2'}px">${setEntryHtml(wid, true)}</div>
-    ${doneBtn}
   </div>`;
 }
 // Phase 1Б: explicit cancel. Empty workout (accidental start) → delete in one tap;
