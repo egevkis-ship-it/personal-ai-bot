@@ -448,7 +448,6 @@ function stepRow(fields) {
 }
 function bump(id, d) { const el = document.getElementById('f_' + id); let v = parseFloat(el.value || 0) + d; if (v < 0) v = 0; el.value = (Math.round(v * 100) / 100); }
 function tag(el) { el.classList.toggle('on'); }
-function getTags() { const t = {}; document.querySelectorAll('.pill[data-tag].on').forEach(e => t['is_' + e.dataset.tag] = true); return t; }
 async function confirmSets() {
   _readSetRows();
   const c = window._setCtx;
@@ -580,17 +579,47 @@ function restAdd(n) { window._restAdd(n); }
 function closeRest() { const b = document.getElementById('restbg'); if (b) { clearInterval(b._iv); b.remove(); } }
 
 // edit / delete set
+// W3-3: locate a set (and its exercise, for the input type) by id in the loaded workout.
+function _findSet(sid) {
+  const W = window._WO; if (!W || !W.exercises) return null;
+  for (const ex of W.exercises) {
+    const s = (ex.sets || []).find(x => x.id === sid);
+    if (s) return { set: s, ex };
+  }
+  return null;
+}
+// W3-3: prefill the editor with the set's ACTUAL recorded values (not zeros), by
+// type — вес×повторы / повторы (bodyweight) / мин:сек (time) — plus the warmup /
+// failure flags. Fields select-on-focus (W2-2, via stepRow).
 async function editSet(sid, wid) {
+  const found = _findSet(sid);
+  const s = found ? found.set : {};
+  const type = found ? (found.ex.type || 'strength') : 'strength';
+  let fields;
+  if (type === 'time') {
+    const dur = s.duration_seconds || 0;
+    fields = stepRow([['min', Math.floor(dur / 60), 'мин', 1], ['sec', dur % 60, 'сек', 5]]);
+  } else if (type === 'bodyweight') {
+    fields = stepRow([['reps', s.reps ?? 0, 'повт.', 1]]);
+  } else {
+    fields = stepRow([['weight', s.weight_kg ?? 0, 'кг', 2.5], ['reps', s.reps ?? 0, 'повт.', 1]]);
+  }
   sheet(`<h2>Редактировать подход</h2>
-    ${stepRow([['weight', 0, 'кг', 2.5], ['reps', 0, 'повт.', 1]])}
-    <div class="tag-row"><span class="pill" data-tag="warmup" onclick="tag(this)">Разминка</span>
-      <span class="pill" data-tag="failure" onclick="tag(this)">До отказа</span></div>
-    <button class="btn" onclick="saveSet(${sid},${wid})">Сохранить</button>
+    ${fields}
+    <div class="tag-row"><span class="pill ${s.is_warmup ? 'on' : ''}" data-tag="warmup" onclick="tag(this)">Разминка</span>
+      <span class="pill ${s.is_failure ? 'on' : ''}" data-tag="failure" onclick="tag(this)">До отказа</span></div>
+    <button class="btn" onclick="saveSet(${sid},${wid},'${type}')">Сохранить</button>
     <button class="btn danger" style="margin-top:8px" onclick="rmSet(${sid},${wid})">Удалить</button>`);
 }
-async function saveSet(sid, wid) {
-  const g = id => parseFloat(document.getElementById('f_' + id).value);
-  await api('/sets/' + sid, 'PATCH', { weight_kg: g('weight'), reps: g('reps'), ...getTags() });
+async function saveSet(sid, wid, type) {
+  const g = id => { const el = document.getElementById('f_' + id); return el ? parseFloat(el.value) : null; };
+  const flag = t => { const el = document.querySelector('.pill[data-tag="' + t + '"]'); return !!(el && el.classList.contains('on')); };
+  // Send both flags explicitly so unchecking one persists (PatchSet drops only None).
+  const body = { is_warmup: flag('warmup'), is_failure: flag('failure') };
+  if (type === 'time') { const mn = g('min') || 0, sc = g('sec') || 0; body.duration_seconds = Math.round(mn * 60 + sc) || null; }
+  else if (type === 'bodyweight') { body.reps = g('reps'); }
+  else { body.weight_kg = g('weight'); body.reps = g('reps'); }
+  await api('/sets/' + sid, 'PATCH', body);
   closeSheet(); go('active', wid);
 }
 async function rmSet(sid, wid) { await api('/sets/' + sid, 'DELETE'); closeSheet(); go('active', wid); }

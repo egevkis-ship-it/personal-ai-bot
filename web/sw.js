@@ -22,7 +22,9 @@
 // marked). v20: «💤 Отдых» days + Apple-style month → centered scrolling day feed.
 // v49: W2-9 — removed the exercise «выполнено» state entirely (no ✅ / «✓ Готово»),
 // only neutral progress «N / цель подх».
-const CACHE = 'fit-proto-v49';
+// v50: W3-3 — editSet prefills the set's recorded values (weight/reps/duration +
+// warmup/failure flags) instead of zeros, by exercise type.
+const CACHE = 'fit-proto-v50';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
