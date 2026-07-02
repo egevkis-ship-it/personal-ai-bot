@@ -42,6 +42,7 @@
     "air_bike": {
       "canonical_ru": "Велосипед (пресс)",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "air bike",
         "велосипед (пресс)"
@@ -53,6 +54,7 @@
     "barbell_ab_rollout": {
       "canonical_ru": "Колесо для пресса",
       "muscle_group": "abs",
+      "input": "strength",
       "aliases": [
         "barbell ab rollout",
         "колесо для пресса"
@@ -64,6 +66,7 @@
     "cable_reverse_crunch": {
       "canonical_ru": "Обратные скручивания",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "cable reverse crunch",
         "обратные скручивания"
@@ -75,6 +78,7 @@
     "hanging_leg_raise": {
       "canonical_ru": "Подъём ног в висе",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "hanging leg raise",
         "подъём ног в висе"
@@ -86,6 +90,7 @@
     "flat_bench_lying_leg_raise": {
       "canonical_ru": "Подъём ног лёжа",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "flat bench lying leg raise",
         "подъём ног лёжа",
@@ -98,6 +103,7 @@
     "crunches": {
       "canonical_ru": "Скручивания",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "crunches",
         "скручивания",
@@ -110,6 +116,7 @@
     "cable_crunch": {
       "canonical_ru": "Скручивания на блоке",
       "muscle_group": "abs",
+      "input": "strength",
       "aliases": [
         "cable crunch",
         "скручивания на блоке"
@@ -121,6 +128,7 @@
     "exercise_ball_crunch": {
       "canonical_ru": "Скручивания на мяче",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "exercise ball crunch",
         "скручивания на мяче"
@@ -132,6 +140,7 @@
     "decline_crunch": {
       "canonical_ru": "Скручивания на наклонной",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "decline crunch",
         "скручивания на наклонной"
@@ -143,6 +152,7 @@
     "hyperextensions_with_no_hyperextension_bench": {
       "canonical_ru": "Гиперэкстензия",
       "muscle_group": "back",
+      "input": "bodyweight",
       "aliases": [
         "hyperextensions with no hyperextension bench",
         "гиперэкстензия"
@@ -154,6 +164,7 @@
     "pullups": {
       "canonical_ru": "Подтягивания",
       "muscle_group": "back",
+      "input": "bodyweight",
       "aliases": [
         "pullups",
         "подтягивания"
@@ -165,6 +176,7 @@
     "bent_arm_dumbbell_pullover": {
       "canonical_ru": "Пуловер с гантелью",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "bent-arm dumbbell pullover",
         "пуловер с гантелью"
@@ -176,6 +188,7 @@
     "barbell_deadlift": {
       "canonical_ru": "Становая тяга",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "barbell deadlift",
         "становая тяга"
@@ -187,6 +200,7 @@
     "wide_grip_lat_pulldown": {
       "canonical_ru": "Тяга верхнего блока",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "wide-grip lat pulldown",
         "тяга верхнего блока"
@@ -198,6 +212,7 @@
     "close_grip_front_lat_pulldown": {
       "canonical_ru": "Тяга верхнего блока узким хватом",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "close-grip front lat pulldown",
         "тяга верхнего блока узким хватом"
@@ -209,6 +224,7 @@
     "one_arm_dumbbell_row": {
       "canonical_ru": "Тяга гантели одной рукой",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "one-arm dumbbell row",
         "тяга гантели одной рукой"
@@ -220,6 +236,7 @@
     "reverse_grip_bent_over_rows": {
       "canonical_ru": "Тяга к поясу обратным хватом",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "reverse grip bent-over rows",
         "тяга к поясу обратным хватом"
@@ -231,6 +248,7 @@
     "seated_cable_rows": {
       "canonical_ru": "Тяга нижнего блока сидя",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "seated cable rows",
         "тяга нижнего блока сидя",
@@ -243,6 +261,7 @@
     "t_bar_row_with_handle": {
       "canonical_ru": "Тяга Т-грифа",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "t-bar row with handle",
         "тяга т-грифа",
@@ -256,6 +275,7 @@
     "bent_over_barbell_row": {
       "canonical_ru": "Тяга штанги в наклоне",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "bent over barbell row",
         "тяга штанги в наклоне"
@@ -267,6 +287,7 @@
     "barbell_shrug": {
       "canonical_ru": "Шраги со штангой",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "barbell shrug",
         "шраги со штангой"
@@ -278,6 +299,7 @@
     "concentration_curls": {
       "canonical_ru": "Концентрированные сгибания",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "concentration curls",
         "концентрированные сгибания"
@@ -289,6 +311,7 @@
     "hammer_curls": {
       "canonical_ru": "Молот",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "hammer curls",
         "молот"
@@ -300,6 +323,7 @@
     "dumbbell_bicep_curl": {
       "canonical_ru": "Подъём гантелей на бицепс",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "dumbbell bicep curl",
         "подъём гантелей на бицепс",
@@ -312,6 +336,7 @@
     "barbell_curl": {
       "canonical_ru": "Подъём штанги на бицепс",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "barbell curl",
         "подъём штанги на бицепс"
@@ -323,6 +348,7 @@
     "high_cable_curls": {
       "canonical_ru": "Сгибания на бицепс на блоке",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "high cable curls",
         "сгибания на бицепс на блоке",
@@ -335,6 +361,7 @@
     "incline_dumbbell_curl": {
       "canonical_ru": "Сгибания на наклонной",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "incline dumbbell curl",
         "сгибания на наклонной"
@@ -346,6 +373,7 @@
     "preacher_curl": {
       "canonical_ru": "Сгибания на скамье Скотта",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "preacher curl",
         "сгибания на скамье скотта"
@@ -357,6 +385,7 @@
     "calf_press": {
       "canonical_ru": "Подъём на носки в жиме ногами",
       "muscle_group": "calves",
+      "input": "strength",
       "aliases": [
         "calf press",
         "подъём на носки в жиме ногами",
@@ -370,6 +399,7 @@
     "standing_dumbbell_calf_raise": {
       "canonical_ru": "Подъём на носки с гантелями",
       "muscle_group": "calves",
+      "input": "strength",
       "aliases": [
         "standing dumbbell calf raise",
         "подъём на носки с гантелями"
@@ -381,6 +411,7 @@
     "barbell_seated_calf_raise": {
       "canonical_ru": "Подъём на носки сидя",
       "muscle_group": "calves",
+      "input": "strength",
       "aliases": [
         "barbell seated calf raise",
         "подъём на носки сидя",
@@ -393,6 +424,7 @@
     "standing_calf_raises": {
       "canonical_ru": "Подъём на носки стоя",
       "muscle_group": "calves",
+      "input": "strength",
       "aliases": [
         "standing calf raises",
         "подъём на носки стоя",
@@ -407,6 +439,7 @@
     "running_treadmill": {
       "canonical_ru": "Бег на дорожке",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "running treadmill",
         "бег на дорожке",
@@ -419,6 +452,7 @@
     "bicycling_stationary": {
       "canonical_ru": "Велотренажёр",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "bicycling stationary",
         "велотренажёр",
@@ -431,6 +465,7 @@
     "rowing_stationary": {
       "canonical_ru": "Гребной тренажёр",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "rowing stationary",
         "гребной тренажёр"
@@ -442,6 +477,7 @@
     "rope_jumping": {
       "canonical_ru": "Скакалка",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "rope jumping",
         "скакалка"
@@ -453,6 +489,7 @@
     "stairmaster": {
       "canonical_ru": "Степпер",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "stairmaster",
         "степпер"
@@ -464,6 +501,7 @@
     "walking_treadmill": {
       "canonical_ru": "Ходьба на дорожке",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "walking treadmill",
         "ходьба на дорожке"
@@ -475,6 +513,7 @@
     "elliptical_trainer": {
       "canonical_ru": "Эллиптический тренажёр",
       "muscle_group": "cardio",
+      "input": "time",
       "aliases": [
         "elliptical trainer",
         "эллиптический тренажёр",
@@ -487,6 +526,7 @@
     "leverage_chest_press": {
       "canonical_ru": "Жим в тренажёре на грудь",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "leverage chest press",
         "жим в тренажёре на грудь",
@@ -499,6 +539,7 @@
     "dumbbell_bench_press": {
       "canonical_ru": "Жим гантелей лёжа",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "dumbbell bench press",
         "жим гантелей лёжа"
@@ -510,6 +551,7 @@
     "incline_dumbbell_press": {
       "canonical_ru": "Жим гантелей на наклонной",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "incline dumbbell press",
         "жим гантелей на наклонной"
@@ -521,6 +563,7 @@
     "barbell_bench_press_medium_grip": {
       "canonical_ru": "Жим штанги лёжа",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "barbell bench press medium grip",
         "жим штанги лёжа"
@@ -532,6 +575,7 @@
     "barbell_incline_bench_press_medium_grip": {
       "canonical_ru": "Жим штанги на наклонной",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "barbell incline bench press medium grip",
         "жим штанги на наклонной"
@@ -543,6 +587,7 @@
     "pushups": {
       "canonical_ru": "Отжимания",
       "muscle_group": "chest",
+      "input": "bodyweight",
       "aliases": [
         "pushups",
         "отжимания"
@@ -554,6 +599,7 @@
     "dips_chest_version": {
       "canonical_ru": "Отжимания на брусьях",
       "muscle_group": "chest",
+      "input": "bodyweight",
       "aliases": [
         "dips chest version",
         "отжимания на брусьях",
@@ -566,6 +612,7 @@
     "dumbbell_flyes": {
       "canonical_ru": "Разведение гантелей лёжа",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "dumbbell flyes",
         "разведение гантелей лёжа"
@@ -577,6 +624,7 @@
     "cable_crossover": {
       "canonical_ru": "Сведение в кроссовере",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "cable crossover",
         "сведение в кроссовере",
@@ -589,6 +637,7 @@
     "butterfly": {
       "canonical_ru": "Сведение в тренажёре (бабочка)",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "butterfly",
         "сведение в тренажёре (бабочка)",
@@ -603,6 +652,7 @@
     "side_bridge": {
       "canonical_ru": "Боковая планка",
       "muscle_group": "core",
+      "input": "time",
       "aliases": [
         "side bridge",
         "боковая планка"
@@ -614,6 +664,7 @@
     "standing_cable_wood_chop": {
       "canonical_ru": "Дровосек на блоке",
       "muscle_group": "core",
+      "input": "strength",
       "aliases": [
         "standing cable wood chop",
         "дровосек на блоке"
@@ -625,6 +676,7 @@
     "dumbbell_side_bend": {
       "canonical_ru": "Наклоны в стороны с гантелью",
       "muscle_group": "core",
+      "input": "strength",
       "aliases": [
         "dumbbell side bend",
         "наклоны в стороны с гантелью"
@@ -636,6 +688,7 @@
     "plank": {
       "canonical_ru": "Планка",
       "muscle_group": "core",
+      "input": "time",
       "aliases": [
         "plank",
         "планка"
@@ -647,6 +700,7 @@
     "cable_russian_twists": {
       "canonical_ru": "Русские скручивания",
       "muscle_group": "core",
+      "input": "bodyweight",
       "aliases": [
         "cable russian twists",
         "русские скручивания"
@@ -658,6 +712,7 @@
     "mountain_climbers": {
       "canonical_ru": "Скалолаз",
       "muscle_group": "core",
+      "input": "bodyweight",
       "aliases": [
         "mountain climbers",
         "скалолаз"
@@ -669,6 +724,7 @@
     "reverse_barbell_curl": {
       "canonical_ru": "Подъём штанги обратным хватом",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "reverse barbell curl",
         "подъём штанги обратным хватом"
@@ -680,6 +736,7 @@
     "seated_palms_down_barbell_wrist_curl": {
       "canonical_ru": "Разгибания запястий со штангой",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "seated palms-down barbell wrist curl",
         "разгибания запястий со штангой"
@@ -691,6 +748,7 @@
     "palms_up_barbell_wrist_curl_over_a_bench": {
       "canonical_ru": "Сгибания запястий со штангой",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "palms-up barbell wrist curl over a bench",
         "сгибания запястий со штангой"
@@ -702,6 +760,7 @@
     "push_press": {
       "canonical_ru": "Жимовой швунг",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "push press",
         "жимовой швунг"
@@ -713,6 +772,7 @@
     "box_jump_multiple_response": {
       "canonical_ru": "Запрыгивания на тумбу",
       "muscle_group": "functional",
+      "input": "bodyweight",
       "aliases": [
         "box jump multiple response",
         "запрыгивания на тумбу"
@@ -724,6 +784,7 @@
     "one_arm_kettlebell_swings": {
       "canonical_ru": "Махи гирей",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "one-arm kettlebell swings",
         "махи гирей"
@@ -735,6 +796,7 @@
     "one_arm_kettlebell_clean": {
       "canonical_ru": "Подъём гири на грудь",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "one-arm kettlebell clean",
         "подъём гири на грудь"
@@ -746,6 +808,7 @@
     "bodyweight_walking_lunge": {
       "canonical_ru": "Прогулка выпадами",
       "muscle_group": "functional",
+      "input": "bodyweight",
       "aliases": [
         "bodyweight walking lunge",
         "прогулка выпадами"
@@ -757,6 +820,7 @@
     "farmers_walk": {
       "canonical_ru": "Прогулка фермера",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "farmers walk",
         "прогулка фермера"
@@ -768,6 +832,7 @@
     "one_arm_kettlebell_snatch": {
       "canonical_ru": "Рывок гири одной рукой",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "one-arm kettlebell snatch",
         "рывок гири одной рукой"
@@ -779,6 +844,7 @@
     "kettlebell_thruster": {
       "canonical_ru": "Трастеры с гирей",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "kettlebell thruster",
         "трастеры с гирей"
@@ -790,6 +856,7 @@
     "kettlebell_turkish_get_up_lunge_style": {
       "canonical_ru": "Турецкий подъём",
       "muscle_group": "functional",
+      "input": "strength",
       "aliases": [
         "kettlebell turkish get-up lunge style",
         "турецкий подъём"
@@ -801,6 +868,7 @@
     "glute_kickback": {
       "canonical_ru": "Махи ногой назад (ягодицы)",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "glute kickback",
         "махи ногой назад (ягодицы)"
@@ -812,6 +880,7 @@
     "thigh_abductor": {
       "canonical_ru": "Отведение бедра в тренажёре",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "thigh abductor",
         "отведение бедра в тренажёре",
@@ -826,6 +895,7 @@
     "one_legged_cable_kickback": {
       "canonical_ru": "Отведение ноги в кроссовере",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "one-legged cable kickback",
         "отведение ноги в кроссовере",
@@ -838,6 +908,7 @@
     "butt_ups": {
       "canonical_ru": "Подъём таза одной ногой",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "butt-ups",
         "подъём таза одной ногой"
@@ -849,6 +920,7 @@
     "butt_lift_bridge": {
       "canonical_ru": "Ягодичный мост",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "butt lift bridge",
         "ягодичный мост",
@@ -861,6 +933,7 @@
     "barbell_glute_bridge": {
       "canonical_ru": "Ягодичный мост со штангой",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "barbell glute bridge",
         "ягодичный мост со штангой"
@@ -872,6 +945,7 @@
     "stiff_leg_barbell_good_morning": {
       "canonical_ru": "Гуд монинг (наклоны)",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "stiff leg barbell good morning",
         "гуд монинг (наклоны)"
@@ -883,6 +957,7 @@
     "romanian_deadlift": {
       "canonical_ru": "Румынская тяга",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "romanian deadlift",
         "румынская тяга"
@@ -894,6 +969,7 @@
     "standing_leg_curl": {
       "canonical_ru": "Сгибание ноги стоя",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "standing leg curl",
         "сгибание ноги стоя"
@@ -905,6 +981,7 @@
     "lying_leg_curls": {
       "canonical_ru": "Сгибания ног лёжа",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "lying leg curls",
         "сгибания ног лёжа",
@@ -917,6 +994,7 @@
     "seated_leg_curl": {
       "canonical_ru": "Сгибания ног сидя",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "seated leg curl",
         "сгибания ног сидя"
@@ -928,6 +1006,7 @@
     "stiff_legged_barbell_deadlift": {
       "canonical_ru": "Становая на прямых ногах",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "stiff-legged barbell deadlift",
         "становая на прямых ногах"
@@ -939,6 +1018,7 @@
     "one_leg_barbell_squat": {
       "canonical_ru": "Болгарские выпады",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "one leg barbell squat",
         "болгарские выпады"
@@ -950,6 +1030,7 @@
     "dumbbell_lunges": {
       "canonical_ru": "Выпады с гантелями",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "dumbbell lunges",
         "выпады с гантелями"
@@ -961,6 +1042,7 @@
     "barbell_lunge": {
       "canonical_ru": "Выпады со штангой",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "barbell lunge",
         "выпады со штангой"
@@ -972,6 +1054,7 @@
     "barbell_hack_squat": {
       "canonical_ru": "Гакк-приседания",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "barbell hack squat",
         "гакк-приседания",
@@ -984,6 +1067,7 @@
     "leg_press": {
       "canonical_ru": "Жим ногами",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "leg press",
         "жим ногами",
@@ -997,6 +1081,7 @@
     "dumbbell_step_ups": {
       "canonical_ru": "Зашагивания на тумбу",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "dumbbell step ups",
         "зашагивания на тумбу"
@@ -1008,6 +1093,7 @@
     "plie_dumbbell_squat": {
       "canonical_ru": "Плие-приседания с гантелью",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "plie dumbbell squat",
         "плие-приседания с гантелью"
@@ -1019,6 +1105,7 @@
     "smith_machine_squat": {
       "canonical_ru": "Приседания в Смите",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "smith machine squat",
         "приседания в смите"
@@ -1030,6 +1117,7 @@
     "goblet_squat": {
       "canonical_ru": "Приседания с кубком",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "goblet squat",
         "приседания с кубком"
@@ -1041,6 +1129,7 @@
     "barbell_full_squat": {
       "canonical_ru": "Приседания со штангой",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "barbell full squat",
         "приседания со штангой"
@@ -1052,6 +1141,7 @@
     "leg_extensions": {
       "canonical_ru": "Разгибания ног в тренажёре",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "leg extensions",
         "разгибания ног в тренажёре",
@@ -1064,6 +1154,7 @@
     "weighted_sissy_squat": {
       "canonical_ru": "Сисси-приседания",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "weighted sissy squat",
         "сисси-приседания"
@@ -1075,6 +1166,7 @@
     "front_barbell_squat": {
       "canonical_ru": "Фронтальные приседания",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "front barbell squat",
         "фронтальные приседания",
@@ -1087,6 +1179,7 @@
     "kettlebell_arnold_press": {
       "canonical_ru": "Жим Арнольда",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "kettlebell arnold press",
         "жим арнольда"
@@ -1098,6 +1191,7 @@
     "dumbbell_shoulder_press": {
       "canonical_ru": "Жим гантелей сидя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "dumbbell shoulder press",
         "жим гантелей сидя"
@@ -1109,6 +1203,7 @@
     "standing_barbell_press_behind_neck": {
       "canonical_ru": "Жим из-за головы",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "standing barbell press behind neck",
         "жим из-за головы"
@@ -1120,6 +1215,7 @@
     "standing_military_press": {
       "canonical_ru": "Жим штанги стоя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "standing military press",
         "жим штанги стоя"
@@ -1131,6 +1227,7 @@
     "dumbbell_lying_rear_lateral_raise": {
       "canonical_ru": "Махи в наклоне (задняя дельта)",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "dumbbell lying rear lateral raise",
         "махи в наклоне (задняя дельта)"
@@ -1142,6 +1239,7 @@
     "side_lateral_raise": {
       "canonical_ru": "Махи гантелями в стороны",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "side lateral raise",
         "махи гантелями в стороны",
@@ -1155,6 +1253,7 @@
     "front_dumbbell_raise": {
       "canonical_ru": "Подъём гантелей перед собой",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "front dumbbell raise",
         "подъём гантелей перед собой"
@@ -1166,6 +1265,7 @@
     "reverse_machine_flyes": {
       "canonical_ru": "Разведение в тренажёре (задняя дельта)",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "reverse machine flyes",
         "разведение в тренажёре (задняя дельта)",
@@ -1181,6 +1281,7 @@
     "upright_barbell_row": {
       "canonical_ru": "Тяга штанги к подбородку",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "upright barbell row",
         "тяга штанги к подбородку"
@@ -1192,6 +1293,7 @@
     "close_grip_barbell_bench_press": {
       "canonical_ru": "Жим узким хватом",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "close-grip barbell bench press",
         "жим узким хватом"
@@ -1203,6 +1305,7 @@
     "dips_triceps_version": {
       "canonical_ru": "Отжимания от скамьи на трицепс",
       "muscle_group": "triceps",
+      "input": "bodyweight",
       "aliases": [
         "dips triceps version",
         "отжимания от скамьи на трицепс",
@@ -1215,6 +1318,7 @@
     "decline_dumbbell_triceps_extension": {
       "canonical_ru": "Разгибание гантели из-за головы",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "decline dumbbell triceps extension",
         "разгибание гантели из-за головы"
@@ -1226,6 +1330,7 @@
     "cable_rope_overhead_triceps_extension": {
       "canonical_ru": "Разгибание из-за головы на блоке",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "cable rope overhead triceps extension",
         "разгибание из-за головы на блоке"
@@ -1237,6 +1342,7 @@
     "triceps_pushdown_rope_attachment": {
       "canonical_ru": "Разгибание на блоке канатом",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "triceps pushdown rope attachment",
         "разгибание на блоке канатом",
@@ -1249,6 +1355,7 @@
     "triceps_pushdown": {
       "canonical_ru": "Разгибания на блоке (трицепс)",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "triceps pushdown",
         "разгибания на блоке (трицепс)",
@@ -1261,6 +1368,7 @@
     "ez_bar_skullcrusher": {
       "canonical_ru": "Французский жим",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "ez-bar skullcrusher",
         "французский жим"
@@ -1272,6 +1380,7 @@
     "seated_triceps_press": {
       "canonical_ru": "Французский жим сидя",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "seated triceps press",
         "французский жим сидя"
@@ -1283,6 +1392,7 @@
     "wide_grip_rear_pull_up": {
       "canonical_ru": "Подтягивания широким хватом",
       "muscle_group": "back",
+      "input": "bodyweight",
       "aliases": [
         "wide-grip rear pull-up",
         "подтягивания широким хватом"
@@ -1294,6 +1404,7 @@
     "scapular_pull_up": {
       "canonical_ru": "Подтягивания в гравитроне",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "scapular pull-up",
         "подтягивания в гравитроне"
@@ -1305,6 +1416,7 @@
     "straight_arm_pulldown": {
       "canonical_ru": "Пуловер в кроссовере",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "straight-arm pulldown",
         "пуловер в кроссовере"
@@ -1316,6 +1428,7 @@
     "machine_shoulder_military_press": {
       "canonical_ru": "Жим на плечи в тренажёре",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "machine shoulder military press",
         "жим на плечи в тренажёре"
@@ -1327,6 +1440,7 @@
     "seated_side_lateral_raise": {
       "canonical_ru": "Махи на среднюю дельту сидя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "seated side lateral raise",
         "махи на среднюю дельту сидя"
@@ -1338,6 +1452,7 @@
     "seated_bent_over_rear_delt_raise": {
       "canonical_ru": "Махи на заднюю дельту сидя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "seated bent-over rear delt raise",
         "махи на заднюю дельту сидя"
@@ -1349,6 +1464,7 @@
     "cable_rear_delt_fly": {
       "canonical_ru": "Задняя дельта в кроссовере",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "cable rear delt fly",
         "задняя дельта в кроссовере"
@@ -1360,6 +1476,7 @@
     "face_pull": {
       "canonical_ru": "Тяга к лицу",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "face pull",
         "тяга к лицу"
@@ -1371,6 +1488,7 @@
     "dumbbell_rear_lunge": {
       "canonical_ru": "Выпады назад с гантелями",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "dumbbell rear lunge",
         "выпады назад с гантелями"
@@ -1382,6 +1500,7 @@
     "thigh_adductor": {
       "canonical_ru": "Сведение ног в тренажёре",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "thigh adductor",
         "сведение ног в тренажёре"
@@ -1393,6 +1512,7 @@
     "seated_dumbbell_curl": {
       "canonical_ru": "Бицепс с гантелями сидя",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "seated dumbbell curl",
         "бицепс с гантелями сидя"
@@ -1404,6 +1524,7 @@
     "standing_dumbbell_triceps_extension": {
       "canonical_ru": "Разгибание рук с гантелью из-за головы",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "standing dumbbell triceps extension",
         "разгибание рук с гантелью из-за головы",
@@ -1417,6 +1538,7 @@
     "jackknife_sit_up": {
       "canonical_ru": "Пресс V-складка",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "jackknife sit-up",
         "пресс v-складка"
@@ -1428,6 +1550,7 @@
     "barbell_hip_thrust": {
       "canonical_ru": "Хип-траст",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "barbell hip thrust",
         "хип-траст",
@@ -1441,6 +1564,7 @@
     "leverage_iso_row": {
       "canonical_ru": "Рычажная тяга с упором",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "leverage iso row",
         "рычажная тяга с упором",
@@ -1454,6 +1578,7 @@
     "single_leg_glute_bridge": {
       "canonical_ru": "Ягодичный мостик одной ногой",
       "muscle_group": "glutes",
+      "input": "strength",
       "aliases": [
         "single leg glute bridge",
         "ягодичный мостик одной ногой",
@@ -1466,6 +1591,7 @@
     "decline_barbell_bench_press": {
       "canonical_ru": "Жим штанги на наклонной вниз",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "decline barbell bench press",
         "жим штанги на наклонной вниз"
@@ -1477,6 +1603,7 @@
     "decline_dumbbell_bench_press": {
       "canonical_ru": "Жим гантелей на наклонной вниз",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "decline dumbbell bench press",
         "жим гантелей на наклонной вниз"
@@ -1488,6 +1615,7 @@
     "incline_dumbbell_flyes": {
       "canonical_ru": "Разведение гантелей на наклонной",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "incline dumbbell flyes",
         "разведение гантелей на наклонной"
@@ -1499,6 +1627,7 @@
     "smith_machine_bench_press": {
       "canonical_ru": "Жим в Смите лёжа",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "smith machine bench press",
         "жим в смите лёжа"
@@ -1510,6 +1639,7 @@
     "push_up_wide": {
       "canonical_ru": "Отжимания широким хватом",
       "muscle_group": "chest",
+      "input": "bodyweight",
       "aliases": [
         "push-up wide",
         "отжимания широким хватом"
@@ -1521,6 +1651,7 @@
     "push_ups_close_triceps_position": {
       "canonical_ru": "Отжимания узким хватом",
       "muscle_group": "chest",
+      "input": "bodyweight",
       "aliases": [
         "push-ups close triceps position",
         "отжимания узким хватом"
@@ -1532,6 +1663,7 @@
     "incline_cable_chest_press": {
       "canonical_ru": "Жим на наклонной в кроссовере",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "incline cable chest press",
         "жим на наклонной в кроссовере"
@@ -1543,6 +1675,7 @@
     "floor_press": {
       "canonical_ru": "Жим с пола со штангой",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "floor press",
         "жим с пола со штангой"
@@ -1554,6 +1687,7 @@
     "hammer_grip_incline_db_bench_press": {
       "canonical_ru": "Жим гантелей на наклонной нейтральным",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "hammer grip incline db bench press",
         "жим гантелей на наклонной нейтральным"
@@ -1565,6 +1699,7 @@
     "low_cable_crossover": {
       "canonical_ru": "Сведение в кроссовере снизу",
       "muscle_group": "chest",
+      "input": "strength",
       "aliases": [
         "low cable crossover",
         "сведение в кроссовере снизу"
@@ -1576,6 +1711,7 @@
     "chin_up": {
       "canonical_ru": "Подтягивания обратным хватом",
       "muscle_group": "back",
+      "input": "bodyweight",
       "aliases": [
         "chin-up",
         "подтягивания обратным хватом"
@@ -1587,6 +1723,7 @@
     "inverted_row": {
       "canonical_ru": "Австралийские подтягивания",
       "muscle_group": "back",
+      "input": "bodyweight",
       "aliases": [
         "inverted row",
         "австралийские подтягивания"
@@ -1598,6 +1735,7 @@
     "lying_t_bar_row": {
       "canonical_ru": "Тяга Т-грифа лёжа",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "lying t-bar row",
         "тяга т-грифа лёжа"
@@ -1609,6 +1747,7 @@
     "dumbbell_shrug": {
       "canonical_ru": "Шраги с гантелями",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "dumbbell shrug",
         "шраги с гантелями"
@@ -1620,6 +1759,7 @@
     "sumo_deadlift": {
       "canonical_ru": "Становая тяга сумо",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "sumo deadlift",
         "становая тяга сумо"
@@ -1631,6 +1771,7 @@
     "underhand_cable_pulldowns": {
       "canonical_ru": "Тяга верхнего блока обратным хватом",
       "muscle_group": "back",
+      "input": "strength",
       "aliases": [
         "underhand cable pulldowns",
         "тяга верхнего блока обратным хватом"
@@ -1642,6 +1783,7 @@
     "smith_machine_upright_row": {
       "canonical_ru": "Тяга к подбородку в Смите",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "smith machine upright row",
         "тяга к подбородку в смите"
@@ -1653,6 +1795,7 @@
     "cable_seated_lateral_raise": {
       "canonical_ru": "Махи в стороны на блоке сидя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "cable seated lateral raise",
         "махи в стороны на блоке сидя"
@@ -1664,6 +1807,7 @@
     "seated_barbell_military_press": {
       "canonical_ru": "Жим штанги сидя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "seated barbell military press",
         "жим штанги сидя"
@@ -1675,6 +1819,7 @@
     "standing_dumbbell_upright_row": {
       "canonical_ru": "Тяга к подбородку с гантелями",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "standing dumbbell upright row",
         "тяга к подбородку с гантелями"
@@ -1686,6 +1831,7 @@
     "standing_dumbbell_press": {
       "canonical_ru": "Жим гантелей стоя",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "standing dumbbell press",
         "жим гантелей стоя"
@@ -1697,6 +1843,7 @@
     "barbell_rear_delt_row": {
       "canonical_ru": "Тяга в наклоне на заднюю дельту",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "barbell rear delt row",
         "тяга в наклоне на заднюю дельту"
@@ -1708,6 +1855,7 @@
     "smith_machine_overhead_shoulder_press": {
       "canonical_ru": "Жим на плечи в Смите",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "smith machine overhead shoulder press",
         "жим на плечи в смите"
@@ -1719,6 +1867,7 @@
     "bent_over_dumbbell_rear_delt_raise_with_head_on_bench": {
       "canonical_ru": "Разведение в наклоне с упором в скамью",
       "muscle_group": "shoulders",
+      "input": "strength",
       "aliases": [
         "bent over dumbbell rear delt raise with head on bench",
         "разведение в наклоне с упором в скамью"
@@ -1730,6 +1879,7 @@
     "ez_bar_curl": {
       "canonical_ru": "Сгибания EZ-штангой",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "ez-bar curl",
         "сгибания ez-штангой"
@@ -1741,6 +1891,7 @@
     "spider_curl": {
       "canonical_ru": "Паучьи сгибания",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "spider curl",
         "паучьи сгибания"
@@ -1752,6 +1903,7 @@
     "zottman_curl": {
       "canonical_ru": "Сгибания Зоттмана",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "zottman curl",
         "сгибания зоттмана"
@@ -1763,6 +1915,7 @@
     "alternate_incline_dumbbell_curl": {
       "canonical_ru": "Сгибания с гантелями попеременно",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "alternate incline dumbbell curl",
         "сгибания с гантелями попеременно"
@@ -1774,6 +1927,7 @@
     "cable_hammer_curls_rope_attachment": {
       "canonical_ru": "Молот на блоке с канатом",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "cable hammer curls rope attachment",
         "молот на блоке с канатом"
@@ -1785,6 +1939,7 @@
     "machine_bicep_curl": {
       "canonical_ru": "Сгибания на бицепс в тренажёре",
       "muscle_group": "biceps",
+      "input": "strength",
       "aliases": [
         "machine bicep curl",
         "сгибания на бицепс в тренажёре"
@@ -1796,6 +1951,7 @@
     "reverse_grip_triceps_pushdown": {
       "canonical_ru": "Разгибание на блоке обратным хватом",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "reverse grip triceps pushdown",
         "разгибание на блоке обратным хватом"
@@ -1807,6 +1963,7 @@
     "lying_dumbbell_tricep_extension": {
       "canonical_ru": "Французский жим гантелями лёжа",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "lying dumbbell tricep extension",
         "французский жим гантелями лёжа"
@@ -1818,6 +1975,7 @@
     "close_grip_push_up_off_of_a_dumbbell": {
       "canonical_ru": "Алмазные отжимания",
       "muscle_group": "triceps",
+      "input": "bodyweight",
       "aliases": [
         "close-grip push-up off of a dumbbell",
         "алмазные отжимания"
@@ -1829,6 +1987,7 @@
     "tate_press": {
       "canonical_ru": "Жим Тейта",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "tate press",
         "жим тейта"
@@ -1840,6 +1999,7 @@
     "standing_overhead_barbell_triceps_extension": {
       "canonical_ru": "Разгибание из-за головы со штангой стоя",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "standing overhead barbell triceps extension",
         "разгибание из-за головы со штангой стоя"
@@ -1851,6 +2011,7 @@
     "triceps_pushdown_v_bar_attachment": {
       "canonical_ru": "Разгибание на блоке с V-рукоятью",
       "muscle_group": "triceps",
+      "input": "strength",
       "aliases": [
         "triceps pushdown v-bar attachment",
         "разгибание на блоке с v-рукоятью"
@@ -1862,6 +2023,7 @@
     "seated_dumbbell_palms_up_wrist_curl": {
       "canonical_ru": "Сгибания запястий с гантелями сидя",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "seated dumbbell palms-up wrist curl",
         "сгибания запястий с гантелями сидя"
@@ -1873,6 +2035,7 @@
     "standing_palms_up_barbell_behind_the_back_wrist_curl": {
       "canonical_ru": "Сгибания запястий за спиной",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "standing palms-up barbell behind the back wrist curl",
         "сгибания запястий за спиной"
@@ -1884,6 +2047,7 @@
     "wrist_roller": {
       "canonical_ru": "Кистевой ролик",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "wrist roller",
         "кистевой ролик"
@@ -1895,6 +2059,7 @@
     "cable_wrist_curl": {
       "canonical_ru": "Сгибания запястий на блоке",
       "muscle_group": "forearms",
+      "input": "strength",
       "aliases": [
         "cable wrist curl",
         "сгибания запястий на блоке"
@@ -1906,6 +2071,7 @@
     "weighted_crunches": {
       "canonical_ru": "Скручивания с весом",
       "muscle_group": "abs",
+      "input": "strength",
       "aliases": [
         "weighted crunches",
         "скручивания с весом"
@@ -1917,6 +2083,7 @@
     "toe_touchers": {
       "canonical_ru": "Касания носков лёжа",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "toe touchers",
         "касания носков лёжа"
@@ -1928,6 +2095,7 @@
     "side_jackknife": {
       "canonical_ru": "Боковая складка",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "side jackknife",
         "боковая складка"
@@ -1939,6 +2107,7 @@
     "ab_crunch_machine": {
       "canonical_ru": "Скручивания в тренажёре",
       "muscle_group": "abs",
+      "input": "strength",
       "aliases": [
         "ab crunch machine",
         "скручивания в тренажёре"
@@ -1950,6 +2119,7 @@
     "oblique_crunches": {
       "canonical_ru": "Косые скручивания",
       "muscle_group": "abs",
+      "input": "bodyweight",
       "aliases": [
         "oblique crunches",
         "косые скручивания"
@@ -1961,6 +2131,7 @@
     "pallof_press": {
       "canonical_ru": "Жим Паллова",
       "muscle_group": "core",
+      "input": "strength",
       "aliases": [
         "pallof press",
         "жим паллова"
@@ -1972,6 +2143,7 @@
     "russian_twist": {
       "canonical_ru": "Русские скручивания (с поворотом)",
       "muscle_group": "core",
+      "input": "bodyweight",
       "aliases": [
         "russian twist",
         "русские скручивания (с поворотом)"
@@ -1983,6 +2155,7 @@
     "dead_bug": {
       "canonical_ru": "«Мёртвый жук»",
       "muscle_group": "core",
+      "input": "bodyweight",
       "aliases": [
         "dead bug",
         "«мёртвый жук»"
@@ -1994,6 +2167,7 @@
     "reverse_hyperextension": {
       "canonical_ru": "Обратная гиперэкстензия",
       "muscle_group": "core",
+      "input": "bodyweight",
       "aliases": [
         "reverse hyperextension",
         "обратная гиперэкстензия"
@@ -2005,6 +2179,7 @@
     "barbell_walking_lunge": {
       "canonical_ru": "Выпады при ходьбе со штангой",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "barbell walking lunge",
         "выпады при ходьбе со штангой"
@@ -2016,6 +2191,7 @@
     "smith_machine_pistol_squat": {
       "canonical_ru": "Присед-пистолет в Смите",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "smith machine pistol squat",
         "присед-пистолет в смите"
@@ -2027,6 +2203,7 @@
     "hack_squat": {
       "canonical_ru": "Гакк-присед в тренажёре",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "hack squat",
         "гакк-присед в тренажёре"
@@ -2038,6 +2215,7 @@
     "split_squat_with_dumbbells": {
       "canonical_ru": "Болгарские выпады с гантелями",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "split squat with dumbbells",
         "болгарские выпады с гантелями"
@@ -2049,6 +2227,7 @@
     "step_up_with_knee_raise": {
       "canonical_ru": "Зашагивания с подъёмом колена",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "step-up with knee raise",
         "зашагивания с подъёмом колена"
@@ -2060,6 +2239,7 @@
     "barbell_side_split_squat": {
       "canonical_ru": "Боковой сплит-присед со штангой",
       "muscle_group": "quads",
+      "input": "strength",
       "aliases": [
         "barbell side split squat",
         "боковой сплит-присед со штангой"
@@ -2071,6 +2251,7 @@
     "glute_ham_raise": {
       "canonical_ru": "Нордические сгибания (glute-ham)",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "glute ham raise",
         "нордические сгибания (glute-ham)"
@@ -2082,6 +2263,7 @@
     "seated_good_mornings": {
       "canonical_ru": "Гудморнинг сидя",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "seated good mornings",
         "гудморнинг сидя"
@@ -2093,6 +2275,7 @@
     "good_morning": {
       "canonical_ru": "Гудморнинг со штангой",
       "muscle_group": "hamstrings",
+      "input": "strength",
       "aliases": [
         "good morning",
         "гудморнинг со штангой"
@@ -2104,6 +2287,7 @@
     "donkey_calf_raises": {
       "canonical_ru": "Подъём на носки «ослик»",
       "muscle_group": "calves",
+      "input": "strength",
       "aliases": [
         "donkey calf raises",
         "подъём на носки «ослик»"
@@ -2115,6 +2299,7 @@
     "smith_machine_calf_raise": {
       "canonical_ru": "Подъём на носки в Смите",
       "muscle_group": "calves",
+      "input": "strength",
       "aliases": [
         "smith machine calf raise",
         "подъём на носки в смите"
@@ -2126,6 +2311,7 @@
     "front_box_jump": {
       "canonical_ru": "Запрыгивания на тумбу фронтально",
       "muscle_group": "functional",
+      "input": "bodyweight",
       "aliases": [
         "front box jump",
         "запрыгивания на тумбу фронтально"

@@ -141,3 +141,45 @@ class TestSelfLearningDetectors:
     ])
     def test_forget(self, text, expected):
         assert self.is_forget(text) == expected
+
+
+class TestExerciseInputMode:
+    """W3-6: catalog-driven input mode (time / bodyweight / strength). No DB."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        from app.bot.services.catalog_v2 import classify_input, CATALOG
+        self.classify = classify_input
+        self.catalog = CATALOG
+
+    @pytest.mark.parametrize("key,expected", [
+        ("running_treadmill", "time"),        # cardio → time, not 20×10
+        ("walking_treadmill", "time"),
+        ("elliptical_trainer", "time"),
+        ("rowing_stationary", "time"),
+        ("stairmaster", "time"),
+        ("rope_jumping", "time"),
+        ("plank", "time"),                    # plank → time
+        ("side_bridge", "time"),
+        ("scapular_pull_up", "strength"),     # gravitron = assisted machine → weight
+        ("pullups", "bodyweight"),
+        ("pushups", "bodyweight"),
+        ("dips_chest_version", "bodyweight"),
+        ("air_bike", "bodyweight"),           # «Велосипед (пресс)» is NOT cardio/time
+        ("barbell_bench_press_medium_grip", "strength"),
+        ("crunches", "bodyweight"),
+        ("weighted_crunches", "strength"),    # added weight → strength
+    ])
+    def test_input_mode(self, key, expected):
+        it = self.catalog.get(key)
+        assert it is not None, f"catalog missing {key}"
+        assert it["input"] == expected, f"{key}: {it['input']} != {expected}"
+
+    def test_every_catalog_entry_has_a_valid_mode(self):
+        assert all(it.get("input") in ("time", "bodyweight", "strength")
+                   for it in self.catalog.values())
+
+    def test_no_cardio_is_weighted(self):
+        for it in self.catalog.values():
+            if it["muscle_group"] == "cardio":
+                assert it["input"] == "time", f"cardio {it['canonical_ru']} → {it['input']}"

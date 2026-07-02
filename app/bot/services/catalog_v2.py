@@ -26,6 +26,43 @@ _V2_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", 
 # Legacy muscle_group → new taxonomy. Only applied to old-only (unmerged) exercises.
 _GROUP_REMAP = {"legs": "quads", "posterior_chain": "hamstrings"}
 
+# ── W3-6: input mode per exercise ───────────────────────────────────────────
+# The set-entry UI has three modes: 'time' (мин:сек), 'bodyweight' (повторы only),
+# 'strength' (вес×повторы). classify_input() derives the mode from the exercise's
+# name/aliases + muscle_group so no exercise gets an absurd input (e.g. cardio as
+# 20×10, or an assisted-machine pull-up as bodyweight). The materialised `input`
+# field in the catalog JSON wins over this classifier when present.
+
+# Loaded / machine movements → weight×reps. Checked BEFORE the bodyweight rule so
+# «Подтягивания в гравитроне» (assisted machine, has a counterweight) is strength.
+_WEIGHT_INDICATORS = (
+    "штанг", "гантел", "гир", "блок", "кроссовер", "тренаж", "смит", "хаммер",
+    "с весом", "весом", "жиме ногами", "в жиме", "ассистир", "гравитрон", "гакк",
+    "рычаж", "паллов",
+)
+# Genuinely bodyweight movements (reps, no external load) — only when no weight
+# indicator is present.
+_BODYWEIGHT_PATTERNS = (
+    "подтягиван", "отжиман", "брусь", "брусья", "скручиван", "складк",
+    "касания носк", "подъём ног", "подъем ног", "скалолаз", "мёртвый жук",
+    "мертвый жук", "велосипед", "запрыгив", "берпи", "прогулка выпад",
+    "русские скручивания", "гиперэкстенз", "дровосек",
+)
+
+
+def classify_input(canonical_ru: str, aliases, muscle_group: str | None) -> str:
+    """Return the input mode: 'time' | 'bodyweight' | 'strength'."""
+    text = (canonical_ru + " " + " ".join(aliases or [])).lower()
+    if (muscle_group or "") == "cardio":
+        return "time"
+    if "планк" in text:                                    # planks / timed holds
+        return "time"
+    if any(w in text for w in _WEIGHT_INDICATORS):         # loaded / machine → weight
+        return "strength"
+    if any(w in text for w in _BODYWEIGHT_PATTERNS):       # bodyweight reps
+        return "bodyweight"
+    return "strength"
+
 
 def _build() -> tuple[dict, list, dict, dict]:
     with open(_V2_PATH, encoding="utf-8") as f:
@@ -39,9 +76,11 @@ def _build() -> tuple[dict, list, dict, dict]:
     for k, it in raw["exercises"].items():
         aliases = {a.strip().lower() for a in it.get("aliases", []) if a}
         aliases.add(it["canonical_ru"].strip().lower())
+        # W3-6: input mode — materialised `input` in the JSON wins, else classify.
+        inp = it.get("input") or classify_input(it["canonical_ru"], it.get("aliases", []), it["muscle_group"])
         catalog[k] = {"canonical_ru": it["canonical_ru"], "muscle_group": it["muscle_group"],
                       "aliases": aliases, "image": it.get("image"), "image_end": it.get("image_end"),
-                      "fedb_id": it.get("fedb_id")}
+                      "fedb_id": it.get("fedb_id"), "input": inp}
         for nm in aliases:
             v2_name_index.setdefault(nm, k)
 
@@ -54,9 +93,10 @@ def _build() -> tuple[dict, list, dict, dict]:
             catalog[match]["aliases"].update(onames)
             merged += 1
         elif ok not in catalog:                     # old-only → keep, remap group, no image
-            mg = oit.get("muscle_group")
-            catalog[ok] = {"canonical_ru": oit["canonical_ru"], "muscle_group": _GROUP_REMAP.get(mg, mg),
-                           "aliases": set(onames), "image": None, "image_end": None, "fedb_id": None}
+            mg = _GROUP_REMAP.get(oit.get("muscle_group"), oit.get("muscle_group"))
+            catalog[ok] = {"canonical_ru": oit["canonical_ru"], "muscle_group": mg,
+                           "aliases": set(onames), "image": None, "image_end": None, "fedb_id": None,
+                           "input": classify_input(oit["canonical_ru"], list(onames), mg)}
 
     name_index: dict = {}
     for k, it in catalog.items():

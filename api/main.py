@@ -90,6 +90,7 @@ PUBLIC = ("/api/auth/telegram", "/api/auth/logout", "/api/config", "/healthz", "
 # while folding legacy names in as aliases so history keeps resolving.
 from app.bot.services.catalog_v2 import GROUPS as GROUP_RU, GROUP_ORDER, CATALOG, NAME_INDEX  # noqa: E402
 from app.bot.services.catalog_v2 import search as _catalog_search  # noqa: E402
+from app.bot.services.catalog_v2 import classify_input  # noqa: E402
 
 _NAME_TO_KEY = NAME_INDEX
 _KEY_TO_RU = {_k: _it["canonical_ru"] for _k, _it in CATALOG.items()}
@@ -106,13 +107,16 @@ def _canon_static(name: str) -> str:
 
 
 def exercise_type(name: str, key: str | None = None) -> str:
-    n = (name or "").lower()
-    mg = (CATALOG.get(key or "") or {}).get("muscle_group")
-    if mg == "cardio" or "планк" in n or "велосипед" in n:
-        return "time"
-    if any(w in n for w in ("подтяг", "отжим", "брус")):
-        return "bodyweight"
-    return "strength"
+    """W3-1/W3-6: the input mode comes from the CATALOG (authoritative), not a
+    fragile name regex — so «Подтягивания в гравитроне» is a weighted machine,
+    «Бег на дорожке» is time, «Велосипед (пресс)» is bodyweight, etc. Falls back
+    to the classifier only for names that aren't in the catalog at all."""
+    it = CATALOG.get(key or "")
+    if not it and name:
+        it = CATALOG.get(name_to_key(name) or "")
+    if it:
+        return it.get("input") or classify_input(it["canonical_ru"], it.get("aliases"), it.get("muscle_group"))
+    return classify_input(name or "", None, None)
 
 
 # ─────────────────────────────── app ────────────────────────────────────────
