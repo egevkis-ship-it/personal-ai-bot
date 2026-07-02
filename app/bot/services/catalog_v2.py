@@ -70,22 +70,27 @@ GROUPS, GROUP_ORDER, CATALOG, NAME_INDEX = _build()
 
 
 def search(query: str, limit: int = 8) -> list[dict]:
-    """Rank catalog entries against a query: exact > prefix > substring > word overlap."""
+    """Rank catalog entries against a query (W3-2). Matching is token-substring AND:
+    every whitespace token of the query must appear as a substring of the canonical
+    name OR any alias (case-insensitive, any order), so a word from the MIDDLE of a
+    name matches (e.g. «гравитрон» → «Подтягивания в гравитроне», «подтягив грав» too).
+    Ranking: exact > prefix > whole-query substring > all-tokens-substring."""
     q = (query or "").strip().lower()
     if not q:
         return []
-    qw = set(q.split())
+    tokens = [t for t in q.split() if t]
     scored: list[tuple] = []
     for k, it in CATALOG.items():
         names = it["aliases"] | {it["canonical_ru"].strip().lower()}
+        blob = " ".join(names)   # canonical + every alias, for token/substring matching
         if any(n == q for n in names):
             s = 100
         elif any(n.startswith(q) for n in names):
             s = 80
-        elif any(q in n for n in names):
-            s = 60
-        elif any(qw & set(n.split()) for n in names):
-            s = 40
+        elif q in blob:                                       # whole query is contiguous somewhere
+            s = 65
+        elif tokens and all(t in blob for t in tokens):       # every token matches (AND, any order)
+            s = 50
         else:
             s = 0
         if s:

@@ -581,6 +581,12 @@ def test_exercise_catalog_v2(client):
     # backward-compat: an old spelling from history resolves to the curated v2 entry
     res = client.get("/api/exercises/search?q=" + urllib.parse.quote("разводка")).json()
     assert any("Разведение гантелей" in x["name"] for x in res)
+    # W3-2: a word from the MIDDLE of the name matches (token-substring), and a
+    # multi-token query matches all tokens in any order (AND).
+    grav = client.get("/api/exercises/search?q=" + urllib.parse.quote("гравитрон")).json()
+    assert any("гравитрон" in x["name"].lower() for x in grav)
+    multi = client.get("/api/exercises/search?q=" + urllib.parse.quote("подтягив грав")).json()
+    assert any("гравитрон" in x["name"].lower() for x in multi)
     # new taxonomy is populated (functional + hamstrings groups didn't exist before)
     assert len(client.get("/api/exercises/catalog?group=functional").json()) >= 5
     assert len(client.get("/api/exercises/catalog?group=hamstrings").json()) >= 3
