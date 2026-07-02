@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from datetime import date
 
 from PIL import Image as PILImage
@@ -52,12 +53,21 @@ _FONT_NAME = "Helvetica"
 _FONT_BOLD = "Helvetica-Bold"
 
 
+# W3-7: DejaVuSans (full Cyrillic) is bundled in the repo so the PDF renders
+# Cyrillic even in a minimal container that has no system fonts. This path is
+# tried FIRST; the system paths remain as fallbacks.
+_BUNDLED_FONT_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "fonts"))
+
+
 def _register_fonts():
     """Try to register a Cyrillic-capable TTF; fall back to Helvetica."""
     global _FONT_REGISTERED, _FONT_NAME, _FONT_BOLD
     if _FONT_REGISTERED:
         return
     candidates = [
+        (os.path.join(_BUNDLED_FONT_DIR, "DejaVuSans.ttf"),
+         os.path.join(_BUNDLED_FONT_DIR, "DejaVuSans-Bold.ttf")),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         ("/Library/Fonts/Arial Unicode.ttf",
