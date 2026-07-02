@@ -663,7 +663,7 @@ async function pickTab(wid, t) {
   const body = document.getElementById('pickbody');
   if (t === 'rec') {
     const r = await api('/exercises/recent');
-    body.innerHTML = r.length ? r.map(x => pickRow(wid, x.name, x.key, x.image)).join('') : '<div class="muted small">Пока пусто — выбери по группам.</div>';
+    body.innerHTML = r.length ? r.map(x => pickRow(wid, x.name, x.key, x.image, x.type)).join('') : '<div class="muted small">Пока пусто — выбери по группам.</div>';
   } else {
     const g = await api('/exercises/groups');
     body.innerHTML = g.map(x => `<div class="list-item" onclick="pickGroup(${wid},'${x.group}','${x.label}')"><div style="flex:1">${x.label}</div><span class="muted small">${x.count} ›</span></div>`).join('');
@@ -671,20 +671,21 @@ async function pickTab(wid, t) {
 }
 async function pickGroup(wid, g, label) {
   const list = await api('/exercises/catalog?group=' + g);
-  document.getElementById('pickbody').innerHTML = `<div class="back" onclick="pickTab(${wid},'grp')">‹ ${label}</div>` + list.map(x => pickRow(wid, x.name, x.exercise_key, x.image)).join('');
+  document.getElementById('pickbody').innerHTML = `<div class="back" onclick="pickTab(${wid},'grp')">‹ ${label}</div>` + list.map(x => pickRow(wid, x.name, x.exercise_key, x.image, x.type)).join('');
 }
 async function pickSearch(wid) {
   const q = document.getElementById('exq').value.trim();
   if (q.length < 2) return;
   const r = await api('/exercises/search?q=' + encodeURIComponent(q));
-  document.getElementById('pickbody').innerHTML = r.map(x => pickRow(wid, x.name, x.exercise_key, x.image)).join('') || '<div class="muted small">Ничего не найдено</div>';
+  document.getElementById('pickbody').innerHTML = r.map(x => pickRow(wid, x.name, x.exercise_key, x.image, x.type)).join('') || '<div class="muted small">Ничего не найдено</div>';
 }
-function pickRow(wid, name, key, image) {
-  return `<div class="list-item" onclick='chooseEx(${wid},${esc(JSON.stringify(name))},${esc(JSON.stringify(key || ''))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+function pickRow(wid, name, key, image, type) {
+  return `<div class="list-item" onclick='chooseEx(${wid},${esc(JSON.stringify(name))},${esc(JSON.stringify(key || ''))},${esc(JSON.stringify(type || ''))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
 }
-function chooseEx(wid, name, key) {
-  const type = key && /план|велосипед|кардио/.test(name.toLowerCase()) ? 'time'
-    : /подтяг|отжим|брус/.test(name.toLowerCase()) ? 'bodyweight' : 'strength';
+// W3-1: the input type comes from the catalog (passed by the picker), not a name
+// regex — so «Подтягивания в гравитроне» is weighted and «Бег на дорожке» is time.
+function chooseEx(wid, name, key, type) {
+  type = type || 'strength';
   if (wid === 0 && window._arch) {   // HIST-1 archive draft: collect sets, don't POST
     openAddSet(0, null, { name, key, type, target: null, last: null }, sets => {
       window._arch.exercises.push({ name, key, type, sets });
@@ -1341,7 +1342,9 @@ function repsLabel(ex) {
   if (a) return String(a);
   return '?';
 }
+function fmtDur(sec) { sec = sec || 0; return sec % 60 === 0 ? (sec / 60) + ' мин' : mmss(sec); }
 function exLine(ex) {
+  if (ex.target_duration_seconds) return fmtDur(ex.target_duration_seconds);   // W3-1: cardio/time target
   const sets = ex.target_sets || '?';
   const w = ex.target_weight ? ' · ' + fmt(ex.target_weight) + ' кг' : '';
   return `${sets}×${repsLabel(ex)}${w}`;
@@ -1772,7 +1775,7 @@ async function planPickTab(t) {
   const body = document.getElementById('ppickbody');
   if (t === 'rec') {
     const r = await api('/exercises/recent');
-    body.innerHTML = r.length ? r.map(x => planPickRow(x.name, x.image)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>';
+    body.innerHTML = r.length ? r.map(x => planPickRow(x.name, x.image, x.type)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>';
   } else {
     const g = await api('/exercises/groups');
     body.innerHTML = g.map(x => `<div class="list-item" onclick="planPickGroup('${x.group}','${esc(x.label)}')"><div style="flex:1">${esc(x.label)}</div><span class="muted small">${x.count} ›</span></div>`).join('');
@@ -1780,44 +1783,54 @@ async function planPickTab(t) {
 }
 async function planPickGroup(g, label) {
   const list = await api('/exercises/catalog?group=' + g);
-  document.getElementById('ppickbody').innerHTML = `<div class="back" onclick="planPickTab('grp')">‹ ${label}</div>` + list.map(x => planPickRow(x.name, x.image)).join('');
+  document.getElementById('ppickbody').innerHTML = `<div class="back" onclick="planPickTab('grp')">‹ ${label}</div>` + list.map(x => planPickRow(x.name, x.image, x.type)).join('');
 }
 async function planPickSearch() {
   const q = document.getElementById('pexq').value.trim(); if (q.length < 2) return;
   const r = await api('/exercises/search?q=' + encodeURIComponent(q));
-  document.getElementById('ppickbody').innerHTML = r.map(x => planPickRow(x.name, x.image)).join('') || '<div class="muted small">Ничего не найдено</div>';
+  document.getElementById('ppickbody').innerHTML = r.map(x => planPickRow(x.name, x.image, x.type)).join('') || '<div class="muted small">Ничего не найдено</div>';
 }
-function planPickRow(name, image) {
-  return `<div class="list-item" onclick='planChooseEx(${esc(JSON.stringify(name))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
+function planPickRow(name, image, type) {
+  return `<div class="list-item" onclick='planChooseEx(${esc(JSON.stringify(name))},${esc(JSON.stringify(type || ''))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`;
 }
-function planChooseEx(name) { openPlanTarget(name, -1); }
+function planChooseEx(name, type) { openPlanTarget(name, -1, type); }
 
-// target sheet (sets / reps / weight) — for new (idx=-1) or existing exercise
-function openPlanTarget(name, idx) {
-  const ex = idx >= 0 ? window._PLAN.exercises[idx] : { name, target_sets: 3, target_reps_min: 10, target_reps_max: 10, target_weight: null, reps_text: null };
+// W3-1/W3-6: target sheet — вес×повторы for strength/bodyweight, or a time goal
+// (минуты) for cardio, so a plan never asks for «подходы×повторы» on cardio.
+function openPlanTarget(name, idx, type) {
+  const ex = idx >= 0 ? window._PLAN.exercises[idx] : { name };
+  const isTime = type === 'time' || ex.target_duration_seconds != null;
+  const head = `<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>`;
+  if (isTime) {
+    const mins = Math.round((ex.target_duration_seconds || 1200) / 60);
+    sheet(`${head}${stepRow([['pmin', mins, 'мин', 1]])}
+      <div class="muted small" style="margin:2px 0 10px">Кардио — цель по времени</div>
+      <button class="btn" onclick='planSaveTarget(${idx},${esc(JSON.stringify(name))},true)'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+    return;
+  }
   const wVal = ex.target_weight != null ? fmt(ex.target_weight) : '';
-  sheet(`<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>
+  sheet(`${head}
     ${stepRow([['psets', ex.target_sets || 3, 'подх.', 1], ['prmin', ex.target_reps_min || 10, 'повт. от', 1]])}
     ${stepRow([['prmax', ex.target_reps_max || ex.target_reps_min || 10, 'повт. до', 1], ['pweight', wVal === '' ? 0 : wVal, 'кг', 2.5]])}
     <div class="tag-row"><span class="pill ${ex.reps_text ? 'on' : ''}" id="pfail" onclick="tag(this)" data-tag="x">До отказа</span></div>
     <div class="muted small" style="margin:2px 0 10px">Вес можно оставить 0, если без веса/по самочувствию</div>
-    <button class="btn" onclick='planSaveTarget(${idx},${esc(JSON.stringify(name))})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+    <button class="btn" onclick='planSaveTarget(${idx},${esc(JSON.stringify(name))},false)'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
 }
-function planEditEx(i) { planSync(); openPlanTarget(window._PLAN.exercises[i].name, i); }
-function planSaveTarget(idx, name) {
+function planEditEx(i) { planSync(); const e = window._PLAN.exercises[i]; openPlanTarget(e.name, i, e.target_duration_seconds != null ? 'time' : ''); }
+function planSaveTarget(idx, name, isTime) {
   const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
-  const failure = document.getElementById('pfail').classList.contains('on');
-  const sets = g('psets') || null;
-  let rmin = g('prmin') || null, rmax = g('prmax') || null;
-  if (rmin && rmax && rmax < rmin) rmax = rmin;
-  const w = g('pweight'); const weight = (w && w > 0) ? w : null;
-  const ex = {
-    name, target_sets: sets,
-    target_reps_min: failure ? null : rmin,
-    target_reps_max: failure ? null : rmax,
-    target_weight: weight,
-    reps_text: failure ? 'до отказа' : null,
-  };
+  let ex;
+  if (isTime) {
+    const mins = g('pmin') || 0;
+    ex = { name, target_sets: null, target_reps_min: null, target_reps_max: null, target_weight: null, reps_text: null, target_duration_seconds: Math.round(mins * 60) || null };
+  } else {
+    const failure = document.getElementById('pfail').classList.contains('on');
+    const sets = g('psets') || null;
+    let rmin = g('prmin') || null, rmax = g('prmax') || null;
+    if (rmin && rmax && rmax < rmin) rmax = rmin;
+    const w = g('pweight'); const weight = (w && w > 0) ? w : null;
+    ex = { name, target_sets: sets, target_reps_min: failure ? null : rmin, target_reps_max: failure ? null : rmax, target_weight: weight, reps_text: failure ? 'до отказа' : null, target_duration_seconds: null };
+  }
   if (idx >= 0) window._PLAN.exercises[idx] = ex;
   else window._PLAN.exercises.push(ex);
   closeSheet(); PlanEdit('new');
@@ -2053,31 +2066,46 @@ async function rPickTab(t) {
   document.getElementById('rtabRec').classList.toggle('on', t === 'rec');
   document.getElementById('rtabGrp').classList.toggle('on', t === 'grp');
   const body = document.getElementById('rpickbody');
-  if (t === 'rec') { const r = await api('/exercises/recent'); body.innerHTML = r.length ? r.map(x => rPickRow(x.name, x.image)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>'; }
+  if (t === 'rec') { const r = await api('/exercises/recent'); body.innerHTML = r.length ? r.map(x => rPickRow(x.name, x.image, x.type)).join('') : '<div class="muted small">Пусто — выбери по группам.</div>'; }
   else { const g = await api('/exercises/groups'); body.innerHTML = g.map(x => `<div class="list-item" onclick="rPickGroup('${x.group}','${esc(x.label)}')"><div style="flex:1">${esc(x.label)}</div><span class="muted small">${x.count} ›</span></div>`).join(''); }
 }
-async function rPickGroup(g, label) { const list = await api('/exercises/catalog?group=' + g); document.getElementById('rpickbody').innerHTML = `<div class="back" onclick="rPickTab('grp')">‹ ${label}</div>` + list.map(x => rPickRow(x.name, x.image)).join(''); }
-async function rPickSearch() { const q = document.getElementById('rexq').value.trim(); if (q.length < 2) return; const r = await api('/exercises/search?q=' + encodeURIComponent(q)); document.getElementById('rpickbody').innerHTML = r.map(x => rPickRow(x.name, x.image)).join('') || '<div class="muted small">Ничего не найдено</div>'; }
-function rPickRow(name, image) { return `<div class="list-item" onclick='rChooseEx(${esc(JSON.stringify(name))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
-function rChooseEx(name) { rOpenTarget(name, -1); }
-function rEditEx(j) { rOpenTarget(window._ROUTINE.days[window._RDi].exercises[j].name, j); }
-function rOpenTarget(name, idx) {
+async function rPickGroup(g, label) { const list = await api('/exercises/catalog?group=' + g); document.getElementById('rpickbody').innerHTML = `<div class="back" onclick="rPickTab('grp')">‹ ${label}</div>` + list.map(x => rPickRow(x.name, x.image, x.type)).join(''); }
+async function rPickSearch() { const q = document.getElementById('rexq').value.trim(); if (q.length < 2) return; const r = await api('/exercises/search?q=' + encodeURIComponent(q)); document.getElementById('rpickbody').innerHTML = r.map(x => rPickRow(x.name, x.image, x.type)).join('') || '<div class="muted small">Ничего не найдено</div>'; }
+function rPickRow(name, image, type) { return `<div class="list-item" onclick='rChooseEx(${esc(JSON.stringify(name))},${esc(JSON.stringify(type || ''))})'>${_exThumb(image)}<div style="flex:1">${esc(name)}</div><span style="color:var(--info)">＋</span></div>`; }
+function rChooseEx(name, type) { rOpenTarget(name, -1, type); }
+function rEditEx(j) { const e = window._ROUTINE.days[window._RDi].exercises[j]; rOpenTarget(e.name, j, e.target_duration_seconds != null ? 'time' : ''); }
+function rOpenTarget(name, idx, type) {
   const arr = window._ROUTINE.days[window._RDi].exercises;
-  const ex = idx >= 0 ? arr[idx] : { name, target_sets: 3, target_reps_min: 10, target_reps_max: 10, target_weight: null, reps_text: null };
+  const ex = idx >= 0 ? arr[idx] : { name };
+  const isTime = type === 'time' || ex.target_duration_seconds != null;
+  const head = `<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>`;
+  if (isTime) {
+    const mins = Math.round((ex.target_duration_seconds || 1200) / 60);
+    sheet(`${head}${stepRow([['rmin', mins, 'мин', 1]])}
+      <div class="muted small" style="margin:2px 0 10px">Кардио — цель по времени</div>
+      <button class="btn" onclick='rSaveTarget(${idx},${esc(JSON.stringify(name))},true)'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+    return;
+  }
   const wVal = ex.target_weight != null ? fmt(ex.target_weight) : '';
-  sheet(`<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>
+  sheet(`${head}
     ${stepRow([['rsets', ex.target_sets || 3, 'подх.', 1], ['rrmin', ex.target_reps_min || 10, 'повт. от', 1]])}
     ${stepRow([['rrmax', ex.target_reps_max || ex.target_reps_min || 10, 'повт. до', 1], ['rweight', wVal === '' ? 0 : wVal, 'кг', 2.5]])}
     <div class="tag-row"><span class="pill ${ex.reps_text ? 'on' : ''}" id="rfail" onclick="tag(this)" data-tag="x">До отказа</span></div>
-    <button class="btn" onclick='rSaveTarget(${idx},${esc(JSON.stringify(name))})'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
+    <button class="btn" onclick='rSaveTarget(${idx},${esc(JSON.stringify(name))},false)'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
 }
-function rSaveTarget(idx, name) {
+function rSaveTarget(idx, name, isTime) {
   const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
-  const failure = document.getElementById('rfail').classList.contains('on');
-  const sets = g('rsets') || null; let rmin = g('rrmin') || null, rmax = g('rrmax') || null;
-  if (rmin && rmax && rmax < rmin) rmax = rmin;
-  const w = g('rweight'); const weight = (w && w > 0) ? w : null;
-  const ex = { name, target_sets: sets, target_reps_min: failure ? null : rmin, target_reps_max: failure ? null : rmax, target_weight: weight, reps_text: failure ? 'до отказа' : null };
+  let ex;
+  if (isTime) {
+    const mins = g('rmin') || 0;
+    ex = { name, target_sets: null, target_reps_min: null, target_reps_max: null, target_weight: null, reps_text: null, target_duration_seconds: Math.round(mins * 60) || null };
+  } else {
+    const failure = document.getElementById('rfail').classList.contains('on');
+    const sets = g('rsets') || null; let rmin = g('rrmin') || null, rmax = g('rrmax') || null;
+    if (rmin && rmax && rmax < rmin) rmax = rmin;
+    const w = g('rweight'); const weight = (w && w > 0) ? w : null;
+    ex = { name, target_sets: sets, target_reps_min: failure ? null : rmin, target_reps_max: failure ? null : rmax, target_weight: weight, reps_text: failure ? 'до отказа' : null, target_duration_seconds: null };
+  }
   const arr = window._ROUTINE.days[window._RDi].exercises;
   if (idx >= 0) arr[idx] = ex; else arr.push(ex);
   closeSheet(); RoutineDay(window._RDi);

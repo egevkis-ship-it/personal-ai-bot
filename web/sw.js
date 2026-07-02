@@ -26,7 +26,10 @@
 // warmup/failure flags) instead of zeros, by exercise type.
 // v51: W3-4 — editable «Заметка к упражнению» in the active-workout accordion.
 // v52: W3-5 — «Тренировка» hub shows «сегодня выполнено» (green) like Home.
-const CACHE = 'fit-proto-v52';
+// v53: W3-1 — exercise input type comes from the catalog (picker/plan/routine),
+// not a name regex: gravitron = weight, cardio = time (not 20×10), plans accept
+// a time goal for cardio.
+const CACHE = 'fit-proto-v53';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

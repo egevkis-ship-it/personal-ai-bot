@@ -1605,6 +1605,7 @@ async def exercises_recent(limit: int = 12, uid: str = Depends(current_uid)):
     for r in rows:
         r["key"] = name_to_key(r["name"])
         r["image"] = (CATALOG.get(r["key"] or "") or {}).get("image")   # DB-2: thumbnail
+        r["type"] = exercise_type(r["name"], r["key"])                  # W3-1: input mode
     return rows
 
 
@@ -1622,7 +1623,7 @@ async def exercises_groups(uid: str = Depends(current_uid)):
 @app.get("/api/exercises/catalog")
 async def exercises_catalog(group: Optional[str] = None, uid: str = Depends(current_uid)):
     out = [{"exercise_key": k, "name": it["canonical_ru"], "muscle_group": it.get("muscle_group"),
-            "image": it.get("image")}
+            "image": it.get("image"), "type": it.get("input")}   # W3-1: input mode
            for k, it in CATALOG.items() if not group or it.get("muscle_group") == group]
     out.sort(key=lambda x: x["name"])
     return out
@@ -1642,7 +1643,7 @@ async def exercises_suggest(q: str, ai: int = 0, uid: str = Depends(current_uid)
     confirms it explicitly."""
     q = (q or "").strip()
     exact = await _resolve_name(q)
-    out = {"query": q, "exact": exact, "similar": _catalog_search(q, 6), "ai": None}
+    out = {"query": q, "exact": exact, "similar": _catalog_search(q, 6, fuzzy=True), "ai": None}
     if ai and not exact and q:
         try:
             await check_and_bump_ai(uid)

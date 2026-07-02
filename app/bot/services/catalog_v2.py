@@ -109,12 +109,15 @@ def _build() -> tuple[dict, list, dict, dict]:
 GROUPS, GROUP_ORDER, CATALOG, NAME_INDEX = _build()
 
 
-def search(query: str, limit: int = 8) -> list[dict]:
+def search(query: str, limit: int = 8, fuzzy: bool = False) -> list[dict]:
     """Rank catalog entries against a query (W3-2). Matching is token-substring AND:
     every whitespace token of the query must appear as a substring of the canonical
     name OR any alias (case-insensitive, any order), so a word from the MIDDLE of a
     name matches (e.g. «гравитрон» → «Подтягивания в гравитроне», «подтягив грав» too).
-    Ranking: exact > prefix > whole-query substring > all-tokens-substring."""
+    Ranking: exact > prefix > whole-query substring > all-tokens-substring.
+
+    fuzzy=True adds a weak any-token tier so an unknown/typo'd query still yields the
+    closest candidates (used by the DB-7 name-matching dialog, not the strict picker)."""
     q = (query or "").strip().lower()
     if not q:
         return []
@@ -131,10 +134,12 @@ def search(query: str, limit: int = 8) -> list[dict]:
             s = 65
         elif tokens and all(t in blob for t in tokens):       # every token matches (AND, any order)
             s = 50
+        elif fuzzy and tokens and any(t in blob for t in tokens):   # any token → closest candidates
+            s = 20
         else:
             s = 0
         if s:
             scored.append((s, it["canonical_ru"], k, it))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [{"exercise_key": k, "name": it["canonical_ru"], "muscle_group": it["muscle_group"],
-             "image": it.get("image")} for _, _, k, it in scored[:limit]]
+             "image": it.get("image"), "type": it.get("input")} for _, _, k, it in scored[:limit]]
