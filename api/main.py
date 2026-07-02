@@ -1331,17 +1331,20 @@ async def assemble_workout(uid: str, wid: int) -> dict:
             "is_warmup": s["is_warmup"], "is_failure": s["is_failure"],
             "superset_group": s["superset_group"], "notes": s["notes"]})
 
+    # W3-4: per-exercise note for this workout (keyed by lowercased name).
+    note_rows = await _rows("SELECT exercise_name, notes FROM workout_exercise_notes WHERE workout_id = :w", w=wid)
+    notes_map = {r["exercise_name"].strip().lower(): r["notes"] for r in note_rows}
+
     exercises, used = [], set()
 
     async def build(name: str, target: dict | None):
         keyl = name.strip().lower(); used.add(keyl)
         logged = grouped.get(keyl, [])
         key = name_to_key(name)
-        working = [x for x in logged if not x["is_warmup"]]
         tgt_sets = (target or {}).get("target_sets")
         return {"name": name, "key": key, "type": exercise_type(name, key), "sets": logged,
                 "target": suggestion_from_plan(target) if target else None, "target_sets": tgt_sets,
-                "last": await last_result(uid, name),
+                "last": await last_result(uid, name), "notes": notes_map.get(keyl),   # W3-4: exercise note
                 "done": False, "in_plan": target is not None}   # W2-9: no auto-done; «Готово» is a manual front-end state
 
     for pe in plan_exs:
@@ -1372,6 +1375,35 @@ async def set_workout_notes(wid: int, body: NotesBody, uid: str = Depends(curren
     await _own_workout(uid, wid)
     await db.update_workout_notes(wid, body.notes)
     return {"ok": True}
+
+
+class ExNoteBody(BaseModel):
+    exercise_name: str
+    notes: Optional[str] = None
+
+
+@app.put("/api/workouts/{wid}/exercise-note")
+async def set_exercise_note(wid: int, body: ExNoteBody, uid: str = Depends(current_uid)):
+    """W3-4: upsert a note attached to an exercise within this workout (not per-set).
+    An empty note removes the row."""
+    await _own_workout(uid, wid)
+    name = (body.exercise_name or "").strip()
+    if not name:
+        raise HTTPException(422, "exercise_name required")
+    note = (body.notes or "").strip()
+    async with get_session() as s:
+        if note:
+            await s.execute(text("""
+                INSERT INTO workout_exercise_notes (workout_id, exercise_name, notes, updated_at)
+                VALUES (:w, :n, :t, now())
+                ON CONFLICT (workout_id, exercise_name)
+                DO UPDATE SET notes = EXCLUDED.notes, updated_at = now()
+            """), {"w": wid, "n": name, "t": note})
+        else:
+            await s.execute(
+                text("DELETE FROM workout_exercise_notes WHERE workout_id = :w AND exercise_name = :n"),
+                {"w": wid, "n": name})
+    return {"ok": True, "notes": note or None}
 
 
 @app.delete("/api/workouts/{wid}")

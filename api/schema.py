@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS exercise_sets (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- W3-4: a note attached to an exercise WITHIN one workout (not per-set), keyed by
+-- workout_id + exercise_name (an empty note deletes the row). Owned by the web API.
+-- Keep this comment free of the statement separator char (CREATE_SQL is split on it).
+CREATE TABLE IF NOT EXISTS workout_exercise_notes (
+    workout_id     INTEGER     NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    exercise_name  TEXT        NOT NULL,
+    notes          TEXT,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workout_id, exercise_name)
+);
+
 CREATE TABLE IF NOT EXISTS body_measurements (
     id           SERIAL PRIMARY KEY,
     user_id      TEXT        NOT NULL,

@@ -24,7 +24,8 @@
 // only neutral progress «N / цель подх».
 // v50: W3-3 — editSet prefills the set's recorded values (weight/reps/duration +
 // warmup/failure flags) instead of zeros, by exercise type.
-const CACHE = 'fit-proto-v50';
+// v51: W3-4 — editable «Заметка к упражнению» in the active-workout accordion.
+const CACHE = 'fit-proto-v51';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

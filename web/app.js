@@ -273,11 +273,29 @@ function accordionBody(wid, ex) {
   const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}</div>` : '';
   // W2-9: no «✓ Готово» button — the exercise has no «выполнено» state; the whole
   // workout is finished via «Завершить тренировку». Only neutral progress is shown.
+  // W3-4: a note attached to the EXERCISE (not per-set), saved on blur.
+  const note = `<div style="margin-top:14px">
+    <div class="muted small" style="margin-bottom:4px">📝 Заметка к упражнению</div>
+    <textarea class="exnote" onclick="event.stopPropagation()" onchange='saveExNote(${wid},${esc(JSON.stringify(ex.name))},this.value)'
+      placeholder="техника, ощущения, что поправить в следующий раз…"
+      style="width:100%;min-height:52px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card);color:var(--txt);font-size:14px;box-sizing:border-box">${esc(ex.notes || '')}</textarea>
+  </div>`;
   return `<div class="card acc-body" onclick="event.stopPropagation()">
     ${last}
     ${sets ? `<div class="muted small" style="margin-bottom:2px">Подходы сегодня</div>${sets}` : ''}
     <div style="margin-top:${sets ? '12' : '2'}px">${setEntryHtml(wid, true)}</div>
+    ${note}
   </div>`;
+}
+// W3-4: save an exercise-level note; mirror into local state so it survives the
+// next re-render without a refetch (accordion rebuilds on every set save).
+async function saveExNote(wid, name, val) {
+  try {
+    await api('/workouts/' + wid + '/exercise-note', 'PUT', { exercise_name: name, notes: val });
+    const W = window._WO;
+    if (W) { const ex = (W.exercises || []).find(e => e.name === name); if (ex) ex.notes = (val || '').trim() || null; }
+    toast('Заметка сохранена');
+  } catch (e) { toast(e.message || 'не удалось сохранить'); }
 }
 // Phase 1Б: explicit cancel. Empty workout (accidental start) → delete in one tap;
 // with sets → confirm. delWorkout clears cache + returns Home.
