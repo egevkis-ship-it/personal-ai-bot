@@ -195,9 +195,15 @@ async function repeatLast(id) { if (!id) return toast('Нет прошлых т�
 
 // ── Train (start) ─────────────────────────────────────────────────────────
 async function Train() {
-  const plan = await api('/plans/today');
+  // W3-5: reuse today_done (dashboard) so the hub shows «сегодня выполнено» in green,
+  // consistent with Home — instead of offering today's plan as if nothing happened.
+  const [plan, d] = await Promise.all([api('/plans/today'), api('/dashboard')]);
+  const done = !!(d && d.today_done);
+  const doneBanner = done ? `<div class="banner ok"><div class="small" style="color:var(--success)">✅ Сегодня — тренировка выполнена</div>
+      <div class="small muted" style="margin-top:4px">Записана в историю. <span style="color:var(--info);cursor:pointer" onclick="go('history')">История ›</span></div></div>` : '';
   view.innerHTML = `<h1>Тренировка</h1><div class="muted small" style="margin-bottom:14px">Что тренируем?</div>
-    ${plan ? `<div class="banner info" onclick="openPlan(${plan.id},'train')"><div class="small" style="color:var(--info)">📅 План на сегодня</div>
+    ${doneBanner}
+    ${(plan && !done) ? `<div class="banner info" onclick="openPlan(${plan.id},'train')"><div class="small" style="color:var(--info)">📅 План на сегодня</div>
       <div class="b-title" style="color:var(--info)">${esc(plan.focus_label || '')} ›</div></div>` : ''}
     <div class="card list-item" onclick="go('chooseDay')"><div class="ic">🗓</div><div style="flex:1"><b>Другой день недели</b><div class="small muted">взять пропущенную</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="freeWorkout()"><div class="ic">➕</div><div style="flex:1"><b>Свободная</b><div class="small muted">с нуля, без плана</div></div><span class="muted">›</span></div>
