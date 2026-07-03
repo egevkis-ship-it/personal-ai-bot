@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS workout_exercise_notes (
     PRIMARY KEY (workout_id, exercise_name)
 );
 
+-- W4-3: an exercise marked «done» within one workout (a row = done, no row = not
+-- done). Manual, persisted, NOT derived from the planned set count. Owned by web API.
+CREATE TABLE IF NOT EXISTS workout_exercise_done (
+    workout_id     INTEGER     NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    exercise_name  TEXT        NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workout_id, exercise_name)
+);
+
 CREATE TABLE IF NOT EXISTS body_measurements (
     id           SERIAL PRIMARY KEY,
     user_id      TEXT        NOT NULL,

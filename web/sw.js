@@ -31,7 +31,9 @@
 // a time goal for cardio.
 // v54: W4-5 — logged sets show the «кг» unit on weight (setLabel).
 // v55: W4-2 — bodyweight exercises get an OPTIONAL added-weight field (+кг).
-const CACHE = 'fit-proto-v55';
+// v56: W4-3 — «✓ Готово» checkmark is back, persisted on the backend (one tap,
+// survives refresh, not tied to the planned set count).
+const CACHE = 'fit-proto-v56';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

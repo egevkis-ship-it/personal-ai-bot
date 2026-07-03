@@ -1346,6 +1346,9 @@ async def assemble_workout(uid: str, wid: int) -> dict:
     # W3-4: per-exercise note for this workout (keyed by the resolved canonical name).
     note_rows = await _rows("SELECT exercise_name, notes FROM workout_exercise_notes WHERE workout_id = :w", w=wid)
     notes_map = {_cg(r["exercise_name"]): r["notes"] for r in note_rows}
+    # W4-3: manually-marked «done» exercises (presence = done), keyed by canonical.
+    done_rows = await _rows("SELECT exercise_name FROM workout_exercise_done WHERE workout_id = :w", w=wid)
+    done_set = {_cg(r["exercise_name"]) for r in done_rows}
 
     exercises, used = [], set()
 
@@ -1358,7 +1361,7 @@ async def assemble_workout(uid: str, wid: int) -> dict:
         return {"name": canon, "key": key, "type": exercise_type(canon, key), "sets": logged,
                 "target": suggestion_from_plan(target) if target else None, "target_sets": tgt_sets,
                 "last": await last_result(uid, canon), "notes": notes_map.get(keyl),   # W3-4: exercise note
-                "done": False, "in_plan": target is not None}   # W2-9: no auto-done; «Готово» is a manual front-end state
+                "done": keyl in done_set, "in_plan": target is not None}   # W4-3: manual «done», persisted
 
     for pe in plan_exs:
         if pe.get("name"):
@@ -1410,6 +1413,33 @@ async def set_exercise_note(wid: int, body: ExNoteBody, uid: str = Depends(curre
                 text("DELETE FROM workout_exercise_notes WHERE workout_id = :w AND exercise_name = :n"),
                 {"w": wid, "n": name})
     return {"ok": True, "notes": note or None}
+
+
+class ExDoneBody(BaseModel):
+    exercise_name: str
+    done: bool = True
+
+
+@app.put("/api/workouts/{wid}/exercise-done")
+async def set_exercise_done(wid: int, body: ExDoneBody, uid: str = Depends(current_uid)):
+    """W4-3: mark/unmark an exercise «done» within this workout (persisted, manual,
+    not derived from the planned set count). A row = done."""
+    await _own_workout(uid, wid)
+    name = (body.exercise_name or "").strip()
+    if not name:
+        raise HTTPException(422, "exercise_name required")
+    async with get_session() as s:
+        if body.done:
+            await s.execute(text("""
+                INSERT INTO workout_exercise_done (workout_id, exercise_name, updated_at)
+                VALUES (:w, :n, now())
+                ON CONFLICT (workout_id, exercise_name) DO UPDATE SET updated_at = now()
+            """), {"w": wid, "n": name})
+        else:
+            await s.execute(
+                text("DELETE FROM workout_exercise_done WHERE workout_id = :w AND exercise_name = :n"),
+                {"w": wid, "n": name})
+    return {"ok": True, "done": body.done}
 
 
 @app.delete("/api/workouts/{wid}")

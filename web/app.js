@@ -249,12 +249,14 @@ function renderActive(w) {
       ? `${tgt ? working.length + '/' + tgt + ' подх' : working.length + ' подх'} · ${working.map(s => setLabel(s)).join(' · ')}`
       : (ex.target ? `цель ${tgt || ''}×${ex.target.reps || (ex.target.duration_seconds ? mmss(ex.target.duration_seconds) : '')}${ex.target.weight_kg ? ' · ' + fmt(ex.target.weight_kg) + ' кг' : ''}` : 'нет подходов');
     const open = exp === i;
+    // W4-3: ✅ when manually marked done (persisted) · 🔵 «в работе» · ⚪️ empty.
+    const icon = ex.done ? '✅' : working.length ? '🔵' : '⚪️';
     const row = `<div class="card list-item ex-row" style="${open ? 'border:2px solid var(--info);margin-bottom:0' : ''}" onclick="toggleExercise(${w.id},${i})">
-      <div class="ic">${working.length ? '🔵' : '⚪️'}</div>
-      <div style="flex:1"><b>${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div>
+      <div class="ic">${icon}</div>
+      <div style="flex:1"><b style="${ex.done ? 'color:var(--success)' : ''}">${esc(ex.name)}</b><div class="small muted">${esc(sub)}</div></div>
       <span class="muted" style="padding:4px 8px;cursor:pointer" title="Прогресс упражнения" onclick="event.stopPropagation();exDetailIdx(${i})">📈</span>
       <span class="muted" style="padding:0 2px 0 4px">${open ? '▾' : '▸'}</span></div>`;
-    return row + (open ? accordionBody(w.id, ex) : '');
+    return row + (open ? accordionBody(w.id, ex, i) : '');
   }).join('');
   view.innerHTML = `<div class="row sp"><span class="back" onclick="go('home')">‹ Главная</span><span class="muted small" onclick="workoutMenu(${w.id})" style="cursor:pointer">···</span></div>
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2>
@@ -272,13 +274,11 @@ function toggleExercise(wid, idx) {
   STATE.activeExpanded = (STATE.activeExpanded === idx) ? null : idx;
   if (window._WO && window._WO.id === wid) renderActive(window._WO);
 }
-function accordionBody(wid, ex) {
+function accordionBody(wid, ex, idx) {
   const sets = ex.sets.map(s => `<div class="row sp" style="padding:7px 2px;border-bottom:1px solid var(--line)">
     <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
     <span><span class="muted" onclick="event.stopPropagation();editSet(${s.id},${wid})" style="cursor:pointer;padding:2px 8px">✏️</span><span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="event.stopPropagation();rmSet(${s.id},${wid})">✕</span></span></div>`).join('');
   const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}</div>` : '';
-  // W2-9: no «✓ Готово» button — the exercise has no «выполнено» state; the whole
-  // workout is finished via «Завершить тренировку». Only neutral progress is shown.
   // W3-4: a note attached to the EXERCISE (not per-set), saved on blur.
   const note = `<div style="margin-top:14px">
     <div class="muted small" style="margin-bottom:4px">📝 Заметка к упражнению</div>
@@ -286,12 +286,30 @@ function accordionBody(wid, ex) {
       placeholder="техника, ощущения, что поправить в следующий раз…"
       style="width:100%;min-height:52px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card);color:var(--txt);font-size:14px;box-sizing:border-box">${esc(ex.notes || '')}</textarea>
   </div>`;
+  // W4-3: manual «✓ Готово» (persisted). One tap marks done + collapses; tap again unmarks.
+  const doneBtn = `<button class="btn ${ex.done ? 'sec' : 'success'} sm" style="margin-top:12px" onclick="event.stopPropagation();toggleDone(${idx})">${ex.done ? '↺ Снять «выполнено»' : '✓ Готово'}</button>`;
   return `<div class="card acc-body" onclick="event.stopPropagation()">
     ${last}
     ${sets ? `<div class="muted small" style="margin-bottom:2px">Подходы сегодня</div>${sets}` : ''}
     <div style="margin-top:${sets ? '12' : '2'}px">${setEntryHtml(wid, true)}</div>
+    ${doneBtn}
     ${note}
   </div>`;
+}
+// W4-3: mark/unmark an exercise done — one tap, persisted on the backend (survives
+// refresh), NOT tied to the planned set count. Optimistic + single re-render.
+async function toggleDone(idx) {
+  const W = window._WO; if (!W) return;
+  const ex = W.exercises[idx]; if (!ex) return;
+  const next = !ex.done;
+  ex.done = next;
+  if (next) {   // collapse this, auto-expand the next not-done exercise (or none)
+    const ni = W.exercises.findIndex(e => !e.done);
+    STATE.activeExpanded = ni >= 0 ? ni : null;
+  }
+  renderActive(W);   // single re-render — no double-tap
+  try { await api('/workouts/' + W.id + '/exercise-done', 'PUT', { exercise_name: ex.name, done: next }); }
+  catch (e) { ex.done = !next; renderActive(W); toast(e.message || 'не удалось сохранить'); }  // revert on failure
 }
 // W3-4: save an exercise-level note; mirror into local state so it survives the
 // next re-render without a refetch (accordion rebuilds on every set save).
