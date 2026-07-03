@@ -363,7 +363,9 @@ async function flushQueue() {
 window.addEventListener('online', () => { flushQueue().then(() => { if (STATE.tab === 'active' && STATE.activeId) go('active', STATE.activeId); }); });
 function setLabel(s) {
   if (s.duration_seconds) return mmss(s.duration_seconds);
-  let v = (s.weight_kg != null ? fmt(s.weight_kg) + '×' : '') + (s.reps != null ? s.reps : (s.reps_text || ''));
+  const reps = (s.reps != null ? s.reps : (s.reps_text || ''));
+  // W4-5: weight carries the «кг» unit; bodyweight (no weight) shows just reps.
+  let v = s.weight_kg != null ? `${fmt(s.weight_kg)} кг × ${reps}` : String(reps);
   if (s.is_failure) v += '⚡';
   return v || '—';
 }

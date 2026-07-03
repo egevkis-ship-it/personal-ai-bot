@@ -29,7 +29,8 @@
 // v53: W3-1 — exercise input type comes from the catalog (picker/plan/routine),
 // not a name regex: gravitron = weight, cardio = time (not 20×10), plans accept
 // a time goal for cardio.
-const CACHE = 'fit-proto-v53';
+// v54: W4-5 — logged sets show the «кг» unit on weight (setLabel).
+const CACHE = 'fit-proto-v54';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
