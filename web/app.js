@@ -422,7 +422,8 @@ function setInputRow(c, i, r) {
     const dur = r.dur ?? c.dur;
     fields = `<input onfocus="this.select()" class="srin sr-min" inputmode="numeric" value="${_setAttr(Math.floor(dur / 60))}" placeholder="мин"><span class="x">:</span><input onfocus="this.select()" class="srin sr-sec" inputmode="numeric" value="${_setAttr(dur % 60)}" placeholder="сек">`;
   } else if (c.type === 'bodyweight') {
-    fields = `<input onfocus="this.select()" class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт."><span class="x" style="flex:0 0 auto">повт.</span>`;
+    // W4-2: optional ADDED weight (empty = своим весом); reps required.
+    fields = `<input onfocus="this.select()" class="srin sr-w" inputmode="decimal" value="${_setAttr(r.weight ?? '')}" placeholder="+кг"><span class="x">×</span><input onfocus="this.select()" class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт.">`;
   } else {
     fields = `<input onfocus="this.select()" class="srin sr-w" inputmode="decimal" value="${_setAttr(r.weight ?? c.w)}" placeholder="кг"><span class="x">×</span><input onfocus="this.select()" class="srin sr-r" inputmode="numeric" value="${_setAttr(r.reps ?? c.reps)}" placeholder="повт.">`;
   }
@@ -482,7 +483,8 @@ async function confirmSets() {
     if (c.type === 'time') o.duration_seconds = r.dur || null;
     else {
       o.reps = (r.reps === '' || r.reps == null) ? null : parseInt(r.reps, 10);
-      if (c.type !== 'bodyweight') o.weight_kg = (r.weight === '' || r.weight == null) ? null : parseFloat(r.weight);
+      // W4-2: weight is optional for bodyweight too (empty → своим весом).
+      o.weight_kg = (r.weight === '' || r.weight == null) ? null : parseFloat(r.weight);
     }
     return o;
   }).filter(o => o.weight_kg != null || o.reps != null || o.duration_seconds != null);
