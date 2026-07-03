@@ -3,7 +3,7 @@
     "source": "Free Exercise DB (yuhonas/free-exercise-db), public domain",
     "image_base": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises",
     "image_pattern": "<image_base>/<fedb_id>/0.jpg",
-    "count": 186,
+    "count": 187,
     "groups": {
       "chest": "Грудь",
       "back": "Спина",
@@ -1243,12 +1243,25 @@
       "aliases": [
         "side lateral raise",
         "махи гантелями в стороны",
-        "махи на среднюю дельту стоя",
-        "махи одной рукой в кроссовере"
+        "махи на среднюю дельту стоя"
       ],
       "fedb_id": "Side_Lateral_Raise",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Side_Lateral_Raise/0.jpg",
       "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Side_Lateral_Raise/1.jpg"
+    },
+    "cable_lateral_raise": {
+      "canonical_ru": "Махи в кроссовере",
+      "muscle_group": "shoulders",
+      "input": "strength",
+      "aliases": [
+        "cable lateral raise",
+        "махи в кроссовере",
+        "махи одной рукой в кроссовере",
+        "махи в стороны в кроссовере"
+      ],
+      "fedb_id": null,
+      "image": null,
+      "image_end": null
     },
     "front_dumbbell_raise": {
       "canonical_ru": "Подъём гантелей перед собой",
