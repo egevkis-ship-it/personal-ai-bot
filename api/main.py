@@ -1327,47 +1327,49 @@ async def assemble_workout(uid: str, wid: int) -> dict:
     plan = await db.get_planned_workout(w["planned_workout_id"]) if w.get("planned_workout_id") else None
     plan_exs = (plan or {}).get("exercises") or []
 
+    # W4-1: group by the RESOLVED CANONICAL name so a plan exercise (alias) and its
+    # logged sets (canon) land in ONE row — no empty duplicate. Display the canonical.
+    def _cg(nm: str) -> str:
+        return _canon_static(nm).strip().lower()
+
     grouped: dict[str, list[dict]] = {}
+    disp: dict[str, str] = {}   # group key → canonical display name
     for s in sets:
-        grouped.setdefault(s["exercise_name"].strip().lower(), []).append({
+        gk = _cg(s["exercise_name"])
+        grouped.setdefault(gk, []).append({
             "id": s["id"], "set_number": s["set_number"], "weight_kg": _to_f(s["weight_kg"]),
             "reps": s["reps"], "reps_text": s["reps_text"], "duration_seconds": s["duration_seconds"],
             "is_warmup": s["is_warmup"], "is_failure": s["is_failure"],
             "superset_group": s["superset_group"], "notes": s["notes"]})
+        disp.setdefault(gk, _canon_static(s["exercise_name"]))
 
-    # W3-4: per-exercise note for this workout (keyed by lowercased name).
+    # W3-4: per-exercise note for this workout (keyed by the resolved canonical name).
     note_rows = await _rows("SELECT exercise_name, notes FROM workout_exercise_notes WHERE workout_id = :w", w=wid)
-    notes_map = {r["exercise_name"].strip().lower(): r["notes"] for r in note_rows}
+    notes_map = {_cg(r["exercise_name"]): r["notes"] for r in note_rows}
 
     exercises, used = [], set()
 
     async def build(name: str, target: dict | None):
-        keyl = name.strip().lower(); used.add(keyl)
+        canon = _canon_static(name)
+        keyl = canon.strip().lower(); used.add(keyl)
         logged = grouped.get(keyl, [])
-        key = name_to_key(name)
+        key = name_to_key(canon)
         tgt_sets = (target or {}).get("target_sets")
-        return {"name": name, "key": key, "type": exercise_type(name, key), "sets": logged,
+        return {"name": canon, "key": key, "type": exercise_type(canon, key), "sets": logged,
                 "target": suggestion_from_plan(target) if target else None, "target_sets": tgt_sets,
-                "last": await last_result(uid, name), "notes": notes_map.get(keyl),   # W3-4: exercise note
+                "last": await last_result(uid, canon), "notes": notes_map.get(keyl),   # W3-4: exercise note
                 "done": False, "in_plan": target is not None}   # W2-9: no auto-done; «Готово» is a manual front-end state
 
     for pe in plan_exs:
         if pe.get("name"):
             exercises.append(await build(pe["name"], pe))
-    for keyl in list(grouped):
-        if keyl not in used:
-            exercises.append(await build(_orig_name(sets, keyl), None))
+    for gk in list(grouped):
+        if gk not in used:
+            exercises.append(await build(disp[gk], None))
 
     return {"id": w["id"], "focus_label": w["focus_label"], "workout_date": w["workout_date"],
             "started_at": w["started_at"], "finished_at": w["finished_at"], "notes": w["notes"],
             "planned_workout_id": w["planned_workout_id"], "exercises": exercises}
-
-
-def _orig_name(sets, keyl):
-    for s in sets:
-        if s["exercise_name"].strip().lower() == keyl:
-            return s["exercise_name"]
-    return keyl
 
 
 class NotesBody(BaseModel):
@@ -1596,17 +1598,29 @@ async def del_set(sid: int, uid: str = Depends(current_uid)):
 @app.get("/api/exercises/recent")
 async def exercises_recent(limit: int = 12, uid: str = Depends(current_uid)):
     limit = max(1, min(limit, 200))
+    # W4-1: return the CANONICAL name (so a picked row matches the name sets save
+    # under → no rename/duplicate) and dedupe by canonical, since history may hold
+    # several spellings of the same exercise. Fetch extra rows to survive the dedupe.
     rows = await _rows(
         """
         SELECT es.exercise_name AS name, MAX(es.created_at) AS last_at
         FROM exercise_sets es JOIN workouts w ON w.id = es.workout_id
         WHERE w.user_id = :u GROUP BY es.exercise_name ORDER BY last_at DESC LIMIT :lim
-        """, u=uid, lim=limit)
+        """, u=uid, lim=min(limit * 4, 200))
+    out, seen = [], set()
     for r in rows:
-        r["key"] = name_to_key(r["name"])
-        r["image"] = (CATALOG.get(r["key"] or "") or {}).get("image")   # DB-2: thumbnail
-        r["type"] = exercise_type(r["name"], r["key"])                  # W3-1: input mode
-    return rows
+        key = name_to_key(r["name"])
+        canon = key_to_name(key) or r["name"]
+        ck = canon.strip().lower()
+        if ck in seen:
+            continue
+        seen.add(ck)
+        out.append({"name": canon, "key": key,
+                    "image": (CATALOG.get(key or "") or {}).get("image"),   # DB-2: thumbnail
+                    "type": exercise_type(canon, key)})                     # W3-1: input mode
+        if len(out) >= limit:
+            break
+    return out
 
 
 @app.get("/api/exercises/groups")

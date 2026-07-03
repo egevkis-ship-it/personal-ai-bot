@@ -376,7 +376,8 @@
       "input": "strength",
       "aliases": [
         "preacher curl",
-        "сгибания на скамье скотта"
+        "сгибания на скамье скотта",
+        "скамья скотта"
       ],
       "fedb_id": "Preacher_Curl",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Preacher_Curl/0.jpg",
