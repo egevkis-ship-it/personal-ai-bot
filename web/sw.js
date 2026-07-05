@@ -36,7 +36,9 @@
 // v57: W4-5 (tail) — «Прошлый раз» line uses setLabel (weight carries «кг»).
 // v58: EXP-1 — human-readable text export: «📋 Скопировать текстом» (one workout)
 // and «📝 Текст» (period), round-trips through the HIST-2 importer.
-const CACHE = 'fit-proto-v58';
+// v59: REC-4 — plan weight tiers (set_groups): render «2×12 · 12.5 кг + 2×15 · 10 кг»
+// and expand them into set-entry rows when starting the workout.
+const CACHE = 'fit-proto-v59';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

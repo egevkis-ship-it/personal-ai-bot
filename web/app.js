@@ -406,6 +406,16 @@ function initSetEntry(wid, ex, onSave) {
     dur: (prev && prev.duration_seconds != null ? prev.duration_seconds : null) ?? tgt.duration_seconds ?? last.duration_seconds ?? 60,
   };
   window._setRows = [{}];   // W2-8: start with ONE row
+  // REC-4: if the plan set weight tiers and nothing is logged yet, expand them into
+  // rows (2 rows 12.5×12 + 2 rows 10×15) so «Записать (N)» logs them all at once.
+  if (ex.set_groups && ex.set_groups.length && !todayWorking.length) {
+    const rows = [];
+    for (const g of ex.set_groups) {
+      const reps = g.reps_max || g.reps_min || null;
+      for (let i = 0; i < (g.sets || 1); i++) rows.push({ weight: g.weight, reps: reps });
+    }
+    if (rows.length) window._setRows = rows;
+  }
 }
 function setEntryHtml(wid, withFreetext) {
   const type = (window._setCtx || {}).type || 'strength';
@@ -1389,7 +1399,15 @@ function repsLabel(ex) {
   return '?';
 }
 function fmtDur(sec) { sec = sec || 0; return sec % 60 === 0 ? (sec / 60) + ' мин' : mmss(sec); }
+// REC-4: one weight tier → «2×12 · 12.5 кг»
+function tierLabel(g) {
+  const reps = (g.reps_min && g.reps_max && g.reps_min !== g.reps_max)
+    ? g.reps_min + '–' + g.reps_max : (g.reps_min || g.reps_max || g.reps_text || '?');
+  const w = g.weight ? ' · ' + fmt(g.weight) + ' кг' : '';
+  return `${g.sets}×${reps}${w}`;
+}
 function exLine(ex) {
+  if (ex.set_groups && ex.set_groups.length) return ex.set_groups.map(tierLabel).join(' + ');   // REC-4: tiers
   if (ex.target_duration_seconds) return fmtDur(ex.target_duration_seconds);   // W3-1: cardio/time target
   const sets = ex.target_sets || '?';
   const w = ex.target_weight ? ' · ' + fmt(ex.target_weight) + ' кг' : '';
@@ -1845,8 +1863,17 @@ function planChooseEx(name, type) { openPlanTarget(name, -1, type); }
 // (минуты) for cardio, so a plan never asks for «подходы×повторы» on cardio.
 function openPlanTarget(name, idx, type) {
   const ex = idx >= 0 ? window._PLAN.exercises[idx] : { name };
-  const isTime = type === 'time' || ex.target_duration_seconds != null;
   const head = `<div class="muted small">${esc(name)}</div><h2>${idx >= 0 ? 'Цель' : 'Новое упражнение'}</h2>`;
+  // REC-4: a tiered exercise — show the tiers; keep them, or replace with a single weight.
+  if (idx >= 0 && ex.set_groups && ex.set_groups.length) {
+    sheet(`${head}
+      <div class="card small" style="margin-bottom:10px">${ex.set_groups.map(g => esc(tierLabel(g))).join('<br>')}</div>
+      <div class="muted small" style="margin-bottom:10px">Ярусы заданы планом. Полное редактирование ярусов — через текст плана (вставить заново).</div>
+      <button class="btn sec" onclick="closeSheet()">Оставить ярусы</button>
+      <button class="btn ghost" style="margin-top:8px" onclick="planClearTiers(${idx})">Заменить одним весом</button>`);
+    return;
+  }
+  const isTime = type === 'time' || ex.target_duration_seconds != null;
   if (isTime) {
     const mins = Math.round((ex.target_duration_seconds || 1200) / 60);
     sheet(`${head}${stepRow([['pmin', mins, 'мин', 1]])}
@@ -1863,6 +1890,12 @@ function openPlanTarget(name, idx, type) {
     <button class="btn" onclick='planSaveTarget(${idx},${esc(JSON.stringify(name))},false)'>✓ ${idx >= 0 ? 'Сохранить' : 'Добавить'}</button>`);
 }
 function planEditEx(i) { planSync(); const e = window._PLAN.exercises[i]; openPlanTarget(e.name, i, e.target_duration_seconds != null ? 'time' : ''); }
+// REC-4: drop the tiers so the exercise can be edited as a single weight.
+function planClearTiers(idx) {
+  const ex = window._PLAN.exercises[idx]; if (!ex) return;
+  delete ex.set_groups;
+  closeSheet(); openPlanTarget(ex.name, idx, ex.target_duration_seconds != null ? 'time' : '');
+}
 function planSaveTarget(idx, name, isTime) {
   const g = id => { const e = document.getElementById('f_' + id); return e ? parseFloat(e.value) : null; };
   let ex;
