@@ -731,6 +731,7 @@ function chooseEx(wid, name, key, type) {
 function workoutMenu(wid) {
   sheet(`<h2>Тренировка</h2>
     <div class="list-item" onclick="noteSheet(${wid})"><div class="ic">📝</div>Заметка к тренировке</div>
+    <div class="list-item" onclick="closeSheet();copyWorkoutText(${wid})"><div class="ic">📋</div>Скопировать текстом</div>
     <div class="list-item" onclick="closeSheet();go('home')"><div class="ic">⏸</div>Свернуть (продолжу позже)</div>
     <div class="list-item" style="color:var(--danger)" onclick="delWorkout(${wid})"><div class="ic">✕</div>Удалить тренировку</div>`);
 }
@@ -851,10 +852,25 @@ async function WorkoutDetail(id) {
     <h2 style="margin-bottom:2px">${esc(w.focus_label || 'Тренировка')}</h2><div class="muted small" style="margin-bottom:10px">${esc(fmtDate(w.workout_date, { weekday: 'long' }))}</div>
     <div class="card">${ex || '<span class="muted">Нет подходов</span>'}</div>
     ${w.notes ? `<div class="card small muted">📝 ${esc(w.notes)}</div>` : ''}
-    <button class="btn ghost" onclick="editWorkoutMeta(${w.id})">✏️ Дата и фокус</button>
+    <button class="btn ghost" onclick="copyWorkoutText(${w.id})">📋 Скопировать текстом</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="editWorkoutMeta(${w.id})">✏️ Дата и фокус</button>
     <button class="btn ghost" style="margin-top:8px" onclick="go('active',${w.id})">✏️ Упражнения и подходы</button>
     <button class="btn ghost" style="margin-top:8px" onclick="repeatLast(${w.id})">🔁 Повторить эту тренировку</button>
     <button class="btn ghost" style="margin-top:8px" onclick="workoutToTemplate(${w.id})">💾 В шаблон</button>`;
+}
+// EXP-1: fetch the workout as text and copy it (clipboard, or a textarea fallback
+// when the Clipboard API is unavailable / blocked).
+async function copyWorkoutText(wid) {
+  let text;
+  try { text = (await api('/workouts/' + wid + '/text')).text || ''; }
+  catch (e) { return toast(e.message || 'не удалось получить текст'); }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Скопировано');
+  } catch {
+    sheet(`<h2>Текст тренировки</h2><div class="muted small" style="margin-bottom:8px">Выделите всё и скопируйте вручную:</div>
+      <textarea readonly onclick="this.select()" style="width:100%;min-height:220px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--card);color:var(--txt);font-size:13px;box-sizing:border-box">${esc(text)}</textarea>`);
+  }
 }
 // HIST-3: edit a workout's date + focus (archive AND normal). Sets/exercises are
 // edited via the active view («✏️ Упражнения и подходы» → go('active')).
@@ -1185,8 +1201,9 @@ function Reports() {
       <div class="mfield" style="margin-bottom:8px"><label>С</label><input id="rFrom" type="date" value="${fromDefault}"></div>
       <div class="mfield" style="margin-bottom:10px"><label>По</label><input id="rTo" type="date" value="${t}"></div>
       <button class="btn sm" onclick="openReportCustom()">📄 Сформировать PDF</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="openTextCustom()">📝 Текст (копировать / импорт)</button>
     </div>
-    <div class="muted small" style="margin-top:10px">PDF откроется в новой вкладке/скачается.</div>`;
+    <div class="muted small" style="margin-top:10px">PDF откроется в новой вкладке/скачается. «Текст» — человекочитаемый экспорт, который можно вставить обратно через импорт Истории.</div>`;
 }
 function openReport(q) { toast('Готовлю PDF…'); window.open('/api/reports?' + q, '_blank'); }
 function openReportCustom() {
@@ -1194,6 +1211,13 @@ function openReportCustom() {
   if (!f || !t) return toast('Укажите период');
   if (f > t) return toast('«С» должно быть раньше «По»');
   openReport(`from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`);
+}
+// EXP-1: same range picker as the PDF report, but human-readable/importable text.
+function openTextCustom() {
+  const f = document.getElementById('rFrom').value, t = document.getElementById('rTo').value;
+  if (!f || !t) return toast('Укажите период');
+  if (f > t) return toast('«С» должно быть раньше «По»');
+  window.open(`/api/export?format=text&from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`, '_blank');
 }
 
 // ── Progress photos ─────────────────────────────────────────────────────────

@@ -34,7 +34,9 @@
 // v56: W4-3 — «✓ Готово» checkmark is back, persisted on the backend (one tap,
 // survives refresh, not tied to the planned set count).
 // v57: W4-5 (tail) — «Прошлый раз» line uses setLabel (weight carries «кг»).
-const CACHE = 'fit-proto-v57';
+// v58: EXP-1 — human-readable text export: «📋 Скопировать текстом» (one workout)
+// and «📝 Текст» (period), round-trips through the HIST-2 importer.
+const CACHE = 'fit-proto-v58';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

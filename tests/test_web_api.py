@@ -592,6 +592,31 @@ def test_exercise_catalog_v2(client):
     assert len(client.get("/api/exercises/catalog?group=hamstrings").json()) >= 3
 
 
+def test_workout_text_export(client):
+    # EXP-1: one workout → human-readable text with sets AND comments, and the
+    # period export bundles finished workouts. Format mirrors the HIST-2 importer.
+    wid = client.post("/api/workouts", json={"focus_label": "Плечи"}).json()["id"]
+    client.patch(f"/api/workouts/{wid}/notes", json={"notes": "спал плохо"})
+    client.post(f"/api/workouts/{wid}/sets",
+                json={"exercise_name": "Жим гантелей сидя",
+                      "sets": [{"weight_kg": 12, "reps": 15, "is_warmup": True},
+                               {"weight_kg": 22, "reps": 8, "is_failure": True}]})
+    client.put(f"/api/workouts/{wid}/exercise-note",
+               json={"exercise_name": "Жим гантелей сидя", "notes": "болело плечо"})
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": "Подтягивания", "sets": [{"reps": 10}]})
+    client.post(f"/api/workouts/{wid}/finish")
+    txt = client.get(f"/api/workouts/{wid}/text").json()["text"]
+    assert "· Плечи" in txt                         # header: date · focus
+    assert "📝 спал плохо" in txt                    # workout note
+    assert "12×15 (р)" in txt and "22×8*" in txt     # warmup marker + failure marker
+    assert "  📝 болело плечо" in txt                # indented exercise note
+    assert "Подтягивания: 10" in txt                 # bodyweight → reps only
+    # period export as text/plain includes this workout
+    r = client.get("/api/export", params={"format": "text", "from": "2025-01-01", "to": "2027-12-31"})
+    assert r.headers["content-type"].startswith("text/plain")
+    assert "Жим гантелей сидя:" in r.text
+
+
 def test_workout_to_template_day(client):
     # UX3-FEAT-1: a finished workout maps to a routine day; per exercise the target is
     # (# working sets) × reps @ the heaviest working set's weight (warmups excluded).

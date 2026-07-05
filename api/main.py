@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -1375,6 +1375,66 @@ async def assemble_workout(uid: str, wid: int) -> dict:
             "planned_workout_id": w["planned_workout_id"], "exercises": exercises}
 
 
+# ── EXP-1: human-readable text export (round-trips through the HIST-2 importer) ──
+def _mmss_txt(sec: int) -> str:
+    sec = int(sec or 0)
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def _num_txt(x) -> str:
+    f = float(x)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def _set_txt(s: dict) -> str:
+    """One set → «80×10» (strength) / «12» (bodyweight) / «20:00» (time), with
+    «(р)» for warmup and «*» for до отказа, mirroring the PDF / setLabel markers."""
+    if s.get("duration_seconds"):
+        v = _mmss_txt(s["duration_seconds"])
+    elif s.get("weight_kg") is not None:
+        reps = s.get("reps")
+        v = f"{_num_txt(s['weight_kg'])}×{reps if reps is not None else (s.get('reps_text') or '')}"
+    else:
+        reps = s.get("reps")
+        v = str(reps) if reps is not None else (s.get("reps_text") or "")
+    if s.get("is_warmup"):
+        v += " (р)"
+    if s.get("is_failure"):
+        v += "*"
+    return v
+
+
+def _workout_to_text(w: dict) -> str:
+    """Assembled workout (assemble_workout) → the shared human/importable text.
+    Header «<ISO> · <focus>», optional «📝 <workout note>», then per exercise
+    «Название: подходы через запятую» with an optional indented «  📝 <ex note>».
+    Exercises without logged sets are skipped (nothing to log)."""
+    wd = w.get("workout_date")
+    date_s = wd.isoformat() if hasattr(wd, "isoformat") else str(wd or "")
+    focus = (w.get("focus_label") or "").strip()
+    lines = [f"{date_s} · {focus}" if focus else date_s]
+    wnote = (w.get("notes") or "").strip()
+    if wnote:
+        lines.append(f"📝 {wnote}")
+    for ex in w.get("exercises", []):
+        sets = ex.get("sets") or []
+        if not sets:
+            continue
+        lines.append(f"{ex['name']}: " + ", ".join(_set_txt(s) for s in sets))
+        enote = (ex.get("notes") or "").strip()
+        if enote:
+            lines.append(f"  📝 {enote}")
+    return "\n".join(lines)
+
+
+@app.get("/api/workouts/{wid}/text")
+async def workout_text(wid: int, uid: str = Depends(current_uid)):
+    """EXP-1: one workout as human-readable text (with comments), copy/paste-able
+    and re-importable via the HIST-2 text importer."""
+    await _own_workout(uid, wid)
+    return {"text": _workout_to_text(await assemble_workout(uid, wid))}
+
+
 class NotesBody(BaseModel):
     notes: str
 
@@ -2334,10 +2394,42 @@ async def del_measurement(mid: int, uid: str = Depends(current_uid)):
 # ──────────────────────────────── reports ───────────────────────────────────
 
 @app.get("/api/export")
-async def export_data(format: str = "json", uid: str = Depends(current_uid)):
+async def export_data(
+    format: str = "json",
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    days: Optional[int] = None,
+    uid: str = Depends(current_uid),
+):
     """Owner-scoped export. format=csv → flat CSV of every set, STREAMED from a
     server-side cursor so memory stays flat regardless of history size. format=json
-    → JSON dump with each table capped so a huge history can't OOM the process."""
+    → JSON dump with each table capped so a huge history can't OOM the process.
+    format=text → human-readable, importable text for a period (EXP-1)."""
+    if format == "text":
+        today = await today_for(uid)
+        if from_ or to:
+            try:
+                fd = date.fromisoformat((from_ or "").strip())
+                td = date.fromisoformat((to or "").strip())
+            except ValueError:
+                raise HTTPException(422, "bad date, expected YYYY-MM-DD")
+        else:
+            n = days if (days and 1 <= days <= 366) else 30
+            td, fd = today, today - timedelta(days=n)
+        if fd > td:
+            raise HTTPException(422, "from must be <= to")
+        rows = await _rows(
+            """SELECT id FROM workouts
+               WHERE user_id = :u AND workout_date BETWEEN :fd AND :td AND finished_at IS NOT NULL
+               ORDER BY workout_date DESC, started_at DESC""", u=uid, fd=fd, td=td)
+        blocks = []
+        for r in rows:
+            t = _workout_to_text(await assemble_workout(uid, r["id"]))
+            if t.strip():
+                blocks.append(t)
+        body = "\n\n".join(blocks) or "Нет завершённых тренировок за период."
+        return PlainTextResponse(body, media_type="text/plain; charset=utf-8",
+                                 headers={"Content-Disposition": 'attachment; filename="workouts.txt"'})
     if format == "csv":
         async def gen():
             import csv as _csv
