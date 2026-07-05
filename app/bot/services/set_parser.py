@@ -215,6 +215,17 @@ _TIME_MIN = re.compile(r"\b(\d+(?:[.,]\d+)?)\s*(?:мин|минут\w*)\b", re.I
 _TIME_SEC = re.compile(r"\b(\d+(?:[.,]\d+)?)\s*(?:сек|секунд\w*)\b", re.I)
 
 
+# REC-6: per-set qualifiers that must NOT split or scale the weight — they are just
+# context. Stripped before number parsing (so «20 кг на руку 12» → 20 кг × 12) and
+# kept as a note. «компенсация/противовес N» is the counterweight LOAD (W3-1): the
+# word is stripped but its number stays as the weight.
+_QUALIFIER_RE = re.compile(
+    r"\b(на\s+руку|на\s+ногу|каждой(?:\s+(?:рукой|ногой))?|одной\s+(?:рукой|ногой)|"
+    r"по\s+стороне|компенсаци\w*|противовес\w*)\b",
+    re.IGNORECASE,
+)
+
+
 def parse_exercise_input(
     text: str,
     last_exercise: str | None = None,
@@ -232,6 +243,15 @@ def parse_exercise_input(
     # normalize_spoken strips "следующий"/"еще" via _UNITS_STRIP.
     raw_lower = text.lower().replace("ё", "е")
     t = normalize_spoken(text)
+    # REC-6: pull out qualifier phrases so they don't break number parsing; keep them
+    # as a note attached to every set.
+    _quals = [m.group(0).strip() for m in _QUALIFIER_RE.finditer(t)]
+    qual_note = ", ".join(dict.fromkeys(_quals)) if _quals else None
+    if _quals:
+        t = re.sub(r"\s{2,}", " ", _QUALIFIER_RE.sub(" ", t)).strip()
+        # removing a qualifier can leave «N кг M» dangling → rejoin as «N кг на M»
+        # so the weight (before кг) parses instead of being read as a second rep.
+        t = re.sub(r"(\d+(?:[.,]\d+)?\s*кг)\s+(\d)", r"\1 на \2", t, flags=re.IGNORECASE)
     t_lower = t.lower()
 
     is_continuation = bool(_CONTINUATION.match(raw_lower)) or raw_lower.startswith("следующий")
@@ -295,6 +315,7 @@ def parse_exercise_input(
             is_warmup=is_warmup,
             is_failure=is_failure,
             superset_group=sg,
+            notes=qual_note,   # REC-6: qualifier kept as a note
         ))
     return results if results else None
 

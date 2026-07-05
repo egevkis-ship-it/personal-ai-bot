@@ -183,3 +183,26 @@ class TestExerciseInputMode:
         for it in self.catalog.values():
             if it["muscle_group"] == "cardio":
                 assert it["input"] == "time", f"cardio {it['canonical_ru']} → {it['input']}"
+
+
+class TestSetQualifiers:
+    """REC-6: per-set qualifiers keep the weight intact and become a note."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        from app.bot.services.set_parser import parse_exercise_input
+        self.P = parse_exercise_input
+
+    def test_per_hand_qualifier_keeps_weight(self):
+        r = self.P("Махи 20 кг на руку 12")
+        assert r[0].weight_kg == 20.0 and r[0].reps == 12
+        assert "на руку" in (r[0].notes or "")
+
+    def test_counterweight_qualifier_keeps_weight(self):
+        r = self.P("Гравитрон компенсация 50 кг 10")
+        assert r[0].weight_kg == 50.0 and r[0].reps == 10
+        assert "компенсаци" in (r[0].notes or "")
+
+    def test_plain_input_unaffected(self):
+        r = self.P("Жим 80x10")
+        assert r[0].weight_kg == 80.0 and r[0].reps == 10 and r[0].notes is None
