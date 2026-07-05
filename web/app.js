@@ -278,7 +278,7 @@ function accordionBody(wid, ex, idx) {
   const sets = ex.sets.map(s => `<div class="row sp" style="padding:7px 2px;border-bottom:1px solid var(--line)">
     <span>${s.is_warmup ? 'Р · ' : ''}${esc(setLabel(s))}</span>
     <span><span class="muted" onclick="event.stopPropagation();editSet(${s.id},${wid})" style="cursor:pointer;padding:2px 8px">✏️</span><span style="color:var(--danger);cursor:pointer;padding:2px 6px" onclick="event.stopPropagation();rmSet(${s.id},${wid})">✕</span></span></div>`).join('');
-  const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${ex.last.duration_seconds ? mmss(ex.last.duration_seconds) : fmt(ex.last.weight_kg) + '×' + ex.last.reps}</div>` : '';
+  const last = ex.last ? `<div class="small" style="color:var(--info);margin-bottom:8px">📈 Прошлый раз ${esc(setLabel(ex.last))}</div>` : '';
   // W3-4: a note attached to the EXERCISE (not per-set), saved on blur.
   const note = `<div style="margin-top:14px">
     <div class="muted small" style="margin-bottom:4px">📝 Заметка к упражнению</div>
