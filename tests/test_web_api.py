@@ -617,6 +617,28 @@ def test_workout_text_export(client):
     assert "Жим гантелей сидя:" in r.text
 
 
+def test_plan_set_groups_tiers(client):
+    # REC-4: tiered weights persist as set_groups; flat target_* fall back to the
+    # FIRST tier (backward compat); single-tier exercises are unchanged; and a
+    # workout started from the plan exposes the tiers.
+    r = client.post("/api/plans", json={"date": "2026-07-10", "focus_label": "Плечи", "exercises": [
+        {"name": "Махи гантелями в стороны", "set_groups": [
+            {"sets": 2, "reps_min": 12, "reps_max": 12, "weight": 12.5},
+            {"sets": 2, "reps_min": 15, "reps_max": 15, "weight": 10}]},
+        {"name": "Жим штанги лёжа", "target_sets": 4, "target_reps_min": 10, "target_weight": 80},
+    ]})
+    pid = r.json()["id"]
+    ex = {e["name"]: e for e in client.get(f"/api/plans/{pid}").json()["exercises"]}
+    tiered = ex["Махи гантелями в стороны"]
+    assert len(tiered["set_groups"]) == 2
+    assert tiered["set_groups"][0]["weight"] == 12.5 and tiered["set_groups"][1]["weight"] == 10
+    assert tiered["target_sets"] == 2 and tiered["target_weight"] == 12.5   # flat = first tier
+    assert ex["Жим штанги лёжа"]["set_groups"] is None and ex["Жим штанги лёжа"]["target_sets"] == 4
+    wid = client.post("/api/workouts", json={"from_plan_id": pid}).json()["id"]
+    wex = {e["name"]: e for e in client.get(f"/api/workouts/{wid}").json()["exercises"]}
+    assert wex["Махи гантелями в стороны"]["set_groups"][1]["reps_max"] == 15
+
+
 def test_workout_to_template_day(client):
     # UX3-FEAT-1: a finished workout maps to a routine day; per exercise the target is
     # (# working sets) × reps @ the heaviest working set's weight (warmups excluded).

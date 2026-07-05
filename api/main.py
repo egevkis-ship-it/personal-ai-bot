@@ -1360,6 +1360,7 @@ async def assemble_workout(uid: str, wid: int) -> dict:
         tgt_sets = (target or {}).get("target_sets")
         return {"name": canon, "key": key, "type": exercise_type(canon, key), "sets": logged,
                 "target": suggestion_from_plan(target) if target else None, "target_sets": tgt_sets,
+                "set_groups": (target or {}).get("set_groups"),   # REC-4: weight tiers, if planned
                 "last": await last_result(uid, canon), "notes": notes_map.get(keyl),   # W3-4: exercise note
                 "done": keyl in done_set, "in_plan": target is not None}   # W4-3: manual «done», persisted
 
@@ -1945,6 +1946,39 @@ def _opt_str(v, maxlen: int = 500):
     return s[:maxlen] or None
 
 
+def _clean_set_groups(raw) -> Optional[list[dict]]:
+    """REC-4: validate weight tiers. Each tier is {sets, reps_min?, reps_max?,
+    weight?, reps_text?, duration_seconds?}. Returns None when empty/absent."""
+    if not raw:
+        return None
+    if not isinstance(raw, list):
+        raise HTTPException(422, "set_groups должен быть списком")
+    out: list[dict] = []
+    for g in raw:
+        if isinstance(g, BaseModel):
+            g = g.model_dump()
+        if not isinstance(g, dict):
+            raise HTTPException(422, "ярус должен быть объектом")
+        sets = _opt_int(g.get("sets"), "sets", 1, 100)
+        if not sets:
+            continue
+        item = {
+            "sets": sets,
+            "reps_min": _opt_int(g.get("reps_min"), "reps_min", 0, 1000),
+            "reps_max": _opt_int(g.get("reps_max"), "reps_max", 0, 1000),
+            "weight": _opt_float(g.get("weight"), "weight", 0, 10000),
+            "reps_text": _opt_str(g.get("reps_text")),
+            "duration_seconds": _opt_int(g.get("duration_seconds"), "duration_seconds", 0, 86400),
+        }
+        if item["reps_min"] is not None and item["reps_max"] is None:
+            item["reps_max"] = item["reps_min"]
+        if (item["reps_min"] is not None and item["reps_max"] is not None
+                and item["reps_min"] > item["reps_max"]):
+            item["reps_min"], item["reps_max"] = item["reps_max"], item["reps_min"]
+        out.append(item)
+    return out or None
+
+
 def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
     """Validate + normalize incoming exercise dicts to the bot's planned-exercise
     shape. Unknown fields are dropped; bad types/ranges -> 422. JSONB storage."""
@@ -1964,6 +1998,7 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
             "reps_text": _opt_str(e.get("reps_text")),
             "notes": _opt_str(e.get("notes")),
             "superset_group": _opt_str(e.get("superset_group"), 50),
+            "set_groups": _clean_set_groups(e.get("set_groups")),   # REC-4
         }
         # if only one reps value provided, mirror it into min==max (bot convention)
         if d["target_reps_min"] is not None and d["target_reps_max"] is None:
@@ -1972,6 +2007,20 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
         if (d["target_reps_min"] is not None and d["target_reps_max"] is not None
                 and d["target_reps_min"] > d["target_reps_max"]):
             d["target_reps_min"], d["target_reps_max"] = d["target_reps_max"], d["target_reps_min"]
+        # REC-4 backward-compat: when tiers are present they are the source of truth,
+        # but keep the flat target_* filled from the FIRST tier so old readers/summaries
+        # (schedule feed, template mapping, _pe) don't break.
+        sg = d["set_groups"]
+        if sg:
+            g0 = sg[0]
+            if d["target_sets"] is None:
+                d["target_sets"] = g0["sets"]
+            if d["target_reps_min"] is None:
+                d["target_reps_min"] = g0["reps_min"]
+            if d["target_reps_max"] is None:
+                d["target_reps_max"] = g0["reps_max"]
+            if d["target_weight"] is None:
+                d["target_weight"] = g0["weight"]
         out.append(d)
     return out
 
@@ -2016,6 +2065,16 @@ async def _normalize_plan_exercises(exs: list[dict], uid: str) -> list[dict]:
     return exs
 
 
+class SetGroup(BaseModel):
+    # REC-4: one weight/reps tier of an exercise, e.g. «2×12 на 12.5 кг».
+    sets: int
+    reps_min: Optional[int] = None
+    reps_max: Optional[int] = None
+    weight: Optional[float] = None
+    reps_text: Optional[str] = None
+    duration_seconds: Optional[int] = None   # REC-5: a time tier (cardio/plank)
+
+
 class PlanExercise(BaseModel):
     name: str
     target_sets: Optional[int] = None
@@ -2025,6 +2084,7 @@ class PlanExercise(BaseModel):
     reps_text: Optional[str] = None
     notes: Optional[str] = None
     superset_group: Optional[str] = None
+    set_groups: Optional[list[SetGroup]] = None   # REC-4: weight tiers (source of truth if set)
 
 
 class CreatePlan(BaseModel):
