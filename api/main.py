@@ -2256,13 +2256,20 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
         exs_out = []
         for ex in day.exercises:
             canon = await _resolve_name(ex.name)   # DB-7: exact only; flag unresolved for the dialog
-            exs_out.append({
+            item = {
                 "name": canon or ex.name, "resolved": canon is not None,
                 "target_sets": ex.target_sets,
                 "target_reps_min": ex.target_reps_min, "target_reps_max": ex.target_reps_max,
                 "target_weight": ex.target_weight, "reps_text": ex.reps_text,
                 "notes": ex.notes, "superset_group": ex.superset_group,
-            })
+                "set_groups": _clean_set_groups(ex.set_groups),   # REC-4: validated tiers
+            }
+            # REC-4: mirror the flat target_* from the first tier for old preview readers.
+            if item["set_groups"] and item["target_sets"] is None:
+                g0 = item["set_groups"][0]
+                item["target_sets"], item["target_reps_min"] = g0["sets"], g0["reps_min"]
+                item["target_reps_max"], item["target_weight"] = g0["reps_max"], g0["weight"]
+            exs_out.append(item)
         out.append({
             "date": assigned.isoformat(),
             "weekday": assigned.weekday(),

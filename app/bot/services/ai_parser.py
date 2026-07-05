@@ -72,6 +72,7 @@ class PlannedExercise:
     reps_text: str | None = None       # "AMRAP", "до отказа"
     notes: str | None = None
     superset_group: str | None = None
+    set_groups: list | None = None     # REC-4: weight tiers, e.g. [{sets,reps_min,reps_max,weight}]
 
 
 @dataclass
@@ -105,7 +106,8 @@ _PLAN_SYSTEM = """\
           "target_weight": 80.0,
           "reps_text": null,
           "notes": "Постараться добавить 2.5кг к рабочему. Пауза в нижней точке 2 сек.",
-          "superset_group": null
+          "superset_group": null,
+          "set_groups": null
         }
       ]
     }
@@ -117,6 +119,13 @@ _PLAN_SYSTEM = """\
 - "4×10" → target_sets:4, target_reps_min:10, target_reps_max:10
 - "4×8-12" → target_sets:4, target_reps_min:8, target_reps_max:12
 - "AMRAP" / "до отказа" → reps_text:"до отказа", target_reps_min:null
+- ЯРУСЫ ВЕСА — несколько групп подходов с РАЗНЫМ весом/повторами в ОДНОЙ строке \
+("2×12 на 12.5 кг + 2×15 на 10 кг", "1×10-12 на 15 + 3×10-12 на 10", пирамида, \
+"тяжёлые в начале, пампинг в конце") → эмить массив "set_groups", по объекту на ярус: \
+[{"sets":2,"reps_min":12,"reps_max":12,"weight":12.5},{"sets":2,"reps_min":15,"reps_max":15,"weight":10}]. \
+Плоские target_* при этом заполни из ПЕРВОГО яруса (target_sets/reps/weight = первый ярус). \
+ОДНОЯРУСНЫЕ строки ("4×10, 80 кг") — set_groups:null, только плоские target_*. Не плоди \
+set_groups без нужды.
 - Суперсеты: помечай superset_group "A", "B"... для упражнений в паре
 - День отдыха (явный «Отдых»/«rest»/«выходной»/«день отдыха» ИЛИ день недели без тренировки): \
 focus_label:"Отдых", exercises:[].
@@ -227,6 +236,7 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
                 reps_text=e.get("reps_text"),
                 notes=e.get("notes"),
                 superset_group=e.get("superset_group"),
+                set_groups=e.get("set_groups"),
             )
             for e in d.get("exercises", [])
             if e.get("name")
