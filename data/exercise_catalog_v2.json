@@ -3,7 +3,7 @@
     "source": "Free Exercise DB (yuhonas/free-exercise-db), public domain",
     "image_base": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises",
     "image_pattern": "<image_base>/<fedb_id>/0.jpg",
-    "count": 187,
+    "count": 188,
     "groups": {
       "chest": "Грудь",
       "back": "Спина",
@@ -327,7 +327,8 @@
       "aliases": [
         "dumbbell bicep curl",
         "подъём гантелей на бицепс",
-        "бицепс с гантелями стоя"
+        "бицепс с гантелями стоя",
+        "подъём гантелей на бицепс стоя"
       ],
       "fedb_id": "Dumbbell_Bicep_Curl",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dumbbell_Bicep_Curl/0.jpg",
@@ -555,7 +556,10 @@
       "input": "strength",
       "aliases": [
         "incline dumbbell press",
-        "жим гантелей на наклонной"
+        "жим гантелей на наклонной",
+        "жим гантелей под углом",
+        "жим гантелей 20°",
+        "наклонный жим гантелей"
       ],
       "fedb_id": "Incline_Dumbbell_Press",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Incline_Dumbbell_Press/0.jpg",
@@ -579,7 +583,10 @@
       "input": "strength",
       "aliases": [
         "barbell incline bench press medium grip",
-        "жим штанги на наклонной"
+        "жим штанги на наклонной",
+        "наклонный жим штанги",
+        "жим штанги 30°",
+        "жим штанги под углом"
       ],
       "fedb_id": "Barbell_Incline_Bench_Press_-_Medium_Grip",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Barbell_Incline_Bench_Press_-_Medium_Grip/0.jpg",
@@ -604,7 +611,8 @@
       "aliases": [
         "dips chest version",
         "отжимания на брусьях",
-        "брусья на грудь"
+        "брусья на грудь",
+        "отжимания на брусьях узким хватом"
       ],
       "fedb_id": "Dips_-_Chest_Version",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Dips_-_Chest_Version/0.jpg",
@@ -629,7 +637,9 @@
       "aliases": [
         "cable crossover",
         "сведение в кроссовере",
-        "сведение в кроссовере снизу вверх"
+        "сведение в кроссовере снизу вверх",
+        "сведение в кроссовере снизу-вверх",
+        "сведение рук в кроссовере"
       ],
       "fedb_id": "Cable_Crossover",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Cable_Crossover/0.jpg",
@@ -900,7 +910,10 @@
       "aliases": [
         "one-legged cable kickback",
         "отведение ноги в кроссовере",
-        "кикбэк в кроссовере"
+        "кикбэк в кроссовере",
+        "отведение ноги в кроссовере (кикбэк)",
+        "кикбэк",
+        "ягодичный кикбэк"
       ],
       "fedb_id": "One-Legged_Cable_Kickback",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/One-Legged_Cable_Kickback/0.jpg",
@@ -1244,7 +1257,8 @@
       "aliases": [
         "side lateral raise",
         "махи гантелями в стороны",
-        "махи на среднюю дельту стоя"
+        "махи на среднюю дельту стоя",
+        "махи гантелей в стороны"
       ],
       "fedb_id": "Side_Lateral_Raise",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Side_Lateral_Raise/0.jpg",
@@ -1583,7 +1597,8 @@
         "leverage iso row",
         "рычажная тяга с упором",
         "тяга в тренажёре с упором двумя руками",
-        "тяга в упоре одной рукой в тренажёре"
+        "тяга в упоре одной рукой в тренажёре",
+        "рычажная тяга с упором двумя руками"
       ],
       "fedb_id": "Leverage_Iso_Row",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Leverage_Iso_Row/0.jpg",
@@ -1601,6 +1616,21 @@
       "fedb_id": "Single_Leg_Glute_Bridge",
       "image": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Single_Leg_Glute_Bridge/0.jpg",
       "image_end": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Single_Leg_Glute_Bridge/1.jpg"
+    },
+    "frog_pump": {
+      "canonical_ru": "Frog pump",
+      "muscle_group": "glutes",
+      "input": "bodyweight",
+      "aliases": [
+        "frog pump",
+        "фрог-памп",
+        "фрог памп",
+        "фрогпамп",
+        "лягушачий ягодичный мостик"
+      ],
+      "fedb_id": null,
+      "image": null,
+      "image_end": null
     },
     "decline_barbell_bench_press": {
       "canonical_ru": "Жим штанги на наклонной вниз",
