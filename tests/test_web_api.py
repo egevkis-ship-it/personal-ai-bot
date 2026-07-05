@@ -639,6 +639,18 @@ def test_plan_set_groups_tiers(client):
     assert wex["Махи гантелями в стороны"]["set_groups"][1]["reps_max"] == 15
 
 
+def test_plan_cardio_duration(client):
+    # REC-5: a cardio/time plan target keeps its duration and carries NO sets×reps
+    # (this also covers the W3-1 gap where target_duration_seconds was dropped on save).
+    r = client.post("/api/plans", json={"date": "2026-07-12", "focus_label": "Кардио", "exercises": [
+        {"name": "Велотренажёр", "target_duration_seconds": 600},
+    ]})
+    pid = r.json()["id"]
+    e = client.get(f"/api/plans/{pid}").json()["exercises"][0]
+    assert e["target_duration_seconds"] == 600
+    assert e["target_sets"] is None and e["target_weight"] is None
+
+
 def test_workout_to_template_day(client):
     # UX3-FEAT-1: a finished workout maps to a routine day; per exercise the target is
     # (# working sets) × reps @ the heaviest working set's weight (warmups excluded).

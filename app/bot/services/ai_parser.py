@@ -73,6 +73,7 @@ class PlannedExercise:
     notes: str | None = None
     superset_group: str | None = None
     set_groups: list | None = None     # REC-4: weight tiers, e.g. [{sets,reps_min,reps_max,weight}]
+    target_duration_seconds: int | None = None   # REC-5: cardio/time goal
 
 
 @dataclass
@@ -107,7 +108,8 @@ _PLAN_SYSTEM = """\
           "reps_text": null,
           "notes": "Постараться добавить 2.5кг к рабочему. Пауза в нижней точке 2 сек.",
           "superset_group": null,
-          "set_groups": null
+          "set_groups": null,
+          "target_duration_seconds": null
         }
       ]
     }
@@ -119,6 +121,10 @@ _PLAN_SYSTEM = """\
 - "4×10" → target_sets:4, target_reps_min:10, target_reps_max:10
 - "4×8-12" → target_sets:4, target_reps_min:8, target_reps_max:12
 - "AMRAP" / "до отказа" → reps_text:"до отказа", target_reps_min:null
+- КАРДИО / ВРЕМЯ / РАЗМИНКА по времени ("велотренажёр 7-10 мин", "разминка 5 мин", "планка 60 сек", \
+"бег 20 минут") → target_duration_seconds В СЕКУНДАХ (минуты×60), а target_sets/target_reps_*/ \
+target_weight = null (НЕ придумывай подходы×повторы для кардио). Диапазон "7-10 мин" → возьми \
+верхнюю границу (600). Название кардио — как в тексте (велотренажёр/беговая дорожка/эллипс…).
 - ЯРУСЫ ВЕСА — несколько групп подходов с РАЗНЫМ весом/повторами в ОДНОЙ строке \
 ("2×12 на 12.5 кг + 2×15 на 10 кг", "1×10-12 на 15 + 3×10-12 на 10", пирамида, \
 "тяжёлые в начале, пампинг в конце") → эмить массив "set_groups", по объекту на ярус: \
@@ -237,6 +243,7 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
                 notes=e.get("notes"),
                 superset_group=e.get("superset_group"),
                 set_groups=e.get("set_groups"),
+                target_duration_seconds=e.get("target_duration_seconds"),
             )
             for e in d.get("exercises", [])
             if e.get("name")

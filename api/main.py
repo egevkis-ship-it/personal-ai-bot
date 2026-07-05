@@ -1999,6 +1999,7 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
             "notes": _opt_str(e.get("notes")),
             "superset_group": _opt_str(e.get("superset_group"), 50),
             "set_groups": _clean_set_groups(e.get("set_groups")),   # REC-4
+            "target_duration_seconds": _opt_int(e.get("target_duration_seconds"), "target_duration_seconds", 0, 86400),   # REC-5
         }
         # if only one reps value provided, mirror it into min==max (bot convention)
         if d["target_reps_min"] is not None and d["target_reps_max"] is None:
@@ -2085,6 +2086,7 @@ class PlanExercise(BaseModel):
     notes: Optional[str] = None
     superset_group: Optional[str] = None
     set_groups: Optional[list[SetGroup]] = None   # REC-4: weight tiers (source of truth if set)
+    target_duration_seconds: Optional[int] = None   # REC-5: cardio/time goal (minutes)
 
 
 class CreatePlan(BaseModel):
@@ -2263,6 +2265,7 @@ async def parse_plan(body: ParsePlan, uid: str = Depends(current_uid)):
                 "target_weight": ex.target_weight, "reps_text": ex.reps_text,
                 "notes": ex.notes, "superset_group": ex.superset_group,
                 "set_groups": _clean_set_groups(ex.set_groups),   # REC-4: validated tiers
+                "target_duration_seconds": _opt_int(ex.target_duration_seconds, "target_duration_seconds", 0, 86400),   # REC-5
             }
             # REC-4: mirror the flat target_* from the first tier for old preview readers.
             if item["set_groups"] and item["target_sets"] is None:
