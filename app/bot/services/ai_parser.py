@@ -20,6 +20,7 @@ from typing import Any
 import anthropic
 import openai
 
+from app.bot.services.catalog_v2 import CATALOG
 from app.config import settings
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,27 @@ _openai = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 # Valid current model (the old "claude-opus-4-7" id no longer resolves and made
 # every AI call 404 — silently, because callers swallowed the exception).
 PARSER_MODEL = "claude-opus-4-8"
+
+
+# REC-3: give the parser the catalog's canonical names so it can fold obvious
+# phrasing variants (angle/grip/stance/side/declension) to the EXACT canon — fewer
+# manual confirmations. Built from CATALOG at import time (no hard-coding, so it
+# tracks REC-1 edits). INVARIANT: an unknown/uncertain movement must pass through
+# VERBATIM (→ _resolve_name returns resolved:false → the DB-7 dialog); the parser
+# must never swap it for a merely-similar entry.
+def _catalog_hint() -> str:
+    names = sorted({it["canonical_ru"] for it in CATALOG.values()})
+    return (
+        "\n\nСПРАВОЧНИК КАНОНИЧЕСКИХ НАЗВАНИЙ (из базы упражнений):\n"
+        + "\n".join(names)
+        + "\n\nПРАВИЛО ИМЁН: если упражнение из текста ЯВНО одно из списка выше (отличается только "
+        "углом/хватом/стойкой/стороной/склонением/сокращением) — верни ТОЧНО это каноническое имя "
+        "из списка. Если не уверен, или движения в списке НЕТ, или оно иное по механике/оборудованию "
+        "— верни имя КАК В ТЕКСТЕ (дословно), НЕ выдумывай и НЕ подгоняй под похожее."
+    )
+
+
+_CATALOG_HINT = _catalog_hint()
 
 
 class PlanParseError(Exception):
@@ -174,7 +196,7 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
         resp = await _anthropic.messages.create(
             model=PARSER_MODEL,
             max_tokens=8192,
-            system=_PLAN_SYSTEM,
+            system=_PLAN_SYSTEM + _CATALOG_HINT,
             messages=[{"role": "user", "content": text}],
         )
     except Exception as exc:
@@ -273,7 +295,7 @@ async def parse_logged_workouts_text(text: str) -> list[dict[str, Any]]:
         resp = await _anthropic.messages.create(
             model=PARSER_MODEL,
             max_tokens=8192,
-            system=_LOG_SYSTEM,
+            system=_LOG_SYSTEM + _CATALOG_HINT,
             messages=[{"role": "user", "content": text}],
         )
     except Exception as exc:
