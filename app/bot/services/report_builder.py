@@ -110,6 +110,18 @@ async def _fetch_workouts(uid: str, fd: date, td: date) -> list[tuple[dict, list
                 {"wid": w["id"]},
             )
             sets = [dict(r) for r in sr.mappings().all()]
+            # EXP-2: per-exercise notes (W3-4), keyed by lowercased exercise name.
+            # Same source as the app / text export (workout_exercise_notes). Guarded
+            # so an old DB without the table degrades gracefully.
+            try:
+                nr = await s.execute(
+                    text("SELECT exercise_name, notes FROM workout_exercise_notes WHERE workout_id = :wid"),
+                    {"wid": w["id"]},
+                )
+                w["_ex_notes"] = {r["exercise_name"].strip().lower(): r["notes"]
+                                  for r in nr.mappings().all() if r["notes"]}
+            except Exception:
+                w["_ex_notes"] = {}
             result.append((w, sets))
         return result
 
@@ -381,6 +393,11 @@ async def build_period_report(bot, user_id: str, from_date: date, to_date: date)
                         notes_collected.append(n)
                 line = f"<b>{_escape(ex)}</b>: <font color='#374151'>{', '.join(pieces)}</font>"
                 story.append(Paragraph(line, body))
+                # EXP-2: the exercise-level note (W3-4). «✏» because DejaVuSans has no
+                # 📝 glyph; the app shows the same text under «📝 Заметка к упражнению».
+                ex_note = (w.get("_ex_notes") or {}).get(ex.strip().lower())
+                if ex_note:
+                    story.append(Paragraph(f"✏ {_escape(ex_note)}", note_style))
                 for n in notes_collected:
                     story.append(Paragraph(f"— {_escape(n)}", note_style))
             story.append(Spacer(1, 4))
