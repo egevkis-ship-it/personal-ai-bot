@@ -17,6 +17,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import time
 import os
 import uuid
@@ -2026,16 +2027,64 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
     return out
 
 
+# REC-2: ё-folded catalog index so «жим штанги лежа» matches «…лёжа». Folding ё→е is
+# a clean 1:1 map — it never merges two different exercises.
+_EFOLD_INDEX = {nm.replace("ё", "е"): k for nm, k in NAME_INDEX.items()}
+# REC-2: a WHITELIST of trailing qualifiers safe to drop before an EXACT re-match —
+# angle, grip, stance, side. NOT a general fuzzy — only these exact suffixes.
+_TRAILING_QUALIFIERS = re.compile(
+    r"\s*("
+    r"\d+\s*°|под\s+углом(\s+\d+)?|"
+    r"(узким|широким|обратным|нейтральным|прямым)\s+хватом|"
+    r"стоя|сидя|лежа|"
+    r"одной\s+(рукой|ногой)|на\s+(руку|ногу)|каждой|по\s+стороне"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _efold_key(name: str) -> Optional[str]:
+    return _EFOLD_INDEX.get((name or "").strip().lower().replace("ё", "е"))
+
+
+def _strip_trailing_qualifiers(s: str) -> str:
+    s = (s or "").strip().lower().replace("ё", "е")
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\s*\([^()]*\)\s*$", "", s).strip()   # a trailing «(…)»
+    prev = None
+    while prev != s:                                   # peel «… 30° стоя» in layers
+        prev = s
+        s = _TRAILING_QUALIFIERS.sub("", s).strip()
+    return s
+
+
+def _resolve_static(raw: str) -> Optional[str]:
+    """REC-2: deterministic EXACT catalog key — direct, ё-folded, and after dropping a
+    whitelist of trailing qualifiers. NEVER fuzzy / cross-stem: matches only real
+    catalog names, so an unknown like «Жим стоя» stays unresolved (→ DB-7)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    k = name_to_key(raw) or _efold_key(raw)
+    if k:
+        return k
+    norm = _strip_trailing_qualifiers(raw)
+    if norm and norm != raw.strip().lower():
+        return name_to_key(norm) or _efold_key(norm)
+    return None
+
+
 async def _resolve_name(raw: str) -> Optional[str]:
     """DB-5/DB-7: resolve an exercise name to its canonical form ONLY by an EXACT
-    match — the static catalog (name_to_key) or a previously user-confirmed alias in
-    the DB cache (resolve_known). NO AI, NO fuzzy. Returns None when the name is
-    unknown, so the client runs the DB-7 matching dialog and the USER decides — we
+    match — the static catalog (name_to_key), a deterministic normalization (REC-2:
+    ё-fold + whitelisted trailing-qualifier strip), or a previously user-confirmed
+    alias in the DB cache (resolve_known). NO AI, NO fuzzy. Returns None when the name
+    is unknown, so the client runs the DB-7 matching dialog and the USER decides — we
     never auto-rename a near-match."""
     raw = (raw or "").strip()
     if not raw:
         return None
-    key = name_to_key(raw)
+    key = _resolve_static(raw)   # REC-2: direct / ё-folded / qualifier-stripped exact
     if key:
         return key_to_name(key)
     try:

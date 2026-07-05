@@ -651,6 +651,23 @@ def test_plan_cardio_duration(client):
     assert e["target_sets"] is None and e["target_weight"] is None
 
 
+def test_rec2_resolve_normalization():
+    # REC-2: deterministic normalization reaches an EXACT match (strip a trailing
+    # degree/stance/side qualifier, ё-fold) but NEVER fuzzy-collapses an unknown.
+    from api.main import _resolve_static, key_to_name
+
+    def r(name):
+        k = _resolve_static(name)
+        return key_to_name(k) if k else None
+
+    assert r("Жим штанги на наклонной 30°") == "Жим штанги на наклонной"   # strip «30°»
+    assert r("жим штанги лежа") == "Жим штанги лёжа"                        # ё-fold
+    assert r("Махи гантелями в стороны одной рукой") == "Махи гантелями в стороны"
+    # unknowns must stay unresolved (→ DB-7), never collapse to a random stem
+    assert _resolve_static("Жим стоя раскоряка") is None
+    assert _resolve_static("приседания хренация") is None
+
+
 def test_workout_to_template_day(client):
     # UX3-FEAT-1: a finished workout maps to a routine day; per exercise the target is
     # (# working sets) × reps @ the heaviest working set's weight (warmups excluded).
