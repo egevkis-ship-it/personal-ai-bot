@@ -286,27 +286,6 @@ async def current_admin(uid: str = Depends(current_uid)) -> str:
     return uid
 
 
-@app.get("/api/admin/diag")
-async def admin_diag(uid: str = Depends(current_admin)):
-    """TEMPORARY diagnostic — remove after use. Finished workouts in the last 21
-    days with working-set / all-set counts (the owner's data)."""
-    rows = await _rows(
-        """
-        SELECT w.id, w.workout_date, w.focus_label,
-               COUNT(es.id) FILTER (WHERE es.is_warmup = false) AS work_sets,
-               COUNT(es.id) AS all_sets
-        FROM workouts w LEFT JOIN exercise_sets es ON es.workout_id = w.id
-        WHERE w.user_id = :u AND w.finished_at IS NOT NULL
-          AND w.workout_date >= CURRENT_DATE - INTERVAL '21 days'
-        GROUP BY w.id ORDER BY w.workout_date DESC
-        """, u=uid)
-    out = [{"id": r["id"],
-            "workout_date": r["workout_date"].isoformat() if r["workout_date"] else None,
-            "focus_label": r["focus_label"], "work_sets": r["work_sets"], "all_sets": r["all_sets"]}
-           for r in rows]
-    return {"count": len(out), "rows": out}
-
-
 async def _is_active(uid: str) -> bool:
     """Whether uid may currently use the app — checked live on each request so a
     block/revoke ends an active session, not just the next login."""
