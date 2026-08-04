@@ -226,6 +226,7 @@ async function ChooseDay() {
 async function Active(id) {
   let w;
   if (!window._SETTINGS) { try { window._SETTINGS = await api('/settings'); _cacheSettings(); } catch { window._SETTINGS = _cachedSettings() || window._SETTINGS; } }  // rest-timer prefs
+  await flushQueue();   // push any queued sets before showing the workout (so counts are real)
   try { w = id ? await api('/workouts/' + id) : await api('/workouts/active'); }
   catch (e) {
     if (isNetworkErr(e)) { w = loadActiveCache(id); if (w) { await overlayQueue(w); return renderActive(w); } }
@@ -363,20 +364,38 @@ async function submitSet(wid, body) {
   body.client_op_id = _opId();
   try { await api('/workouts/' + wid + '/sets', 'POST', body); go('active', wid); }
   catch (e) {
-    if (isNetworkErr(e)) {
-      await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
-      const W = window._WO; if (W && W.id === wid) { _insertSet(W, body); renderActive(W); }
-      toast('Оффлайн — сохранится при сети');
-    } else { toast(e.message || 'не удалось'); }
+    // queue on ANY failure (network, 401 session-expiry, 5xx) — never drop the set
+    await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
+    const W = window._WO; if (W && W.id === wid) { _insertSet(W, body); renderActive(W); }
+    toast(e.code === 401 ? 'Сессия истекла — подход в очереди' : isNetworkErr(e) ? 'Оффлайн — сохранится при сети' : 'Не ушло на сервер — подход в очереди');
+    updateUnsyncedBanner();
   }
 }
 async function flushQueue() {
   if (!navigator.onLine) return;
   const ops = (await _qAll()).sort((a, b) => a.ts - b.ts);
   for (const o of ops) {
-    try { await api('/workouts/' + o.wid + '/sets', 'POST', o.body); await _qDel(o.op_id); }
-    catch (e) { if (isNetworkErr(e)) break; await _qDel(o.op_id); }  // drop permanently-failed ops
+    try {
+      await api('/workouts/' + o.wid + '/sets', 'POST', o.body);
+      await _qDel(o.op_id);   // 2xx incl. {duplicate:true} (server is idempotent) → safe to remove
+    } catch (e) {
+      break;   // NEVER drop a set on any error (401/5xx/network) — keep it queued + retry later
+    }
   }
+  updateUnsyncedBanner();
+}
+// Persistent «N подходов не сохранились» indicator + one-tap resync (→ re-login if 401).
+async function updateUnsyncedBanner() {
+  const n = (await _qAll()).length;
+  let el = document.getElementById('unsynced');
+  if (!n) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'unsynced'; el.className = 'unsynced'; document.body.appendChild(el); }
+  el.innerHTML = `⚠️ ${n} ${n === 1 ? 'подход не сохранён' : 'подх. не сохранены'} на сервере · <span onclick="retrySync()">повторить</span>`;
+}
+async function retrySync() {
+  await flushQueue();
+  if ((await _qAll()).length) { toast('Не удалось — вероятно, нужно войти заново'); Login(); }
+  else { toast('Синхронизировано'); if (STATE.tab === 'active' && STATE.activeId) go('active', STATE.activeId); }
 }
 window.addEventListener('online', () => { flushQueue().then(() => { if (STATE.tab === 'active' && STATE.activeId) go('active', STATE.activeId); }); });
 function setLabel(s) {
@@ -527,12 +546,12 @@ async function submitSets(wid, body) {
   body.client_op_id = _opId();
   try { await api('/workouts/' + wid + '/sets', 'POST', body); go('active', wid); }
   catch (e) {
-    if (isNetworkErr(e)) {
-      await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
-      const W = window._WO;
-      if (W && W.id === wid) { (body.sets || []).forEach((s, k) => _insertSet(W, { ...s, exercise_name: body.exercise_name, client_op_id: body.client_op_id + '-' + k })); renderActive(W); }
-      toast('Оффлайн — сохранится при сети');
-    } else { toast(e.message || 'не удалось'); }
+    // queue on ANY failure — never drop the sets
+    await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
+    const W = window._WO;
+    if (W && W.id === wid) { (body.sets || []).forEach((s, k) => _insertSet(W, { ...s, exercise_name: body.exercise_name, client_op_id: body.client_op_id + '-' + k })); renderActive(W); }
+    toast(e.code === 401 ? 'Сессия истекла — подходы в очереди' : isNetworkErr(e) ? 'Оффлайн — сохранится при сети' : 'Не ушло на сервер — подходы в очереди');
+    updateUnsyncedBanner();
   }
 }
 async function confirmText(wid) {
@@ -752,7 +771,15 @@ function noteSheet(wid) {
 async function saveNote(wid) { await api('/workouts/' + wid + '/notes', 'PATCH', { notes: document.getElementById('note').value }); closeSheet(); toast('Заметка сохранена'); }
 async function delWorkout(wid) { await api('/workouts/' + wid, 'DELETE'); clearActiveCache(); closeSheet(); go('home'); }
 async function finishWorkout(wid) {
-  const r = await api('/workouts/' + wid + '/finish', 'POST');
+  // Never finish with sets still in flight: sync first, and block if any remain.
+  await flushQueue();
+  if ((await _qAll()).some(o => o.wid === wid)) {
+    updateUnsyncedBanner();
+    return toast('Есть несохранённые подходы — сначала нажми «повторить» (или войди заново)');
+  }
+  let r;
+  try { r = await api('/workouts/' + wid + '/finish', 'POST'); }
+  catch (e) { return toast(e.code === 401 ? 'Сессия истекла — войди снова' : (e.message || 'не удалось завершить')); }
   clearActiveCache();
   sheet(`<div style="text-align:center"><div style="font-size:34px">✅</div><h2>Тренировка завершена</h2>
     <div class="muted small">${r.set_count} рабочих подходов</div></div>
