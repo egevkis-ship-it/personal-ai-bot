@@ -540,8 +540,10 @@ def test_coach_generate_surfaces_ai_failure_as_502(client, monkeypatch):
 
 
 def test_history_hides_rest_days(client):
-    # UX2-2: a real workout (has a working set) is shown; finished «Отдых» and
-    # empty-focus sessions with 0 working sets are hidden from the journal.
+    # UX2-2 (corrected in audit #16): ONLY a genuine «Отдых» rest day with 0 working
+    # sets is hidden. An empty-focus finished workout with 0 working sets must STILL
+    # appear — an empty focus is not a rest signal, and silently hiding it can mask a
+    # workout whose sets were lost (the exact "workout disappeared" symptom).
     import datetime as _dt
     from sqlalchemy.ext.asyncio import create_async_engine
     wid = client.post("/api/workouts", json={"focus_label": "Грудь-UX22"}).json()["id"]
@@ -550,12 +552,15 @@ def test_history_hides_rest_days(client):
     rest = client.post("/api/workouts", json={"focus_label": "Отдых"}).json()["id"]
     client.post(f"/api/workouts/{rest}/finish")
 
+    empty_id = None
     async def _seed_empty():  # the web API defaults a free workout's focus to «Свободная тренировка»,
-        eng = create_async_engine(os.environ["DATABASE_URL"])  # so insert an empty-focus rest row directly
+        nonlocal empty_id
+        eng = create_async_engine(os.environ["DATABASE_URL"])  # so insert an empty-focus row directly
         try:
             async with eng.begin() as conn:
-                await conn.execute(text("INSERT INTO workouts (user_id, workout_date, focus_label, finished_at) "
-                                        "VALUES ('local', :d, '', now())"), {"d": _dt.date.today()})
+                r = await conn.execute(text("INSERT INTO workouts (user_id, workout_date, focus_label, finished_at) "
+                                            "VALUES ('local', :d, '', now()) RETURNING id"), {"d": _dt.date.today()})
+                empty_id = r.scalar_one()
         finally:
             await eng.dispose()
     asyncio.run(_seed_empty())
@@ -565,7 +570,8 @@ def test_history_hides_rest_days(client):
     foci = [(w.get("focus_label") or "") for w in hist]
     assert wid in ids                              # real workout kept
     assert rest not in ids                         # «Отдых» 0-set hidden
-    assert "Отдых" not in foci and "" not in foci  # no rest / empty rows in the journal
+    assert "Отдых" not in foci                     # no explicit rest rows in the journal
+    assert empty_id in ids                         # empty-focus 0-working workout now SHOWS (#16)
 
 
 def test_exercise_catalog_v2(client):

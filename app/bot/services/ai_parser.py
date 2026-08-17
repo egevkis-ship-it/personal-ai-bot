@@ -234,8 +234,15 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
             je.lineno, je.colno, je.msg, len(raw), candidate[max(0, je.pos-80):je.pos+80],
         )
         return []
+    # Guard every level: the model may emit valid JSON of an unexpected shape (a
+    # top-level array, {"days": null}, string items). Degrade to [] → the caller's
+    # "couldn't parse" path, never an uncaught TypeError/AttributeError → 500 (#13).
     days: list[PlannedDay] = []
-    for d in data.get("days", []):
+    raw_days = data.get("days") if isinstance(data, dict) else None
+    for d in raw_days if isinstance(raw_days, list) else []:
+        if not isinstance(d, dict):
+            continue
+        raw_ex = d.get("exercises")
         exercises = [
             PlannedExercise(
                 name=e.get("name", "?"),
@@ -249,8 +256,8 @@ async def parse_plan_text(text: str) -> list[PlannedDay]:
                 set_groups=e.get("set_groups"),
                 target_duration_seconds=e.get("target_duration_seconds"),
             )
-            for e in d.get("exercises", [])
-            if e.get("name")
+            for e in (raw_ex if isinstance(raw_ex, list) else [])
+            if isinstance(e, dict) and e.get("name")
         ]
         days.append(PlannedDay(
             day_label=d.get("day_label", ""),
@@ -462,7 +469,11 @@ async def parse_set_text_ai(
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
             parsed = [parsed]
-        return parsed
+        if not isinstance(parsed, list):
+            return []
+        # Enforce the documented list[dict] contract: a stray bare string/number in
+        # the array must not reach the caller's `d.get(...)` loop and crash it (#14).
+        return [d for d in parsed if isinstance(d, dict)]
     except Exception as exc:
         log.error("parse_set_text_ai error: %s. Raw=%r", exc, locals().get("raw","")[:300])
         return []

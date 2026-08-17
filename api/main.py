@@ -1262,20 +1262,22 @@ async def workouts_history(days: int = 30, q: Optional[str] = None, uid: str = D
         FROM workouts w
         LEFT JOIN exercise_sets es ON es.workout_id = w.id
         WHERE w.user_id = :u AND w.finished_at IS NOT NULL
-          AND w.workout_date >= :fd AND w.workout_date <= :td
+          AND w.workout_date >= :fd
         GROUP BY w.id
         HAVING ((:q = '')
             OR lower(coalesce(w.focus_label, '')) LIKE :qp
             OR bool_or(lower(coalesce(es.exercise_name, '')) LIKE :qp))
-          -- UX2-2: hide rest days (no working sets + empty/«Отдых» focus) from the journal
+          -- UX2-2: hide only genuine rest days (explicit «Отдых» focus + no working
+          -- sets). An empty/null focus is NOT a rest signal — a finished workout that
+          -- ended with zero working sets must still show, not silently vanish (#16).
           AND NOT (
             COUNT(es.id) FILTER (WHERE es.is_warmup = false) = 0
-            AND (w.focus_label IS NULL OR btrim(w.focus_label) = '' OR lower(w.focus_label) LIKE '%отдых%')
+            AND w.focus_label IS NOT NULL AND lower(w.focus_label) LIKE '%отдых%'
           )
         ORDER BY w.workout_date DESC, w.id DESC
         LIMIT 500
         """,
-        u=uid, fd=today - timedelta(days=days), td=today, q=ql, qp='%' + ql + '%')
+        u=uid, fd=today - timedelta(days=days), q=ql, qp='%' + ql + '%')
     for r in rows:
         r["set_count"] = int(r.get("set_count") or 0)
         r["tonnage"] = int(r.get("tonnage") or 0)
@@ -2032,11 +2034,15 @@ def _clean_plan_exercises(exercises: list[dict]) -> list[dict]:
 _EFOLD_INDEX = {nm.replace("ё", "е"): k for nm, k in NAME_INDEX.items()}
 # REC-2: a WHITELIST of trailing qualifiers safe to drop before an EXACT re-match —
 # angle, grip, stance, side. NOT a general fuzzy — only these exact suffixes.
+# Only truly COSMETIC trailing decorations are peeled here. Stance (стоя|сидя|лежа)
+# and grip («… хватом») are deliberately NOT stripped: the catalog treats them as
+# distinguishing (e.g. «французский жим сидя» = seated_triceps_press is a separate
+# key from the lying skullcrusher), so collapsing «… стоя» onto the base name would
+# misfile the sets onto a different exercise. An unknown stance/grip variant instead
+# stays unresolved → the DB-7 dialog lets the user pick the right one (#9).
 _TRAILING_QUALIFIERS = re.compile(
     r"\s*("
     r"\d+\s*°|под\s+углом(\s+\d+)?|"
-    r"(узким|широким|обратным|нейтральным|прямым)\s+хватом|"
-    r"стоя|сидя|лежа|"
     r"одной\s+(рукой|ногой)|на\s+(руку|ногу)|каждой|по\s+стороне"
     r")\s*$",
     re.IGNORECASE,
@@ -2650,7 +2656,8 @@ async def voice_transcribe(file: UploadFile = File(...), uid: str = Depends(curr
         raise HTTPException(422, "пустой файл")
     if len(data) > 25 * 1024 * 1024:
         raise HTTPException(413, "файл слишком большой")
-    await check_and_bump_ai(uid)
+    if await _ai_over_limit(uid):                    # gate BEFORE the paid Whisper call
+        raise HTTPException(429, "дневной лимит AI исчерпан")
     try:
         from app.bot.services.ai_parser import transcribe_voice
     except Exception:
@@ -2659,7 +2666,12 @@ async def voice_transcribe(file: UploadFile = File(...), uid: str = Depends(curr
         text_out = await transcribe_voice(data, filename=file.filename or "voice.webm")
     except Exception as e:
         raise HTTPException(502, f"ошибка распознавания: {str(e)[:200]}")
-    return {"text": text_out or ""}
+    # transcribe_voice swallows backend errors and returns "" — treat an empty result
+    # as a failure so we neither report bogus success nor burn a quota unit (#30).
+    if not (text_out or "").strip():
+        raise HTTPException(502, "не удалось распознать — попробуй ещё раз")
+    await check_and_bump_ai(uid)                     # count only a real, non-empty result
+    return {"text": text_out}
 
 
 # ──────────────────────────────── photos ────────────────────────────────────
