@@ -21,6 +21,7 @@ Public:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -31,7 +32,11 @@ from app.db.engine import get_session
 log = logging.getLogger(__name__)
 
 _DEFAULT_TZ = "UTC"
-_cache: dict[str, str] = {}
+# (tz_name, monotonic_ts). A short TTL bounds cross-process staleness: the tz is
+# normally set from the BOT process, but today_for()/date boundaries are read in the
+# API process, whose cache would otherwise never see the change until restart (#25).
+_cache: dict[str, tuple[str, float]] = {}
+_CACHE_TTL = 60.0
 
 # timezonefinder is heavy to construct; build lazily and keep one instance.
 _tf = None
@@ -45,8 +50,9 @@ def _zone(name: str) -> ZoneInfo:
 
 
 async def user_tz_name(uid: str) -> str:
-    if uid in _cache:
-        return _cache[uid]
+    ent = _cache.get(uid)
+    if ent is not None and (time.monotonic() - ent[1]) < _CACHE_TTL:
+        return ent[0]
     try:
         async with get_session() as s:
             r = await s.execute(
@@ -56,9 +62,11 @@ async def user_tz_name(uid: str) -> str:
             row = r.scalar_one_or_none()
     except Exception as exc:
         log.warning("user_tz_name lookup failed: %s", exc)
+        if ent is not None:
+            return ent[0]   # transient DB error → keep the last-known zone, not UTC
         row = None
     name = row or _DEFAULT_TZ
-    _cache[uid] = name
+    _cache[uid] = (name, time.monotonic())
     return name
 
 
@@ -83,7 +91,7 @@ async def set_user_tz(uid: str, tz_name: str) -> None:
             """),
             {"u": uid, "tz": tz_name},
         )
-    _cache[uid] = tz_name
+    _cache[uid] = (tz_name, time.monotonic())
 
 
 async def today(uid: str) -> date:

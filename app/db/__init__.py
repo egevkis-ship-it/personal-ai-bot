@@ -227,6 +227,11 @@ async def add_set_tx(
     """Insert one set on a CALLER-PROVIDED session (does NOT commit), so it can
     share a transaction — e.g. with the offline-replay processed_ops marker, so
     the marker and the set commit atomically (no lost-write window)."""
+    # #26: serialize the MAX(set_number)+1 read-modify-write per workout. Under READ
+    # COMMITTED two concurrent add-set transactions would otherwise read the same MAX
+    # and assign a duplicate set_number (corrupting order + the PR-window query). A
+    # transaction-scoped advisory lock keyed on the workout auto-releases at commit.
+    await s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": workout_id})
     cnt = await s.execute(
         text("""
             SELECT COALESCE(MAX(set_number), 0) + 1

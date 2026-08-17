@@ -29,7 +29,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 import app.db as db
@@ -396,8 +396,17 @@ async def _migrate_legacy_names() -> None:
         print("[migration] legacy_rename: no map present, skipped", flush=True)
         return
     digest = hashlib.sha256(json.dumps(rename, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
-    marker = f"legacy_rename:{digest}"
+    # :v2 forces a one-time re-run on already-migrated DBs so the newly-added
+    # workout_exercise_notes/done rename (#24) is applied; all other renames are
+    # keyed on the old name, so re-running them is a no-op.
+    marker = f"legacy_rename:{digest}:v2"
     olds = list(rename.keys())
+    # #31: the per-entry SQL renames chain sequentially; the JSONB path maps once.
+    # They diverge only for a transitive map (a key that is also a value). The map
+    # is authored chain-free — warn loudly if that invariant is ever broken.
+    _chain = set(rename) & set(rename.values())
+    if _chain:
+        print(f"[migration] legacy_rename WARNING: transitive rename chain {_chain} — SQL/JSONB may diverge", flush=True)
     async with get_session() as s:
         await s.execute(text(
             "CREATE TABLE IF NOT EXISTS data_migrations ("
@@ -407,7 +416,8 @@ async def _migrate_legacy_names() -> None:
         if (await s.execute(text("SELECT 1 FROM data_migrations WHERE key = :k"), {"k": marker})).scalar():
             print(f"[migration] legacy_rename {marker} already applied; remaining legacy sets={rem}", flush=True)
             return  # already applied for this exact map
-        counts = {"exercise_sets": 0, "exercise_aliases": 0, "planned_workouts": 0, "routines": 0}
+        counts = {"exercise_sets": 0, "exercise_aliases": 0, "planned_workouts": 0,
+                  "routines": 0, "workout_exercise_notes": 0, "workout_exercise_done": 0}
         for old, new in rename.items():
             r = await s.execute(text("UPDATE exercise_sets SET exercise_name = :new WHERE exercise_name = :old"),
                                 {"new": new, "old": old})
@@ -415,6 +425,18 @@ async def _migrate_legacy_names() -> None:
             r = await s.execute(text("UPDATE exercise_aliases SET canonical = :new WHERE canonical = :old"),
                                 {"new": new, "old": old})
             counts["exercise_aliases"] += r.rowcount or 0
+            # #24: these two tables are keyed by (workout_id, exercise_name) and were
+            # missed before, so a per-exercise note/done marker kept a legacy name and
+            # dropped out of the PDF export. Rename them too, PK-conflict-safe: first
+            # delete a legacy row that would collide with an already-canonical row.
+            for tbl in ("workout_exercise_notes", "workout_exercise_done"):
+                await s.execute(text(
+                    f"DELETE FROM {tbl} t WHERE t.exercise_name = :old AND EXISTS "
+                    f"(SELECT 1 FROM {tbl} c WHERE c.workout_id = t.workout_id AND c.exercise_name = :new)"),
+                    {"old": old, "new": new})
+                r = await s.execute(text(f"UPDATE {tbl} SET exercise_name = :new WHERE exercise_name = :old"),
+                                    {"new": new, "old": old})
+                counts[tbl] += r.rowcount or 0
         # planned_workouts.exercises JSONB: [{name, ...}]
         for row in (await s.execute(text("SELECT id, exercises FROM planned_workouts"))).mappings().all():
             exs = row["exercises"]
@@ -1067,24 +1089,26 @@ async def start_workout(body: StartWorkout, uid: str = Depends(current_uid)):
 
 
 class ArchiveSetIn(BaseModel):
-    weight_kg: Optional[float] = None
-    reps: Optional[int] = None
+    # #23: bound numeric ranges + list sizes so a malformed/huge import can't store
+    # absurd values (which flow into tonnage) or open an unbounded transaction.
+    weight_kg: Optional[float] = Field(None, ge=0, le=10000)
+    reps: Optional[int] = Field(None, ge=0, le=1000)
     reps_text: Optional[str] = None
-    duration_seconds: Optional[int] = None
+    duration_seconds: Optional[int] = Field(None, ge=0, le=86400)
     is_warmup: bool = False
     is_failure: bool = False
 
 
 class ArchiveExerciseIn(BaseModel):
     name: str
-    sets: list[ArchiveSetIn] = []
+    sets: list[ArchiveSetIn] = Field(default_factory=list, max_length=200)
 
 
 class ArchiveWorkoutIn(BaseModel):
     workout_date: str
     focus_label: Optional[str] = None
     notes: Optional[str] = None
-    exercises: list[ArchiveExerciseIn] = []
+    exercises: list[ArchiveExerciseIn] = Field(default_factory=list, max_length=100)
 
 
 async def _insert_archive(s, uid: str, d: date, focus: str, notes: Optional[str], exercises: list[dict]) -> tuple[int, int]:
@@ -1171,7 +1195,7 @@ async def parse_logged_workouts(body: ParseTextIn, uid: str = Depends(current_ui
 
 
 class BulkArchiveIn(BaseModel):
-    workouts: list[ArchiveWorkoutIn]
+    workouts: list[ArchiveWorkoutIn] = Field(..., max_length=366)
 
 
 @app.post("/api/workouts/archive-bulk")
@@ -1572,14 +1596,14 @@ class AddSet(BaseModel):
     exercise_key: Optional[str] = None
     exercise_name: Optional[str] = None
     text: Optional[str] = None
-    weight_kg: Optional[float] = None
-    reps: Optional[int] = None
-    duration_seconds: Optional[int] = None
+    weight_kg: Optional[float] = Field(None, ge=0, le=10000)   # #23: sane bounds
+    reps: Optional[int] = Field(None, ge=0, le=1000)
+    duration_seconds: Optional[int] = Field(None, ge=0, le=86400)
     reps_text: Optional[str] = None
     is_warmup: bool = False
     is_failure: bool = False
     superset_group: Optional[str] = None
-    sets: Optional[list[dict]] = None    # WK-2: several structured rows at once
+    sets: Optional[list[dict]] = Field(None, max_length=200)    # WK-2: several structured rows at once
     client_op_id: Optional[str] = None   # idempotency key for offline replay
 
 
