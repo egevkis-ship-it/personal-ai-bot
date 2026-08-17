@@ -43,7 +43,8 @@
 // v61: AUDIT batch B — active-workout state: expansion tracked by identity (no wrong
 // exercise after add/delete), added 0-set exercise survives refetch, typed rows kept,
 // in-set timer no longer leaks, start-workout errors surfaced, reload resumes.
-const CACHE = 'fit-proto-v61';
+// v62: edit exercises mid-workout — per-exercise Убрать / Заменить / ↑↓ reorder.
+const CACHE = 'fit-proto-v62';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {

@@ -66,6 +66,25 @@ CREATE TABLE IF NOT EXISTS workout_exercise_done (
     PRIMARY KEY (workout_id, exercise_name)
 );
 
+-- D1: an exercise the user removed from THIS workout (a row = hidden). Needed so a
+-- PLANNED exercise stays gone after removal even though it lives in the plan snapshot.
+-- Logging a set for the same name clears the marker (re-adds it). Owned by web API.
+CREATE TABLE IF NOT EXISTS workout_exercise_removed (
+    workout_id     INTEGER     NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    exercise_name  TEXT        NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workout_id, exercise_name)
+);
+
+-- D3: a user-chosen order for the exercises in THIS workout (position asc). Absent
+-- exercises keep their natural order after the positioned ones. Owned by web API.
+CREATE TABLE IF NOT EXISTS workout_exercise_order (
+    workout_id     INTEGER     NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+    exercise_name  TEXT        NOT NULL,
+    position       INTEGER     NOT NULL,
+    PRIMARY KEY (workout_id, exercise_name)
+);
+
 CREATE TABLE IF NOT EXISTS body_measurements (
     id           SERIAL PRIMARY KEY,
     user_id      TEXT        NOT NULL,

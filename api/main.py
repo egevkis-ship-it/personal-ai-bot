@@ -1376,6 +1376,12 @@ async def assemble_workout(uid: str, wid: int) -> dict:
     # W4-3: manually-marked «done» exercises (presence = done), keyed by canonical.
     done_rows = await _rows("SELECT exercise_name FROM workout_exercise_done WHERE workout_id = :w", w=wid)
     done_set = {_cg(r["exercise_name"]) for r in done_rows}
+    # D1: exercises the user removed from this workout — hidden even if still in the plan.
+    removed_rows = await _rows("SELECT exercise_name FROM workout_exercise_removed WHERE workout_id = :w", w=wid)
+    removed_set = {_cg(r["exercise_name"]) for r in removed_rows}
+    # D3: a user-chosen exercise order (position asc); unlisted keep their natural order.
+    order_rows = await _rows("SELECT exercise_name, position FROM workout_exercise_order WHERE workout_id = :w", w=wid)
+    order_map = {_cg(r["exercise_name"]): r["position"] for r in order_rows}
 
     exercises, used = [], set()
 
@@ -1392,11 +1398,13 @@ async def assemble_workout(uid: str, wid: int) -> dict:
                 "done": keyl in done_set, "in_plan": target is not None}   # W4-3: manual «done», persisted
 
     for pe in plan_exs:
-        if pe.get("name"):
+        if pe.get("name") and _cg(pe["name"]) not in removed_set:   # D1: skip removed planned exercises
             exercises.append(await build(pe["name"], pe))
     for gk in list(grouped):
-        if gk not in used:
+        if gk not in used and gk not in removed_set:
             exercises.append(await build(disp[gk], None))
+    if order_map:   # D3: apply the user-chosen order (stable — unlisted keep natural order after)
+        exercises.sort(key=lambda e: order_map.get(_cg(e["name"]), 10000))
 
     return {"id": w["id"], "focus_label": w["focus_label"], "workout_date": w["workout_date"],
             "started_at": w["started_at"], "finished_at": w["finished_at"], "notes": w["notes"],
@@ -1528,6 +1536,57 @@ async def set_exercise_done(wid: int, body: ExDoneBody, uid: str = Depends(curre
                 text("DELETE FROM workout_exercise_done WHERE workout_id = :w AND exercise_name = :n"),
                 {"w": wid, "n": name})
     return {"ok": True, "done": body.done}
+
+
+class ExRemoveBody(BaseModel):
+    exercise_name: str
+
+
+@app.post("/api/workouts/{wid}/exercise-remove")
+async def remove_exercise(wid: int, body: ExRemoveBody, uid: str = Depends(current_uid)):
+    """D1: remove an exercise from THIS workout — delete its logged sets + note + done
+    marker, and record a «removed» marker so a PLANNED exercise stays hidden too (it
+    lives in the plan snapshot and would otherwise reappear). Idempotent. Logging a set
+    for the same name later clears the marker (re-adds it)."""
+    await _own_workout(uid, wid)
+    name = (body.exercise_name or "").strip()
+    if not name:
+        raise HTTPException(422, "exercise_name required")
+    canon = _canon_static(name)
+    target_cg = canon.strip().lower()
+    # Match ALL sets that group to the same canonical exercise (variant spellings too).
+    del_ids = [row["id"] for row in await db.get_workout_sets(wid)
+               if _canon_static(row["exercise_name"]).strip().lower() == target_cg]
+    async with get_session() as s:
+        if del_ids:
+            await s.execute(text("DELETE FROM exercise_sets WHERE id = ANY(:ids)"), {"ids": del_ids})
+        await s.execute(text("DELETE FROM workout_exercise_notes WHERE workout_id=:w AND lower(exercise_name)=:n"),
+                        {"w": wid, "n": target_cg})
+        await s.execute(text("DELETE FROM workout_exercise_done WHERE workout_id=:w AND lower(exercise_name)=:n"),
+                        {"w": wid, "n": target_cg})
+        await s.execute(text("INSERT INTO workout_exercise_removed (workout_id, exercise_name, updated_at) "
+                             "VALUES (:w, :n, now()) ON CONFLICT (workout_id, exercise_name) DO UPDATE SET updated_at=now()"),
+                        {"w": wid, "n": canon})
+    return {"ok": True, "removed_sets": len(del_ids)}
+
+
+class ExOrderBody(BaseModel):
+    order: list[str]
+
+
+@app.post("/api/workouts/{wid}/exercise-order")
+async def set_exercise_order(wid: int, body: ExOrderBody, uid: str = Depends(current_uid)):
+    """D3: persist the user-chosen exercise order for this workout. `order` is the full
+    list of exercise names top-to-bottom; positions are rewritten atomically."""
+    await _own_workout(uid, wid)
+    names = [_canon_static(n).strip() for n in (body.order or []) if (n or "").strip()]
+    async with get_session() as s:
+        await s.execute(text("DELETE FROM workout_exercise_order WHERE workout_id = :w"), {"w": wid})
+        for pos, nm in enumerate(names):
+            await s.execute(text("INSERT INTO workout_exercise_order (workout_id, exercise_name, position) "
+                                 "VALUES (:w, :n, :p) ON CONFLICT (workout_id, exercise_name) DO UPDATE SET position = EXCLUDED.position"),
+                            {"w": wid, "n": nm, "p": pos})
+    return {"ok": True}
 
 
 @app.delete("/api/workouts/{wid}")
@@ -1684,6 +1743,12 @@ async def add_set(wid: int, body: AddSet, uid: str = Depends(current_uid)):
             if r.scalar() is None:
                 return {"ids": [], "duplicate": True}
         ids = [await db.add_set_tx(s, wid, **row) for row in rows]
+        # D1: logging a set for a previously-removed exercise un-hides it (clears the marker).
+        names = list({row["exercise_name"] for row in rows if row.get("exercise_name")})
+        if names:
+            await s.execute(text("DELETE FROM workout_exercise_removed WHERE workout_id = :w "
+                                 "AND lower(exercise_name) = ANY(:n)"),
+                            {"w": wid, "n": [n.strip().lower() for n in names]})
     return {"ids": ids}
 
 

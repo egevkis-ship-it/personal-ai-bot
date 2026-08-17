@@ -314,13 +314,63 @@ function accordionBody(wid, ex, idx) {
   </div>`;
   // W4-3: manual «✓ Готово» (persisted). One tap marks done + collapses; tap again unmarks.
   const doneBtn = `<button class="btn ${ex.done ? 'sec' : 'success'} sm" style="margin-top:12px" onclick="event.stopPropagation();toggleDone(${idx})">${ex.done ? '↺ Снять «выполнено»' : '✓ Готово'}</button>`;
+  // D1/D2/D3: edit this exercise mid-workout — reorder up/down, replace, or remove.
+  const total = (window._WO && window._WO.exercises.length) || 1;
+  const manage = `<div class="ex-manage row" style="gap:6px;margin-top:14px" onclick="event.stopPropagation()">
+    <button class="btn ghost sm" style="width:42px" title="Выше" onclick="moveExercise(${idx},-1)" ${idx === 0 ? 'disabled' : ''}>↑</button>
+    <button class="btn ghost sm" style="width:42px" title="Ниже" onclick="moveExercise(${idx},1)" ${idx >= total - 1 ? 'disabled' : ''}>↓</button>
+    <button class="btn ghost sm" style="flex:1" onclick="replaceExercise(${idx})">↔ Заменить</button>
+    <button class="btn ghost sm" style="flex:1;color:var(--danger)" onclick="removeExercise(${idx})">✕ Убрать</button>
+  </div>`;
   return `<div class="card acc-body" onclick="event.stopPropagation()">
     ${last}
     ${sets ? `<div class="muted small" style="margin-bottom:2px">Подходы сегодня</div>${sets}` : ''}
     <div style="margin-top:${sets ? '12' : '2'}px">${setEntryHtml(wid, true)}</div>
     ${doneBtn}
+    ${manage}
     ${note}
   </div>`;
+}
+// D1: remove an exercise from the active workout. A 0-set, non-plan exercise that was
+// only added locally is just spliced out (nothing on the server). Anything the server
+// knows (logged sets or a planned exercise) is removed via the endpoint so it stays
+// gone — a confirm guards a destructive removal of logged sets.
+function removeExercise(idx) {
+  const W = window._WO; if (!W) return;
+  const ex = W.exercises[idx]; if (!ex) return;
+  const hasSets = (ex.sets || []).length > 0;
+  const serverKnown = hasSets || ex.in_plan;
+  const doIt = async () => {
+    W.exercises.splice(idx, 1);
+    if (STATE.activeExpandedName === ex.name) STATE.activeExpandedName = null;
+    renderActive(W);
+    if (serverKnown) {
+      try { await api('/workouts/' + W.id + '/exercise-remove', 'POST', { exercise_name: ex.name }); }
+      catch (e) { toast(e.message || 'не удалось убрать'); return go('active', W.id); }  // revert via refetch
+    }
+    toast('Упражнение убрано');
+  };
+  if (hasSets) confirmSheet('Убрать упражнение?', `«${ex.name}» и все его подходы будут удалены из тренировки.`, 'Убрать', true, doIt);
+  else doIt();
+}
+// D2: replace = remove the current exercise, then open the picker to add another.
+function replaceExercise(idx) {
+  const W = window._WO; if (!W) return;
+  const ex = W.exercises[idx]; if (!ex) return;
+  const go2 = () => { const wid = W.id; removeExercise(idx); setTimeout(() => openPicker(wid), 60); };
+  if ((ex.sets || []).length) confirmSheet('Заменить упражнение?', `Подходы «${ex.name}» будут удалены, затем выберешь новое.`, 'Заменить', true, go2);
+  else { removeExercise(idx); openPicker(W.id); }
+}
+// D3: move an exercise up/down; persist the full new order so it survives a refetch.
+async function moveExercise(idx, dir) {
+  const W = window._WO; if (!W) return;
+  const j = idx + dir;
+  if (j < 0 || j >= W.exercises.length) return;
+  const [it] = W.exercises.splice(idx, 1);
+  W.exercises.splice(j, 0, it);
+  renderActive(W);
+  try { await api('/workouts/' + W.id + '/exercise-order', 'POST', { order: W.exercises.map(e => e.name) }); }
+  catch (e) { toast(e.message || 'не удалось переставить'); }
 }
 // W4-3: mark/unmark an exercise done — one tap, persisted on the backend (survives
 // refresh), NOT tied to the planned set count. Optimistic + single re-render.

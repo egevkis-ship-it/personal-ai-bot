@@ -79,13 +79,14 @@ adversarial verification (7 high · 8 medium · 15 low · 1 nit). Full details:
       shared usage-gate module, call before every bot AI invocation; web side count-on-success.
 
 ## BATCH D — mid-workout editing UX rework (tasks #3/#4) — Egor's explicit ask
+✅ DONE — verified in browser (remove w/ confirm, reorder persists, re-add un-hides). sw v62.
 
-- [ ] D1 Remove exercise mid-workout: workout_exercise_removed marker table +
+- [x] D1 Remove exercise mid-workout: workout_exercise_removed marker table +
       DELETE endpoint (sets+note+done+plan-hide); assemble_workout filters removed;
       add_set clears marker on re-add. Confirm sheet if it has sets.
-- [ ] D2 Replace/swap exercise (remove + pick new, keeps flow).
-- [ ] D3 Reorder exercises (up/down, persisted order).
-- [ ] D4 Easier/adjacent-add exercise; per-exercise "···" menu in the accordion.
+- [x] D2 Replace/swap exercise (remove + pick new, keeps flow).
+- [x] D3 Reorder exercises (up/down, persisted order).
+- [x] D4 Easier/adjacent-add exercise; per-exercise "···" menu in the accordion.
 
 ## DEFERRED (2) — need Egor input, both bot-side + untestable here + ~0 single-user impact
 - C12 (#7) per-user alias scoping: only matters with MULTIPLE bot users (cross-user

@@ -574,6 +574,29 @@ def test_history_hides_rest_days(client):
     assert empty_id in ids                         # empty-focus 0-working workout now SHOWS (#16)
 
 
+def test_exercise_remove_reorder_readd(client):
+    # D1/D3: remove an exercise (its sets + plan-hide), reorder persists across a
+    # refetch, and re-logging a set for a removed name un-hides it.
+    wid = client.post("/api/workouts", json={"focus_label": "D-тест"}).json()["id"]
+    for nm, wt in [("Жим лёжа", 60), ("Присед", 80), ("Тяга", 70)]:
+        client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": nm, "sets": [{"weight_kg": wt, "reps": 8}]})
+    names0 = [e["name"] for e in client.get(f"/api/workouts/{wid}").json()["exercises"]]
+    assert len(names0) == 3
+    mid = names0[1]
+    r = client.post(f"/api/workouts/{wid}/exercise-remove", json={"exercise_name": mid})
+    assert r.status_code == 200 and r.json()["removed_sets"] == 1
+    names1 = [e["name"] for e in client.get(f"/api/workouts/{wid}").json()["exercises"]]
+    assert mid not in names1 and len(names1) == 2
+    # reorder: reverse the remaining two; the order survives a refetch
+    client.post(f"/api/workouts/{wid}/exercise-order", json={"order": list(reversed(names1))})
+    names2 = [e["name"] for e in client.get(f"/api/workouts/{wid}").json()["exercises"]]
+    assert names2 == list(reversed(names1))
+    # re-logging a set for the removed exercise brings it back (marker cleared)
+    client.post(f"/api/workouts/{wid}/sets", json={"exercise_name": mid, "sets": [{"weight_kg": 85, "reps": 6}]})
+    names3 = [e["name"] for e in client.get(f"/api/workouts/{wid}").json()["exercises"]]
+    assert mid in names3
+
+
 def test_exercise_catalog_v2(client):
     # DB-1: v2 catalog drives the picker — 14 groups, no duplicate labels (the old
     # biceps/triceps→«Руки», abs/core→«Пресс» bug is gone), and legacy names resolve.
