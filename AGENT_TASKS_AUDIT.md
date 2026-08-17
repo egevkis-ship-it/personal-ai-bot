@@ -30,23 +30,24 @@ adversarial verification (7 high · 8 medium · 15 low · 1 nit). Full details:
       Fix: cache only r.ok. **Bump sw version here (last frontend change of batch).**
 
 ## BATCH B — active-workout state + UX-adjacent (web/app.js)
+✅ DONE — verified in browser (added exercise survives refetch; identity-tracked expansion; accordion+entry intact). sw v61.
 
-- [ ] B1 (#11 MED) Added 0-set exercise vanishes on next refetch. Fix: carry
+- [x] B1 (#11 MED) Added 0-set exercise vanishes on next refetch. Fix: carry
       set-less non-plan additions across renderActive refetch. (also UX pain)
-- [ ] B2 (#10 MED) activeExpanded is positional → wrong exercise after a delete.
+- [x] B2 (#10 MED) activeExpanded is positional → wrong exercise after a delete.
       Fix: track expanded by canonical name, derive index in renderActive.
-- [ ] B3 (#29 LOW) Typed-but-unsaved rows wiped on re-render (toggleDone/online).
+- [x] B3 (#29 LOW) Typed-but-unsaved rows wiped on re-render (toggleDone/online).
       Fix: snapshot _readSetRows before re-render, restore if same exercise.
-- [ ] B4 (#8 MED) In-set count-up timer leaks + records inflated set on collapse.
+- [x] B4 (#8 MED) In-set count-up timer leaks + records inflated set on collapse.
       Fix: stopTimer() at top of renderActive + reset TMR_VAL + self-clean interval.
-- [ ] B5 (#27 LOW) toggleDone auto-expands first-undone, not next-after-idx.
+- [x] B5 (#27 LOW) toggleDone auto-expands first-undone, not next-after-idx.
       Fix: findIndex i>idx first, then fallback.
-- [ ] B6 (#19 LOW) freeWorkout/startFromPlan/repeatLast swallow errors (offline/
+- [x] B6 (#19 LOW) freeWorkout/startFromPlan/repeatLast swallow errors (offline/
       401/5xx → silent no-op). Fix: try/catch + toast + 401→login.
-- [ ] B7 (#20 LOW) Reload mid-workout → Home, accordion collapsed. Fix: persist
+- [x] B7 (#20 LOW) Reload mid-workout → Home, accordion collapsed. Fix: persist
       tiny nav state (activeId/activeExpanded), resume on boot.
-- [ ] B8 (#28 LOW) Cross-month week shows duplicate divider. Fix: clamp week label to month.
-- [ ] B9 (#22 LOW) XSS: coachPreview interpolates exLine(ex) without esc(). Fix: esc().
+- [x] B8 (#28 LOW) Cross-month week shows duplicate divider. Fix: clamp week label to month.
+- [x] B9 (#22 LOW) XSS: coachPreview interpolates exLine(ex) without esc(). Fix: esc().
 
 ## BATCH C — backend correctness (api/main.py, app/db, ai_parser, tz, catalog, schema)
 

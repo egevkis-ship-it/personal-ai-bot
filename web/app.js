@@ -190,8 +190,13 @@ async function Home() {
       <div class="tile" onclick="go('history')">📖<div class="small" style="margin-top:6px">История</div></div>
     </div>`;
 }
-async function startFromPlan(pid) { const r = await api('/workouts', 'POST', { from_plan_id: pid }); go('active', r.id); }
-async function repeatLast(id) { if (!id) return toast('Нет прошлых тренировок'); const r = await api('/workouts', 'POST', { repeat_from: id }); go('active', r.id); }
+// Start a workout, surfacing failures instead of a silent no-op on offline/401/5xx (#19).
+async function _startWorkout(body) {
+  try { const r = await api('/workouts', 'POST', body); go('active', r.id); }
+  catch (e) { if (e.code === 401) return go('login'); toast(isNetworkErr(e) ? 'Нет сети — попробуй позже' : (e.message || 'Не удалось начать тренировку')); }
+}
+async function startFromPlan(pid) { return _startWorkout({ from_plan_id: pid }); }
+async function repeatLast(id) { if (!id) return toast('Нет прошлых тренировок'); return _startWorkout({ repeat_from: id }); }
 
 // ── Train (start) ─────────────────────────────────────────────────────────
 async function Train() {
@@ -211,7 +216,7 @@ async function Train() {
     <div class="card list-item" onclick="go('plans')"><div class="ic">📝</div><div style="flex:1"><b>Запланировать</b><div class="small muted">создать план: день, неделя, AI или текстом</div></div><span class="muted">›</span></div>
     <div class="card list-item" onclick="go('schedule')"><div class="ic">📅</div><div style="flex:1"><b>Расписание</b><div class="small muted">посмотреть запланированное: день / неделя / месяц</div></div><span class="muted">›</span></div>`;
 }
-async function freeWorkout() { const r = await api('/workouts', 'POST', {}); go('active', r.id); }
+async function freeWorkout() { return _startWorkout({}); }
 async function ChooseDay() {
   const wk = await api('/workouts/week');
   const ic = s => s === 'completed' ? '✅' : s === 'skipped' ? '⚠️' : '⚪️';
@@ -237,10 +242,29 @@ async function Active(id) {
   renderActive(w);
 }
 function renderActive(w) {
-  if (STATE.activeId !== w.id) { STATE.activeExpanded = null; }  // reset on switch
+  // B1 (#11): carry set-less locally-added exercises across a refetch — the server
+  // only returns planned or set-bearing exercises, so a just-added 0-set exercise
+  // would otherwise silently vanish on the next re-render.
+  const prevWO = window._WO;
+  if (prevWO && prevWO.id === w.id) {
+    const have = new Set(w.exercises.map(e => (e.name || '').toLowerCase()));
+    for (const e of prevWO.exercises)
+      if ((e.sets || []).length === 0 && !e.in_plan && !have.has((e.name || '').toLowerCase())) w.exercises.push(e);
+  }
+  stopTimer();   // B4 (#8): tear down any in-set timer before its #timerbox DOM is rebuilt
+  if (STATE.activeId !== w.id) STATE.activeExpandedName = null;   // reset on switch
+  // B2 (#10): the open exercise is tracked by IDENTITY (name), not a positional
+  // index, so a shift after a delete/add can never expand the wrong exercise.
+  const exp = STATE.activeExpandedName ? w.exercises.findIndex(e => e.name === STATE.activeExpandedName) : -1;
+  // B3 (#29): preserve set rows the user typed but hasn't saved when the SAME
+  // exercise stays open across a re-render (toggleDone / online refetch).
+  let carriedRows = null;
+  if (exp >= 0 && document.querySelector('#setrows .setrow') && window._setCtx && window._setCtx.ex && window._setCtx.ex.name === w.exercises[exp].name) {
+    _readSetRows(); carriedRows = window._setRows;
+  }
   STATE.activeId = w.id; window._WO = w; saveActiveCache(w);
-  const exp = STATE.activeExpanded;
-  if (exp != null && w.exercises[exp]) initSetEntry(w.id, w.exercises[exp], null);  // _setCtx before the body
+  try { localStorage.setItem('active_nav', JSON.stringify({ id: w.id, exp: exp >= 0 ? STATE.activeExpandedName : null })); } catch {}   // B7 (#20): restore the open exercise after a reload
+  if (exp >= 0 && w.exercises[exp]) { initSetEntry(w.id, w.exercises[exp], null); if (carriedRows) window._setRows = carriedRows; }  // _setCtx before the body
   const items = w.exercises.map((ex, i) => {
     const working = ex.sets.filter(s => !s.is_warmup);
     const tgt = ex.target_sets;
@@ -267,12 +291,13 @@ function renderActive(w) {
     <button class="btn ghost" style="margin-top:8px" onclick="restTimer(restSecs())">⏱ Таймер отдыха</button>
     <button class="btn success" style="margin-top:10px" onclick="finishWorkout(${w.id})">Завершить тренировку</button>
     <button class="btn ghost" style="margin-top:8px;color:var(--danger)" onclick="cancelWorkout(${w.id})">✖ Отменить тренировку</button>`;
-  if (exp != null && w.exercises[exp]) renderSetRows();   // fill #setrows in the open accordion
+  if (exp >= 0 && w.exercises[exp]) renderSetRows();   // fill #setrows in the open accordion
 }
 // W2-1: tap an exercise to expand its sets + WK-2 entry inline (accordion); tap
 // again or another exercise to collapse. State persists across set-save re-renders.
 function toggleExercise(wid, idx) {
-  STATE.activeExpanded = (STATE.activeExpanded === idx) ? null : idx;
+  const nm = window._WO && window._WO.exercises[idx] && window._WO.exercises[idx].name;
+  STATE.activeExpandedName = (STATE.activeExpandedName === nm) ? null : nm;
   if (window._WO && window._WO.id === wid) renderActive(window._WO);
 }
 function accordionBody(wid, ex, idx) {
@@ -304,9 +329,10 @@ async function toggleDone(idx) {
   const ex = W.exercises[idx]; if (!ex) return;
   const next = !ex.done;
   ex.done = next;
-  if (next) {   // collapse this, auto-expand the next not-done exercise (or none)
-    const ni = W.exercises.findIndex(e => !e.done);
-    STATE.activeExpanded = ni >= 0 ? ni : null;
+  if (next) {   // collapse this, auto-expand the next not-done exercise AFTER it (#27)
+    let ni = W.exercises.findIndex((e, i) => i > idx && !e.done);
+    if (ni < 0) ni = W.exercises.findIndex(e => !e.done);   // fall back to any earlier one
+    STATE.activeExpandedName = ni >= 0 ? W.exercises[ni].name : null;
   }
   renderActive(W);   // single re-render — no double-tap
   try { await api('/workouts/' + W.id + '/exercise-done', 'PUT', { exercise_name: ex.name, done: next }); }
@@ -344,7 +370,7 @@ function _opId() { return 'op-' + Date.now().toString(36) + '-' + Math.random().
 // IndexedDB queue on load, so caching them too would double-count offline (#12).
 function saveActiveCache(w) { try { const c = { ...w, exercises: (w.exercises || []).map(e => ({ ...e, sets: (e.sets || []).filter(s => !s._pending) })) }; localStorage.setItem('active_wo', JSON.stringify(c)); } catch {} }
 function loadActiveCache(id) { try { const w = JSON.parse(localStorage.getItem('active_wo') || 'null'); if (w && (!id || w.id === id)) return w; } catch {} return null; }
-function clearActiveCache() { try { localStorage.removeItem('active_wo'); } catch {} }
+function clearActiveCache() { try { localStorage.removeItem('active_wo'); localStorage.removeItem('active_nav'); } catch {} }
 function _idb() {
   return new Promise((res, rej) => {
     let r; try { r = indexedDB.open('fitq', 1); } catch (e) { return rej(e); }
@@ -531,7 +557,8 @@ function rmSetRow(i) { _readSetRows(); window._setRows.splice(i, 1); if (!window
 // live count-up timer for time-based exercises: stop appends a row with the elapsed time
 function toggleSetTimer() {
   if (TMR) {
-    stopTimer(); const v = window.TMR_VAL || 0;
+    const v = window.TMR_VAL || 0;   // read BEFORE stopTimer resets it
+    stopTimer();
     const b = document.getElementById('tbtn'); if (b) b.textContent = '▶ Таймер (запишет подход)';
     const box = document.getElementById('timerbox'); if (box) box.innerHTML = '';
     if (v) { _readSetRows(); window._setRows.push({ dur: v }); renderSetRows(); }
@@ -540,7 +567,10 @@ function toggleSetTimer() {
   let s = 0; const box = document.getElementById('timerbox');
   const b = document.getElementById('tbtn'); if (b) b.textContent = '■ Стоп и записать';
   window.TMR_VAL = 0;
-  TMR = setInterval(() => { s++; window.TMR_VAL = s; if (box) box.innerHTML = `<div class="timer">${mmss(s)}</div>`; }, 1000);
+  TMR = setInterval(() => {
+    if (!box || !box.isConnected) { clearInterval(TMR); TMR = null; return; }   // self-clean if the accordion collapsed (#8)
+    s++; window.TMR_VAL = s; box.innerHTML = `<div class="timer">${mmss(s)}</div>`;
+  }, 1000);
 }
 function stepRow(fields) {
   const cells = fields.map(([id, val, unit, step]) =>
@@ -658,6 +688,7 @@ function toggleTimer() {
 function stopTimer(write) {
   if (TMR) { clearInterval(TMR); TMR = null; }
   if (write && window.TMR_VAL) { document.getElementById('f_min').value = Math.floor(window.TMR_VAL / 60); document.getElementById('f_sec').value = window.TMR_VAL % 60; const b = document.getElementById('tbtn'); if (b) b.textContent = '▶ Запустить таймер'; }
+  window.TMR_VAL = 0;   // never let a stale elapsed value leak into the next set (#8)
 }
 
 // WK-4: the persisted rest-timer setting is the single source of truth. It lives
@@ -799,7 +830,7 @@ function chooseEx(wid, name, key, type) {
   const W = window._WO;
   if (W && W.id === wid) {
     W.exercises.push({ name, key: key || null, type, sets: [], target: null, target_sets: null, last: null, in_plan: false, done: false });
-    STATE.activeExpanded = W.exercises.length - 1;
+    STATE.activeExpandedName = name;
     closeSheet();
     renderActive(W);
   }
@@ -908,11 +939,18 @@ function histCard(w) {
 const _MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const _MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 function _mondayOf(iso) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoOf(d); }
-function _weekLabel(mondayIso) {
-  const mon = new Date(mondayIso + 'T00:00:00'), sun = new Date(mon); sun.setDate(sun.getDate() + 6);
-  return mon.getMonth() === sun.getMonth()
-    ? `${mon.getDate()}–${sun.getDate()} ${_MONTHS_GEN[mon.getMonth()]}`
-    : `${mon.getDate()} ${_MONTHS_GEN[mon.getMonth()]} – ${sun.getDate()} ${_MONTHS_GEN[sun.getMonth()]}`;
+function _weekLabel(mondayIso, monthKey) {
+  let mon = new Date(mondayIso + 'T00:00:00'); const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+  let end = sun;
+  if (monthKey) {   // clamp the shown range to this month section so a cross-month week reads distinctly (#28)
+    const mStart = new Date(monthKey + '-01T00:00:00');
+    const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
+    if (mon < mStart) mon = mStart;
+    if (end > mEnd) end = mEnd;
+  }
+  return mon.getMonth() === end.getMonth()
+    ? `${mon.getDate()}–${end.getDate()} ${_MONTHS_GEN[mon.getMonth()]}`
+    : `${mon.getDate()} ${_MONTHS_GEN[mon.getMonth()]} – ${end.getDate()} ${_MONTHS_GEN[end.getMonth()]}`;
 }
 function groupHistory(list) {
   const months = []; let cm = null, cw = null;
@@ -924,7 +962,7 @@ function groupHistory(list) {
       months.push(cm); cw = null;
     }
     const wk = _mondayOf(w.workout_date);
-    if (!cw || cw.key !== wk) { cw = { key: wk, label: _weekLabel(wk), count: 0, cards: '' }; cm.weeks.push(cw); }
+    if (!cw || cw.key !== wk) { cw = { key: wk, label: _weekLabel(wk, mk), count: 0, cards: '' }; cm.weeks.push(cw); }
     cw.cards += histCard(w); cw.count++; cm.count++; cm.tonnage += (w.tonnage || 0);
   }
   return months.map(m => `<div class="hist-month-h"><span>${esc(m.label)}</span><span class="muted small">${m.count} трен · ${m.tonnage.toLocaleString('ru-RU')} кг</span></div>
@@ -1572,7 +1610,7 @@ function coachPreview() {
       <div class="row sp"><b>${WD_FULL[d.weekday] || ''}${d.focus_label ? ' · ' + esc(d.focus_label) : ''}</b>
         <span style="color:var(--danger);cursor:pointer;font-size:13px" onclick="coachDropDay(${i})">убрать</span></div>
       <div class="small muted" style="margin:2px 0 4px">${fmtPlanDate(d.date)}</div>
-      ${(d.exercises || []).map(ex => `<div class="small" style="margin-top:2px">• ${esc(ex.name)} <span class="muted">— ${exLine(ex)}</span></div>`).join('')}
+      ${(d.exercises || []).map(ex => `<div class="small" style="margin-top:2px">• ${esc(ex.name)} <span class="muted">— ${esc(exLine(ex))}</span></div>`).join('')}
       ${d.notes ? `<div class="small muted" style="margin-top:5px">📝 ${esc(d.notes)}</div>` : ''}</div>`;
   view.innerHTML = `<span class="back" onclick="go('plans')">‹ Планы</span>
     <h1 style="margin-bottom:2px">🧠 Неделя от наставника</h1>
@@ -2614,6 +2652,7 @@ function closeSheet() { const b = document.getElementById('sheetbg'); if (b) b.r
     await api('/auth/me');
     try { window._SETTINGS = await api('/settings'); _cacheSettings(); }  // date_format + rest-timer for first paint
     catch { window._SETTINGS = _cachedSettings() || window._SETTINGS; }   // offline: keep the last persisted value
+    try { const nav = JSON.parse(localStorage.getItem('active_nav') || 'null'); if (nav && nav.id) { STATE.activeId = nav.id; STATE.activeExpandedName = nav.exp || null; } } catch {}  // B7: re-open the same exercise on Continue
     renderTabs(); go('home'); flushQueue();
   } catch { Login(); }
 })();

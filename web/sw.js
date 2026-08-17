@@ -40,7 +40,10 @@
 // and expand them into set-entry rows when starting the workout.
 // v60: AUDIT batch A — never lose/double a set (poison-pill flush drop, durable
 // queue write, idempotent free-text, re-entrant «Записать»); cache only OK responses.
-const CACHE = 'fit-proto-v60';
+// v61: AUDIT batch B — active-workout state: expansion tracked by identity (no wrong
+// exercise after add/delete), added 0-set exercise survives refetch, typed rows kept,
+// in-set timer no longer leaks, start-workout errors surfaced, reload resumes.
+const CACHE = 'fit-proto-v61';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
