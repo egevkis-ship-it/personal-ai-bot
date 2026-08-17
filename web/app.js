@@ -340,7 +340,9 @@ async function cancelActiveFromHome(wid) {
 // ── offline support: IndexedDB queue + optimistic set logging ───────────────
 function isNetworkErr(e) { return !navigator.onLine || !e || e.status === undefined || e.status === 0; }
 function _opId() { return 'op-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
-function saveActiveCache(w) { try { localStorage.setItem('active_wo', JSON.stringify(w)); } catch {} }
+// Never cache optimistic (_pending) sets: overlayQueue re-adds them from the
+// IndexedDB queue on load, so caching them too would double-count offline (#12).
+function saveActiveCache(w) { try { const c = { ...w, exercises: (w.exercises || []).map(e => ({ ...e, sets: (e.sets || []).filter(s => !s._pending) })) }; localStorage.setItem('active_wo', JSON.stringify(c)); } catch {} }
 function loadActiveCache(id) { try { const w = JSON.parse(localStorage.getItem('active_wo') || 'null'); if (w && (!id || w.id === id)) return w; } catch {} return null; }
 function clearActiveCache() { try { localStorage.removeItem('active_wo'); } catch {} }
 function _idb() {
@@ -350,7 +352,9 @@ function _idb() {
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
 }
-async function _qPut(op) { try { const db = await _idb(); await new Promise(r => { const t = db.transaction('ops', 'readwrite'); t.objectStore('ops').put(op); t.oncomplete = r; t.onerror = r; }); } catch {} }
+// Durable write: reject on any failure (quota, private-mode, abort) so callers
+// NEVER show «сохранится при сети» for a set that was not actually stored (#6).
+async function _qPut(op) { const db = await _idb(); await new Promise((res, rej) => { const t = db.transaction('ops', 'readwrite'); t.objectStore('ops').put(op); t.oncomplete = res; t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); }
 async function _qAll() { try { const db = await _idb(); return await new Promise(r => { const rq = db.transaction('ops').objectStore('ops').getAll(); rq.onsuccess = () => r(rq.result || []); rq.onerror = () => r([]); }); } catch { return []; } }
 async function _qDel(op_id) { try { const db = await _idb(); await new Promise(r => { const t = db.transaction('ops', 'readwrite'); t.objectStore('ops').delete(op_id); t.oncomplete = r; t.onerror = r; }); } catch {} }
 function _insertSet(W, body) {
@@ -359,30 +363,51 @@ function _insertSet(W, body) {
   if (!ex) { ex = { name, key: null, type: 'strength', sets: [], target: null, target_sets: null, last: null, in_plan: false, done: false }; W.exercises.push(ex); }
   ex.sets.push({ id: 'tmp-' + body.client_op_id, set_number: ex.sets.length + 1, weight_kg: body.weight_kg ?? null, reps: body.reps ?? null, reps_text: body.reps_text ?? null, duration_seconds: body.duration_seconds ?? null, is_warmup: !!body.is_warmup, is_failure: !!body.is_failure, superset_group: body.superset_group ?? null, notes: null, _pending: true });
 }
-async function overlayQueue(w) { const ops = (await _qAll()).filter(o => o.wid === w.id).sort((a, b) => a.ts - b.ts); for (const o of ops) _insertSet(w, o.body); }
+async function overlayQueue(w) {
+  const ops = (await _qAll()).filter(o => o.wid === w.id).sort((a, b) => a.ts - b.ts);
+  for (const o of ops) {
+    const b = o.body || {};
+    // multi-set op → expand each row (mirror the in-session insert), else single set (#17)
+    if (Array.isArray(b.sets)) b.sets.forEach((s, k) => _insertSet(w, { ...s, exercise_name: b.exercise_name, client_op_id: (b.client_op_id || o.op_id) + '-' + k }));
+    else _insertSet(w, b);
+  }
+}
 async function submitSet(wid, body) {
-  body.client_op_id = _opId();
+  body.client_op_id = body.client_op_id || _opId();
   try { await api('/workouts/' + wid + '/sets', 'POST', body); go('active', wid); }
   catch (e) {
-    // queue on ANY failure (network, 401 session-expiry, 5xx) — never drop the set
-    await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
+    // queue on ANY failure (network, 401 session-expiry, 5xx) — never drop the set.
+    // If the durable write itself fails, do NOT pretend it is queued (#6).
+    try { await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() }); }
+    catch { return toast('⚠️ Не удалось сохранить — хранилище недоступно, запиши подход ещё раз'); }
     const W = window._WO; if (W && W.id === wid) { _insertSet(W, body); renderActive(W); }
     toast(e.code === 401 ? 'Сессия истекла — подход в очереди' : isNetworkErr(e) ? 'Оффлайн — сохранится при сети' : 'Не ушло на сервер — подход в очереди');
     updateUnsyncedBanner();
   }
 }
+// Drain the offline queue oldest-first. Transient failures (network/401/5xx/429)
+// KEEP the op queued and stop; permanent client errors (4xx like 404 for a
+// deleted workout, 422) DROP the poison-pill op and continue — otherwise one bad
+// op jams the whole queue and blocks finishing every later workout forever (#1).
 async function flushQueue() {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) return { sessionExpired: false };
   const ops = (await _qAll()).sort((a, b) => a.ts - b.ts);
+  let sessionExpired = false, dropped = 0;
   for (const o of ops) {
     try {
       await api('/workouts/' + o.wid + '/sets', 'POST', o.body);
       await _qDel(o.op_id);   // 2xx incl. {duplicate:true} (server is idempotent) → safe to remove
     } catch (e) {
-      break;   // NEVER drop a set on any error (401/5xx/network) — keep it queued + retry later
+      if (e && e.code === 401) { sessionExpired = true; break; }   // transient: keep queued, re-login
+      if (isNetworkErr(e)) break;                                   // transient: keep queued, retry later
+      const st = e && e.status;
+      if (st >= 400 && st < 500 && st !== 408 && st !== 429) { await _qDel(o.op_id); dropped++; continue; }  // permanent → drop
+      break;   // 5xx / 408 / 429 / unknown: transient, retry later
     }
   }
+  if (dropped) toast(`${dropped} ${plural(dropped, 'подход отброшен', 'подхода отброшено', 'подходов отброшено')} — тренировка удалена или устарела`);
   updateUnsyncedBanner();
+  return { sessionExpired };
 }
 // Persistent «N подходов не сохранились» indicator + one-tap resync (→ re-login if 401).
 async function updateUnsyncedBanner() {
@@ -393,8 +418,9 @@ async function updateUnsyncedBanner() {
   el.innerHTML = `⚠️ ${n} ${n === 1 ? 'подход не сохранён' : 'подх. не сохранены'} на сервере · <span onclick="retrySync()">повторить</span>`;
 }
 async function retrySync() {
-  await flushQueue();
-  if ((await _qAll()).length) { toast('Не удалось — вероятно, нужно войти заново'); Login(); }
+  const { sessionExpired } = await flushQueue();
+  if (sessionExpired) { toast('Сессия истекла — войди заново'); Login(); return; }   // only a real 401 → re-login (#1)
+  if ((await _qAll()).length) { toast('Часть подходов не ушла — попробуй ещё раз'); }
   else { toast('Синхронизировано'); if (STATE.tab === 'active' && STATE.activeId) go('active', STATE.activeId); }
 }
 window.addEventListener('online', () => { flushQueue().then(() => { if (STATE.tab === 'active' && STATE.activeId) go('active', STATE.activeId); }); });
@@ -420,6 +446,9 @@ function initSetEntry(wid, ex, onSave) {
   const prev = todayWorking.length ? todayWorking[todayWorking.length - 1] : null;
   window._setCtx = {
     wid, ex, type, onSave,
+    opId: _opId(),   // stable idempotency key for THIS entry session; a fresh one is
+                     // minted on every re-render (after each save), so a double-tap
+                     // before the re-render reuses it and the server dedups it (#3)
     w: (prev && prev.weight_kg != null ? prev.weight_kg : null) ?? tgt.weight_kg ?? last.weight_kg ?? 20,
     reps: (prev && prev.reps != null ? prev.reps : null) ?? tgt.reps ?? last.reps ?? 10,
     dur: (prev && prev.duration_seconds != null ? prev.duration_seconds : null) ?? tgt.duration_seconds ?? last.duration_seconds ?? 60,
@@ -522,7 +551,9 @@ function stepRow(fields) {
 }
 function bump(id, d) { const el = document.getElementById('f_' + id); let v = parseFloat(el.value || 0) + d; if (v < 0) v = 0; el.value = (Math.round(v * 100) / 100); }
 function tag(el) { el.classList.toggle('on'); }
+let _savingSets = false;   // re-entrancy guard: a double-tap on «✓ Записать» must not double-submit (#3)
 async function confirmSets() {
+  if (_savingSets) return;
   _readSetRows();
   const c = window._setCtx;
   const sets = window._setRows.map(r => {
@@ -536,18 +567,24 @@ async function confirmSets() {
     return o;
   }).filter(o => o.weight_kg != null || o.reps != null || o.duration_seconds != null);
   if (!sets.length) return toast('Заполни хотя бы один подход');
+  _savingSets = true;
+  const btn = document.getElementById('savesets'); if (btn) btn.disabled = true;
   closeSheet(); stopTimer();
-  if (c.onSave) { c.onSave(sets); return; }  // HIST-1: collect into a draft, no POST / no rest timer
-  await submitSets(c.wid, { exercise_name: c.ex.name, sets });
-  if (restEnabled()) restTimer(restSecs());  // auto-start unless persisted-disabled
+  try {
+    if (c.onSave) { c.onSave(sets); return; }  // HIST-1: collect into a draft, no POST / no rest timer
+    await submitSets(c.wid, { exercise_name: c.ex.name, sets, client_op_id: c.opId });
+    if (restEnabled()) restTimer(restSecs());  // auto-start unless persisted-disabled
+  } finally { _savingSets = false; }
 }
 // post several structured sets as ONE idempotent op; offline-aware like submitSet
 async function submitSets(wid, body) {
-  body.client_op_id = _opId();
+  body.client_op_id = body.client_op_id || _opId();
   try { await api('/workouts/' + wid + '/sets', 'POST', body); go('active', wid); }
   catch (e) {
-    // queue on ANY failure — never drop the sets
-    await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() });
+    // queue on ANY failure — never drop the sets. A failed durable write must NOT
+    // masquerade as «queued» (#6).
+    try { await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() }); }
+    catch { return toast('⚠️ Не удалось сохранить — хранилище недоступно, запиши подходы ещё раз'); }
     const W = window._WO;
     if (W && W.id === wid) { (body.sets || []).forEach((s, k) => _insertSet(W, { ...s, exercise_name: body.exercise_name, client_op_id: body.client_op_id + '-' + k })); renderActive(W); }
     toast(e.code === 401 ? 'Сессия истекла — подходы в очереди' : isNetworkErr(e) ? 'Оффлайн — сохранится при сети' : 'Не ушло на сервер — подходы в очереди');
@@ -555,12 +592,24 @@ async function submitSets(wid, body) {
   }
 }
 async function confirmText(wid) {
-  const t = document.getElementById('freetext').value.trim(); if (!t) return;
+  const el = document.getElementById('freetext'); if (!el) return;
+  const t = el.value.trim(); if (!t) return;
   // the field is scoped to the current exercise: pass its name so numbers-only
   // input («80x10, 82x8») attaches to it (the backend uses it as the parse hint).
   const name = (window._setCtx && window._setCtx.ex && window._setCtx.ex.name) || undefined;
-  try { await api('/workouts/' + wid + '/sets', 'POST', { text: t, exercise_name: name }); closeSheet(); go('active', wid); }
-  catch (e) { toast(e.message || 'не удалось разобрать'); }
+  const body = { text: t, exercise_name: name, client_op_id: _opId() };   // idempotent replay (#2/#4)
+  el.value = '';   // clear BEFORE awaiting so a second tap on ↑ can't resend the same text
+  try { await api('/workouts/' + wid + '/sets', 'POST', body); closeSheet(); go('active', wid); }
+  catch (e) {
+    // 422 = the server understood us but couldn't parse the text → permanent; show it
+    // and restore the input so the user can fix the wording (do NOT queue a poison pill).
+    if (e.status === 422) { el.value = t; return toast(e.message || 'не удалось разобрать'); }
+    // network / 401 / 5xx → queue for replay so the sets are never lost.
+    try { await _qPut({ op_id: body.client_op_id, wid, body, ts: Date.now() }); }
+    catch { el.value = t; return toast('⚠️ Не удалось сохранить — хранилище недоступно'); }
+    toast(e.code === 401 ? 'Сессия истекла — запись в очереди' : isNetworkErr(e) ? 'Оффлайн — сохранится при сети' : 'Не ушло на сервер — запись в очереди');
+    updateUnsyncedBanner();
+  }
 }
 
 // voice → text: record with MediaRecorder, transcribe via Whisper, fill a field
@@ -769,7 +818,11 @@ function noteSheet(wid) {
     <button class="btn" style="margin-top:10px" onclick="saveNote(${wid})">Сохранить</button>`);
 }
 async function saveNote(wid) { await api('/workouts/' + wid + '/notes', 'PATCH', { notes: document.getElementById('note').value }); closeSheet(); toast('Заметка сохранена'); }
-async function delWorkout(wid) { await api('/workouts/' + wid, 'DELETE'); clearActiveCache(); closeSheet(); go('home'); }
+async function delWorkout(wid) {
+  await api('/workouts/' + wid, 'DELETE');
+  for (const o of (await _qAll()).filter(o => o.wid === wid)) await _qDel(o.op_id);   // purge queued sets → no poison-pill op (#1)
+  clearActiveCache(); updateUnsyncedBanner(); closeSheet(); go('home');
+}
 async function finishWorkout(wid) {
   // Never finish with sets still in flight: sync first, and block if any remain.
   await flushQueue();

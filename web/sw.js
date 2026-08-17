@@ -38,7 +38,9 @@
 // and «📝 Текст» (period), round-trips through the HIST-2 importer.
 // v59: REC-4 — plan weight tiers (set_groups): render «2×12 · 12.5 кг + 2×15 · 10 кг»
 // and expand them into set-entry rows when starting the workout.
-const CACHE = 'fit-proto-v59';
+// v60: AUDIT batch A — never lose/double a set (poison-pill flush drop, durable
+// queue write, idempotent free-text, re-entrant «Записать»); cache only OK responses.
+const CACHE = 'fit-proto-v60';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
@@ -59,7 +61,10 @@ self.addEventListener('fetch', e => {
   if (url.pathname.startsWith('/api/')) return; // never cache API
   e.respondWith(
     fetch(e.request).then(r => {
-      const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r;
+      // Only cache successful responses — never overwrite a good cached shell asset
+      // with a transient 4xx/5xx error page that would then be served offline.
+      if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
+      return r;
     }).catch(() => caches.match(e.request).then(m => m || caches.match('index.html')))
   );
 });
