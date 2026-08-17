@@ -51,31 +51,31 @@ adversarial verification (7 high · 8 medium · 15 low · 1 nit). Full details:
 
 ## BATCH C — backend correctness (api/main.py, app/db, ai_parser, tz, catalog, schema)
 
-- [ ] C1 (#16 LOW) History hides 0-working+empty-focus finished workout. Fix:
+- [x] C1 (#16 LOW) History hides 0-working+empty-focus finished workout. Fix:
       narrow rest-day HAVING to explicit "%отдых%" (not empty focus).
-- [ ] C2 (#18 LOW) History upper-clamp to today hides post-westward-tz workouts.
+- [x] C2 (#18 LOW) History upper-clamp to today hides post-westward-tz workouts.
       Fix: drop the "w.workout_date <= :td" upper bound (finished_at scopes it).
-- [ ] C3 (#9 MED) Trailing-qualifier strip misfiles стоя/сидя/лежа/хватом variants
+- [x] C3 (#9 MED) Trailing-qualifier strip misfiles стоя/сидя/лежа/хватом variants
       onto a different catalog key (Французский жим стоя → skullcrusher). Fix:
       don't strip distinguishing qualifiers (or guard against a sibling key).
-- [ ] C4 (#13 MED) parse_plan_text crashes on malformed-but-valid model JSON.
+- [x] C4 (#13 MED) parse_plan_text crashes on malformed-but-valid model JSON.
       Fix: isinstance guards mirroring parse_logged_workouts_text.
-- [ ] C5 (#14 MED) parse_set_text_ai returns unvalidated items → non-dict crashes
+- [x] C5 (#14 MED) parse_set_text_ai returns unvalidated items → non-dict crashes
       the set-logging handler. Fix: coerce/validate to list[dict].
-- [ ] C6 (#30 LOW) Dead Whisper key returns 200 "" and burns AI quota. Fix:
+- [x] C6 (#30 LOW) Dead Whisper key returns 200 "" and burns AI quota. Fix:
       transcribe_voice raises on failure; count only on a real result.
-- [ ] C7 (#23 LOW) Archive create/bulk lack list caps + weight/reps range guards.
+- [x] C7 (#23 LOW) Archive create/bulk lack list caps + weight/reps range guards.
       Fix: Field(ge/le) + max_length; also AddSet bounds.
-- [ ] C8 (#24 LOW) Legacy-rename migration skips workout_exercise_notes/done →
+- [x] C8 (#24 LOW) Legacy-rename migration skips workout_exercise_notes/done →
       PDF export drops notes. Fix: rename those two tables in the same tx.
-- [ ] C9 (#31 NIT) SQL renames chain sequentially vs JSONB once (latent; no chain
+- [x] C9 (#31 NIT) SQL renames chain sequentially vs JSONB once (latent; no chain
       in current 49-entry map). Fix: single-pass VALUES map, or reject chains at load.
-- [ ] C10 (#25 LOW) tz cache never invalidated cross-process. Fix: 60s TTL.
-- [ ] C11 (#26 LOW) set_number MAX+1 race → duplicate set_number. Fix: pg_advisory_xact_lock + unique constraint (new migration).
-- [ ] C12 (#7 HIGH) exercise_aliases GLOBAL (no user_id, first-writer-wins) →
+- [x] C10 (#25 LOW) tz cache never invalidated cross-process. Fix: 60s TTL.
+- [x] C11 (#26 LOW) set_number MAX+1 race → duplicate set_number. Fix: pg_advisory_xact_lock + unique constraint (new migration).
+- [~] C12 (#7 HIGH) DEFERRED — see note exercise_aliases GLOBAL (no user_id, first-writer-wins) →
       one user's alias rewrites another's logged exercise names. Fix: add user_id +
       UNIQUE(user_id, alias_clean), thread uid through resolve/register, migrate.
-- [ ] C13 (#15 MED) Telegram bot bypasses the per-user AI daily cap entirely. Fix:
+- [~] C13 (#15 MED) DEFERRED — see note Telegram bot bypasses the per-user AI daily cap entirely. Fix:
       shared usage-gate module, call before every bot AI invocation; web side count-on-success.
 
 ## BATCH D — mid-workout editing UX rework (tasks #3/#4) — Egor's explicit ask
@@ -86,3 +86,14 @@ adversarial verification (7 high · 8 medium · 15 low · 1 nit). Full details:
 - [ ] D2 Replace/swap exercise (remove + pick new, keeps flow).
 - [ ] D3 Reorder exercises (up/down, persisted order).
 - [ ] D4 Easier/adjacent-add exercise; per-exercise "···" menu in the accordion.
+
+## DEFERRED (2) — need Egor input, both bot-side + untestable here + ~0 single-user impact
+- C12 (#7) per-user alias scoping: only matters with MULTIPLE bot users (cross-user
+  alias rewrite). Single-user deployment → unreachable today. Safe fix = schema
+  migration + threading uid through the Telegram handlers (plans.py / workout.py),
+  which I cannot end-to-end test without a live Telegram session. ASK: does the bot
+  serve more than one person? If yes (or "do it anyway"), I'll implement + test the
+  web path and carefully thread the bot path.
+- C13 (#15) bot bypasses the AI daily cap: for a single trusted owner the runaway-
+  cost risk is low; safe fix also needs untestable bot-handler edits. ASK: want the
+  bot AI-capped like the web app? (guards mainly against other approved users.)
